@@ -21,7 +21,7 @@ import kotlinx.serialization.json.contentOrNull
 data class GeneratedTrack(
     val name: String,
     val artist: String,
-    val artworkUrl: String?,
+    val artworkUrl: String? = null,
     val url: String = "",
     val listeners: Long? = null,
     val playcount: Long? = null,

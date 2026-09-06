@@ -1,6 +1,10 @@
 package com.lastwave.app.data.feed
 
 import androidx.compose.runtime.Immutable
+import com.lastwave.app.data.artwork.ArtworkNormalizer
+import com.lastwave.app.util.ArtistHelper
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.generate.youtubeVideoIdOrNull
 import com.lastwave.app.data.model.ArtistRef
@@ -131,7 +135,7 @@ class FeedRepository @Inject constructor(
             runCatching { playlistRepository.ensureLikedSongs().id }.getOrNull()
         }
 
-        val newReleases = newReleasesDef.await()
+        val releaseCandidates = newReleasesDef.await()
         val charts = chartsDef.await()
         val homePlaylists = homeMixesDef.await().filter {
             it.id.startsWith("PL") || it.id.startsWith("RD") || it.id.startsWith("OLAK") || it.id == "LM"
@@ -176,20 +180,32 @@ class FeedRepository @Inject constructor(
 
         val artistSignalTracks = ytRecentSongs + ytLikedSongs + ytQuickPicks + homeSongs + charts
         val ytArtistNames = (ytRecentSongs + ytLikedSongs)
-            .filter { it.artist.isNotBlank() && !it.artist.equals("Unknown artist", ignoreCase = true) }
-            .groupBy { it.artist.trim().lowercase() }
+            .flatMap { ArtistHelper.splitArtists(it.artist) }
+            .filter { it.isNotBlank() && !it.equals("Unknown artist", ignoreCase = true) }
+            .groupBy { it.trim().lowercase() }
             .values.sortedByDescending { it.size }
-            .map { it.first().artist.trim() }
-        val listeningArtists = tasteProfile?.topArtistsRaw.orEmpty()
+            .map { it.first().trim() }
+        val listeningArtists = tasteProfile?.topArtistsRaw.orEmpty().flatMap(ArtistHelper::splitArtists)
+        val tasteArtists = (ytArtistNames + listeningArtists +
+            recentTracks.flatMap { ArtistHelper.splitArtists(it.artist.displayName) } +
+            regularPicks.flatMap { ArtistHelper.splitArtists(it.artist) })
+            .filter { it.isNotBlank() && !it.equals("Unknown artist", ignoreCase = true) }
+            .map { it.lowercase() }.distinct()
+        val artistRanks = tasteArtists.withIndex().associate { it.value to it.index }
+        val matchedReleases = if (artistRanks.isEmpty()) releaseCandidates else releaseCandidates
+            .mapNotNull { release ->
+                val rank = ArtistHelper.splitArtists(release.author).mapNotNull { artistRanks[it.lowercase()] }.minOrNull()
+                rank?.let { release to it }
+            }.sortedBy { it.second }.map { it.first }.distinctBy { it.id }.take(15)
         val topArtistNames = buildList {
             repeat(maxOf(ytArtistNames.size, listeningArtists.size).coerceAtMost(10)) { index ->
                 ytArtistNames.getOrNull(index)?.let { add(it) }
                 listeningArtists.getOrNull(index)?.let { add(it) }
             }
-            addAll(artistSignalTracks.map(YouTubeMusicTrack::artist))
             addAll(recentTracks.map { it.artist.displayName })
+            if (isEmpty()) addAll(artistSignalTracks.map(YouTubeMusicTrack::artist))
         }
-            .map { it.trim() }
+            .flatMap(ArtistHelper::splitArtists)
             .filter { it.isNotBlank() && !it.equals("Unknown artist", ignoreCase = true) }
             .distinctBy { it.lowercase() }
             .take(10)
@@ -197,7 +213,7 @@ class FeedRepository @Inject constructor(
         val topArtists = topArtistNames.map { name ->
             async(Dispatchers.IO) {
                 val trackArtwork = artistSignalTracks
-                    .firstOrNull { it.artist.trim().equals(name, ignoreCase = true) }
+                    .firstOrNull { ArtistHelper.splitArtists(it.artist).any { artist -> artist.equals(name, ignoreCase = true) } }
                     ?.artworkUrl
                 val entity = runCatching {
                     innerTube.searchArtists(name, limit = 3)
@@ -206,10 +222,27 @@ class FeedRepository @Inject constructor(
                 FeedArtist(
                     name = name,
                     browseId = entity?.browseId,
-                    artworkUrl = entity?.artworkUrl ?: trackArtwork,
+                    artworkUrl = entity?.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage) ?: trackArtwork,
                 )
             }
         }.awaitAll()
+
+        val releaseYear = java.time.Year.now().value.toString()
+        val artistReleases = topArtists.filter { it.name.lowercase() in artistRanks }
+            .take(5).map { artist ->
+                async(Dispatchers.IO) {
+                    val page = artist.browseId?.let { id ->
+                        runCatching { innerTube.fetchArtistPage(id, artist.name) }.getOrNull()
+                    }
+                    (page?.albums.orEmpty() + page?.singles.orEmpty())
+                        .filter { it.year == releaseYear && it.browseId.isNotBlank() }
+                        .take(3).map { release ->
+                            YouTubePlaylistSummary(id = release.browseId, title = release.title,
+                                author = artist.name, artworkUrl = release.artworkUrl)
+                        }
+                }
+            }.awaitAll().flatten()
+        val newReleases = (matchedReleases + artistReleases).distinctBy { it.id }.take(15)
 
         val heavyRotation = buildList {
             repeat(15) { index ->
@@ -236,6 +269,7 @@ class FeedRepository @Inject constructor(
             }
         }.distinctBy { it.artist.displayName.trim().lowercase() to it.name.trim().lowercase() }.take(15)
 
+        val albumArtworkRequests = Semaphore(4)
         val recentAlbums = buildList {
             (ytRecentSongs + ytLikedSongs).forEach { track ->
                 val album = track.album?.takeIf(String::isNotBlank) ?: return@forEach
@@ -263,6 +297,21 @@ class FeedRepository @Inject constructor(
         }
             .distinctBy { "${it.artist.trim().lowercase()}_${it.title.trim().lowercase()}" }
             .take(14)
+            .map { album ->
+                async(Dispatchers.IO) {
+                    if (ArtworkNormalizer.isRealImage(album.artworkUrl)) album else albumArtworkRequests.withPermit {
+                        val match = runCatching {
+                            innerTube.searchAlbums("${album.title} ${album.artist}", limit = 5).firstOrNull {
+                                it.name.equals(album.title, ignoreCase = true) &&
+                                    ArtistHelper.splitArtists(it.artist).any { candidate ->
+                                        ArtistHelper.splitArtists(album.artist).any { candidate.equals(it, ignoreCase = true) }
+                                    }
+                            }
+                        }.getOrNull()
+                        album.copy(artworkUrl = match?.artworkUrl, browseId = match?.browseId)
+                    }
+                }
+            }.awaitAll()
 
         // Spotlight artist banner
         val topSpotlightArtist = topArtists.firstOrNull()

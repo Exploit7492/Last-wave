@@ -6,6 +6,30 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
+fun isRtlText(text: CharSequence?): Boolean {
+    if (text.isNullOrBlank()) return false
+    var rtlCount = 0
+    var ltrCount = 0
+    var firstStrongRtl: Boolean? = null
+    var i = 0
+    while (i < text.length) {
+        val codePoint = Character.codePointAt(text, i)
+        when (Character.getDirectionality(codePoint)) {
+            Character.DIRECTIONALITY_RIGHT_TO_LEFT,
+            Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC -> {
+                if (firstStrongRtl == null) firstStrongRtl = true
+                rtlCount++
+            }
+            Character.DIRECTIONALITY_LEFT_TO_RIGHT -> {
+                if (firstStrongRtl == null) firstStrongRtl = false
+                ltrCount++
+            }
+        }
+        i += Character.charCount(codePoint)
+    }
+    return (firstStrongRtl == true) || (rtlCount > 0 && rtlCount >= ltrCount)
+}
+
 data class LyricSyllable(
     val timeMs: Long,
     val durationMs: Long,
@@ -22,6 +46,7 @@ data class LyricLine(
     val transliterationSyllables: List<LyricSyllable> = emptyList(),
 ) {
     val hasSyllables: Boolean get() = syllables.isNotEmpty()
+    val isRtl: Boolean get() = isRtlText(text) || syllables.any { isRtlText(it.text) }
 }
 
 sealed interface LyricsResult {
@@ -32,7 +57,9 @@ sealed interface LyricsResult {
         val plainLyrics: String? = null,
         val isInstrumental: Boolean = false,
         val source: String? = null,
-    ) : LyricsResult
+    ) : LyricsResult {
+        val isRtl: Boolean get() = lines.any { it.isRtl } || isRtlText(plainLyrics)
+    }
 
     data object Empty : LyricsResult
     data class Error(val message: String) : LyricsResult

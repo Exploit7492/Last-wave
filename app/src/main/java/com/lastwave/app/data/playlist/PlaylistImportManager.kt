@@ -7,6 +7,7 @@ import com.lastwave.app.data.ytmusic.YtMusicPreferences
 import com.lastwave.app.data.ytmusic.YtPlaylistMapping
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 import javax.inject.Inject
@@ -44,22 +45,29 @@ class PlaylistImportManager @Inject constructor(
 
     /** Makes an owned account playlist local while retaining its live two-way mapping. */
     suspend fun importOwnedYouTubePlaylist(playlist: YouTubePlaylistResult): SavedPlaylist =
-        withContext(Dispatchers.IO) {
-            val saved = importYouTubePlaylist(playlist)
-            val mappings = ytMusicPreferences.mappings().toMutableMap()
-            mappings[saved.id] = YtPlaylistMapping(
-                remotePlaylistId = playlist.id,
-                remoteTitle = playlist.title,
-                lastSyncAtMillis = System.currentTimeMillis(),
-                lastSyncedVideoIds = playlist.tracks.map { it.videoId },
-                deleteRemoteWithLocal = false,
-            )
-            ytMusicPreferences.setMappings(mappings)
-            val selectedIds = ytMusicPreferences.syncedPlaylistIds.first()
-            if (selectedIds != null && saved.id !in selectedIds) {
-                ytMusicPreferences.setSyncedPlaylistIds(selectedIds + saved.id)
+        ytMusicPreferences.playlistSyncMutex.withLock {
+            withContext(Dispatchers.IO) {
+                val mappings = ytMusicPreferences.mappings().toMutableMap()
+                val remoteId = playlist.id.removePrefix("VL")
+                val existingIds = mappings.filterValues {
+                    it.remotePlaylistId.removePrefix("VL") == remoteId
+                }.keys
+                playlistRepository.getAll().firstOrNull { it.id in existingIds }?.let { return@withContext it }
+                val saved = importYouTubePlaylist(playlist)
+                mappings[saved.id] = YtPlaylistMapping(
+                    remotePlaylistId = remoteId,
+                    remoteTitle = playlist.title,
+                    lastSyncAtMillis = System.currentTimeMillis(),
+                    lastSyncedVideoIds = playlist.tracks.map { it.videoId },
+                    deleteRemoteWithLocal = false,
+                )
+                ytMusicPreferences.setMappings(mappings)
+                val selectedIds = ytMusicPreferences.syncedPlaylistIds.first()
+                if (selectedIds != null && saved.id !in selectedIds) {
+                    ytMusicPreferences.setSyncedPlaylistIds(selectedIds + saved.id)
+                }
+                saved
             }
-            saved
         }
 
     suspend fun importCsvStream(
@@ -67,10 +75,13 @@ class PlaylistImportManager @Inject constructor(
         filename: String,
     ): Pair<SavedPlaylist, CsvImportResult> = withContext(Dispatchers.IO) {
         val result = csvPlaylistImporter.parseAndMatchCsv(inputStream, filename)
-        val fileType = if (filename.endsWith(".m3u", ignoreCase = true) || filename.endsWith(".m3u8", ignoreCase = true)) "M3U" else "CSV"
+        require(result.tracks.isNotEmpty()) {
+            "No verified tracks found. Include track titles and artists, or YouTube links. Nothing was imported."
+        }
+        val fileType = filename.substringAfterLast('.', "File").uppercase()
         val saved = playlistRepository.save(
             title = result.suggestedTitle,
-            subtitle = "$fileType Import \u2022 ${result.tracks.size} tracks (${result.matchedCount} matched)",
+            subtitle = "$fileType Import \u2022 ${result.matchedCount} imported, ${result.totalRows - result.matchedCount} skipped",
             mode = "custom",
             tracks = result.tracks,
         )

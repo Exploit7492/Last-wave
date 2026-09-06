@@ -83,15 +83,15 @@ fun FeedPlaylistDetailScreen(
         ) {
         val playlist = (state as? FeedPlaylistDetailUiState.Success)?.playlist
         ExpressiveHeader(
-            title = playlist?.title?.takeIf(String::isNotBlank) ?: "Mix",
-            subtitle = playlist?.author ?: "From your feed",
+            title = playlist?.title?.takeIf(String::isNotBlank) ?: "Playlist",
+            subtitle = playlist?.author ?: "YouTube Music",
             onBack = onBack,
         )
 
         when (val current = state) {
             FeedPlaylistDetailUiState.Loading -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    ExpressiveLoadingIndicator(message = "Opening mix…")
+                    ExpressiveLoadingIndicator(message = "Opening playlist…")
                 }
             }
 
@@ -128,6 +128,10 @@ fun FeedPlaylistDetailScreen(
                     playlist = current.playlist,
                     onPlay = viewModel::playFrom,
                     onShuffle = viewModel::shuffle,
+                    onSave = viewModel::saveToLibrary,
+                    isSaving = current.isSaving,
+                    savedToLibrary = current.savedToLibrary,
+                    saveError = current.saveError,
                 )
             }
         }
@@ -140,6 +144,10 @@ private fun PlaylistContent(
     playlist: YouTubePlaylistResult,
     onPlay: (Int) -> Unit,
     onShuffle: () -> Unit,
+    onSave: () -> Unit,
+    isSaving: Boolean,
+    savedToLibrary: Boolean,
+    saveError: String?,
 ) {
     var menuTrack by remember { mutableStateOf<YouTubeMusicTrack?>(null) }
     LazyColumn(
@@ -168,7 +176,7 @@ private fun PlaylistContent(
                 )
                 Spacer(Modifier.height(18.dp))
                 Text(
-                    text = playlist.title.ifBlank { "Mix" },
+                    text = playlist.title.ifBlank { "Playlist" },
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
@@ -205,6 +213,21 @@ private fun PlaylistContent(
                         Spacer(Modifier.width(6.dp))
                         Text("Shuffle")
                     }
+                }
+                Spacer(Modifier.height(18.dp))
+                FilledTonalButton(
+                    onClick = onSave,
+                    enabled = !isSaving && !savedToLibrary,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(when {
+                        isSaving -> "Saving…"
+                        savedToLibrary -> "Saved to library"
+                        else -> "Save to library"
+                    })
+                }
+                saveError?.let { message ->
+                    Text(message, color = MaterialTheme.colorScheme.error)
                 }
                 Spacer(Modifier.height(18.dp))
                 Text(

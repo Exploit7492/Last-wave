@@ -34,6 +34,7 @@ data class ArtistPageData(
     val albums: List<ArtistAlbumItem> = emptyList(),
     val singles: List<ArtistAlbumItem> = emptyList(),
     val similarArtists: List<ArtistSummaryItem> = emptyList(),
+    val fallbackArtworkUrl: String? = null,
 )
 
 @Immutable

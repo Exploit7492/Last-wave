@@ -9,6 +9,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -46,7 +48,8 @@ fun ArtworkImage(
     artworkViewModel: ArtworkViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
-    if (!embeddedUrl.isNullOrBlank()) {
+    var embeddedFailed by remember(name, artist, embeddedUrl) { mutableStateOf(false) }
+    if (ArtworkNormalizer.isRealImage(embeddedUrl) && !embeddedFailed) {
         val model = remember(embeddedUrl, decodeSizePx, context) {
             if (decodeSizePx == null) embeddedUrl
             else ImageRequest.Builder(context).data(embeddedUrl).size(decodeSizePx).build()
@@ -57,6 +60,7 @@ fun ArtworkImage(
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
+                onError = { embeddedFailed = true },
             )
         }
         return
@@ -70,16 +74,21 @@ fun ArtworkImage(
     val resolvedUrl by remember(key) {
         artworkViewModel.resolved.map { it[key] }.distinctUntilChanged()
     }.collectAsStateWithLifecycle(initialValue = artworkViewModel.resolved.value[key])
+    var resolvedFailed by remember(key, resolvedUrl) { mutableStateOf(false) }
+    var refreshRequested by remember(key) { mutableStateOf(false) }
 
-    LaunchedEffect(key, resolvedUrl) {
-        if (resolvedUrl == null) {
+    LaunchedEffect(key, embeddedFailed) {
+        if (embeddedFailed) {
+            refreshRequested = true
+            artworkViewModel.refresh(name, artist)
+        } else if (resolvedUrl.isNullOrBlank()) {
             artworkViewModel.resolve(name, artist)
         }
     }
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         when {
-            !resolvedUrl.isNullOrBlank() -> {
+            !resolvedUrl.isNullOrBlank() && !resolvedFailed -> {
                 val model = remember(resolvedUrl, decodeSizePx, context) {
                     if (decodeSizePx == null) resolvedUrl
                     else ImageRequest.Builder(context).data(resolvedUrl).size(decodeSizePx).build()
@@ -89,6 +98,13 @@ fun ArtworkImage(
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
+                    onError = {
+                        resolvedFailed = true
+                        if (!refreshRequested) {
+                            refreshRequested = true
+                            artworkViewModel.refresh(name, artist)
+                        }
+                    },
                 )
             }
             else -> Icon(

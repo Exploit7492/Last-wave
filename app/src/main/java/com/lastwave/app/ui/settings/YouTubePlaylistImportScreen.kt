@@ -560,7 +560,7 @@ fun YouTubePlaylistImportScreen(
                                 )
 
                                 Text(
-                                    "Import your playlists from M3U, M3U8, or CSV exports (Spotify, Apple Music, VLC, Soundiiz, or local storage). LastWave parses and matches original titles and artists.",
+                                    "Import CSV, TSV, M3U/M3U8, or TXT files. For TXT, use Artist - Title, one song per line, or YouTube links. Only verified matches are imported; uncertain tracks are skipped.",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = TextAlign.Center,
@@ -590,7 +590,7 @@ fun YouTubePlaylistImportScreen(
                                     } else {
                                         Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(20.dp))
                                         Spacer(Modifier.width(8.dp))
-                                        Text("Select CSV or M3U File", fontWeight = FontWeight.Bold)
+                                        Text("Select playlist file", fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }

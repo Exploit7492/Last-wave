@@ -172,6 +172,74 @@ class MusicPlayer @Inject constructor(
     private val downloadedTrackDao: dagger.Lazy<com.lastwave.app.data.local.db.DownloadedTrackDao>,
 ) {
     private val appContext = context.applicationContext
+    private var castPlayback: com.lastwave.app.playback.cast.CastPlayback? = null
+    private val isCasting: Boolean get() = castPlayback?.active == true
+
+    fun initializeCast(): Boolean = runCatching {
+        if (castPlayback == null) {
+            val castContext = com.google.android.gms.cast.framework.CastContext.getSharedInstance(appContext)
+            castPlayback = com.lastwave.app.playback.cast.CastPlayback(appContext, this, applicationScope, castContext)
+            castPlayback?.initialize()
+        }
+        true
+    }.getOrElse {
+        android.util.Log.w("MusicPlayer", "Google Cast unavailable", it)
+        false
+    }
+
+    internal fun prepareForCast(): MusicPlayerState {
+        val snapshot = _state.value
+        pendingRestoredSession = null
+        cancelPendingPlaybackResolution()
+        queueEnrichmentJob?.cancel()
+        discoverQueueLoadJob?.cancel()
+        radioQueueLoadJob?.cancel()
+        cancelCrossfade()
+        if (playerDelegate.isInitialized()) {
+            player.stop()
+            player.clearMediaItems()
+        }
+        if (snapshot.current != null) ensureForegroundService()
+        return snapshot
+    }
+
+    internal suspend fun resolveCastStream(track: PlayableTrack): ResolvedStream =
+        track.playbackUrl?.let { url ->
+            val mime = track.playbackMimeType ?: withContext(Dispatchers.IO) {
+                if (url.startsWith("content://")) appContext.contentResolver.getType(Uri.parse(url)) else null
+            } ?: android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(
+                url.substringBefore('?').substringAfterLast('.').lowercase(),
+            ) ?: "audio/mpeg"
+            ResolvedStream(url, mime, null, null, url)
+        } ?: resolveTrackAudioStreamWithRetry(track, track.videoId, allowLossless = true)
+
+    internal fun castBuffering(playing: Boolean) {
+        _state.update { it.copy(isPlaying = playing, isBuffering = true, error = null) }
+    }
+
+    internal fun castError(message: String) {
+        _state.update { it.copy(isPlaying = false, isBuffering = false, error = message) }
+    }
+
+    internal fun updateCastState(playing: Boolean, buffering: Boolean, position: Long, duration: Long, speed: Float) {
+        _state.update { it.copy(isPlaying = playing, isBuffering = buffering,
+            positionMs = position.coerceAtLeast(0), durationMs = duration.coerceAtLeast(0),
+            speed = speed.takeIf { rate -> rate in 0.5f..2f } ?: it.speed) }
+        persistPlaybackSession()
+    }
+
+    internal fun castTrackEnded() {
+        if (_state.value.repeatMode == Player.REPEAT_MODE_ONE) {
+            castPlayback?.load(_state.value.copy(positionMs = 0))
+        } else {
+            next()
+        }
+    }
+
+    internal fun finishCasting() {
+        _state.update { it.copy(isPlaying = false, isBuffering = false) }
+        persistPlaybackSession()
+    }
     private val playbackPreferences = appContext.getSharedPreferences(
         PLAYBACK_PREFERENCES_NAME,
         Context.MODE_PRIVATE,
@@ -279,6 +347,7 @@ class MusicPlayer @Inject constructor(
             }
         }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            if (isCasting) return
             if (mediaItem != null) {
                 losslessBypassMediaIds.retainAll(setOf(mediaItem.mediaId))
                 if (retryMediaId != mediaItem.mediaId) {
@@ -337,6 +406,7 @@ class MusicPlayer @Inject constructor(
             }
         }
         override fun onPlayerError(error: PlaybackException) {
+            if (isCasting) return
             cancelCrossfade()
             resolutionRequests.clear()
             val currentTrack = _state.value.current
@@ -639,6 +709,17 @@ class MusicPlayer @Inject constructor(
         ticker = applicationScope.launch(Dispatchers.Main.immediate) {
             var lastTickerPersistMs = 0L
             while (true) {
+                if (isCasting) {
+                    val remaining = sleepTimerDeadlineMs?.minus(SystemClock.elapsedRealtime())
+                    if (remaining != null && remaining <= 0) {
+                        sleepTimerDeadlineMs = null
+                        sleepTimerStep = 0
+                        pause()
+                    }
+                    _state.update { it.copy(sleepTimerRemainingMs = remaining?.coerceAtLeast(0)) }
+                    delay(500)
+                    continue
+                }
                 if (_state.value.current != null && playerDelegate.isInitialized()) {
                     val remaining = sleepTimerDeadlineMs?.minus(SystemClock.elapsedRealtime())
                     if (remaining != null && remaining <= 0) {
@@ -789,6 +870,18 @@ class MusicPlayer @Inject constructor(
         startShuffled: Boolean = false,
     ) {
         val selectedTrack = tracks[selectedIndex].withYoutubeArtwork()
+        if (isCasting) {
+            onMain {
+                cancelPendingPlaybackResolution()
+                ensureForegroundService()
+                _state.value = _state.value.copy(current = selectedTrack, queue = tracks,
+                    currentIndex = selectedIndex, positionMs = startPositionMs, durationMs = 0,
+                    sourceLabel = sourceLabel, isEndlessQueue = endlessDiscover,
+                    shuffleEnabled = startShuffled, error = null)
+                castPlayback?.load(_state.value)
+            }
+            return
+        }
         warmArtwork(selectedTrack)
         val generation = playRequestGeneration.incrementAndGet()
         playRequest?.cancel()
@@ -901,6 +994,15 @@ class MusicPlayer @Inject constructor(
         applicationScope.launch {
             val enriched = runCatching { matchMetadata(track) }.getOrDefault(track)
             withContext(Dispatchers.Main.immediate) {
+                if (isCasting) {
+                    _state.update { snapshot ->
+                        val queue = snapshot.queue.toMutableList()
+                        queue.add((snapshot.currentIndex + 1).coerceIn(0, queue.size), enriched)
+                        snapshot.copy(queue = queue)
+                    }
+                    persistPlaybackSession()
+                    return@withContext
+                }
                 val index = (player.currentMediaItemIndex + 1).coerceAtMost(player.mediaItemCount)
                 player.addMediaItem(index, enriched.toMediaItem())
             }
@@ -910,7 +1012,14 @@ class MusicPlayer @Inject constructor(
     fun addToQueue(track: PlayableTrack) {
         applicationScope.launch {
             val enriched = runCatching { matchMetadata(track) }.getOrDefault(track)
-            withContext(Dispatchers.Main.immediate) { player.addMediaItem(enriched.toMediaItem()) }
+            withContext(Dispatchers.Main.immediate) {
+                if (isCasting) {
+                    _state.update { it.copy(queue = it.queue + enriched) }
+                    persistPlaybackSession()
+                } else {
+                    player.addMediaItem(enriched.toMediaItem())
+                }
+            }
         }
     }
 
@@ -953,6 +1062,10 @@ class MusicPlayer @Inject constructor(
     }
 
     fun resume() = onMain {
+        if (isCasting) {
+            castPlayback?.play()
+            return@onMain
+        }
         ensureForegroundService()
         if (retryInterruptedPlayback()) return@onMain
         if (player.mediaItemCount == 0 && _state.value.current != null) {
@@ -988,12 +1101,17 @@ class MusicPlayer @Inject constructor(
     fun pause() {
         cancelPendingPlaybackResolution()
         onMain {
+            if (isCasting) castPlayback?.pause()
             if (playerDelegate.isInitialized()) player.pause()
             _state.update { it.copy(isPlaying = false, isBuffering = false) }
         }
     }
 
     fun togglePlayPause() = onMain {
+        if (isCasting) {
+            if (_state.value.isPlaying || _state.value.isBuffering) pause() else resume()
+            return@onMain
+        }
         if (playRequest?.isActive == true && _state.value.isBuffering) {
             pause()
             return@onMain
@@ -1054,6 +1172,10 @@ class MusicPlayer @Inject constructor(
         return true
     }
     fun seekTo(positionMs: Long) = onMain {
+        if (isCasting) {
+            castPlayback?.seek(positionMs.coerceAtLeast(0))
+            return@onMain
+        }
         cancelCrossfade()
         val target = positionMs.coerceAtLeast(0)
         player.seekTo(target)
@@ -1164,6 +1286,15 @@ class MusicPlayer @Inject constructor(
     }
 
     fun seekToQueueItem(index: Int) = onMain {
+        if (isCasting) {
+            val snapshot = _state.value
+            if (index in snapshot.queue.indices) {
+                _state.value = snapshot.copy(current = snapshot.queue[index], currentIndex = index,
+                    positionMs = 0, durationMs = 0, error = null)
+                castPlayback?.load(_state.value)
+            }
+            return@onMain
+        }
         if (index in 0 until player.mediaItemCount) {
             resolveAndPlayQueueItem(index)
         } else {
@@ -1171,6 +1302,11 @@ class MusicPlayer @Inject constructor(
         }
     }
     fun previous() = onMain {
+        if (isCasting) {
+            if (_state.value.positionMs > 5_000) seekTo(0)
+            else seekToQueueItem(previousQueueIndex(_state.value))
+            return@onMain
+        }
         cancelCrossfade()
         val pendingState = _state.value
         if (player.currentPosition > 5_000) {
@@ -1185,6 +1321,10 @@ class MusicPlayer @Inject constructor(
         }
     }
     fun next() = onMain {
+        if (isCasting) {
+            seekToQueueItem(nextQueueIndex(_state.value))
+            return@onMain
+        }
         val pendingState = _state.value
         val index = player.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET }
             ?: nextQueueIndex(pendingState)
@@ -1328,6 +1468,11 @@ class MusicPlayer @Inject constructor(
     fun toggleShuffle() = setShuffleEnabled(!state.value.shuffleEnabled)
 
     fun setShuffleEnabled(enabled: Boolean) = onMain {
+        if (isCasting) {
+            _state.update { it.copy(shuffleEnabled = enabled) }
+            persistPlaybackSession()
+            return@onMain
+        }
         if (player.shuffleModeEnabled == enabled) return@onMain
         cancelCrossfade()
         player.shuffleModeEnabled = enabled
@@ -1349,12 +1494,28 @@ class MusicPlayer @Inject constructor(
             Player.REPEAT_MODE_ONE, Player.REPEAT_MODE_ALL -> mode
             else -> Player.REPEAT_MODE_OFF
         }
+        if (isCasting) {
+            _state.update { it.copy(repeatMode = supportedMode) }
+            persistPlaybackSession()
+            return@onMain
+        }
         if (player.repeatMode == supportedMode) return@onMain
         player.repeatMode = supportedMode
         _state.update { it.copy(repeatMode = supportedMode) }
         persistPlaybackSession()
     }
     fun cycleSpeed() = onMain {
+        if (isCasting) {
+            val next = when {
+                _state.value.speed < 1f -> 1f
+                _state.value.speed < 1.25f -> 1.25f
+                _state.value.speed < 1.5f -> 1.5f
+                _state.value.speed < 2f -> 2f
+                else -> 0.75f
+            }
+            castPlayback?.setSpeed(next)
+            return@onMain
+        }
         cancelCrossfade()
         val next = when {
             player.playbackParameters.speed < 1f -> 1f
@@ -1366,8 +1527,12 @@ class MusicPlayer @Inject constructor(
         player.setPlaybackSpeed(next)
     }
     fun cycleSleepTimer() = onMain {
-        sleepTimerStep = (sleepTimerStep + 1) % SLEEP_TIMER_MINUTES.size
-        val minutes = SLEEP_TIMER_MINUTES[sleepTimerStep]
+        setSleepTimerMinutes(SLEEP_TIMER_MINUTES[(sleepTimerStep + 1) % SLEEP_TIMER_MINUTES.size])
+    }
+
+    fun setSleepTimerMinutes(minutes: Int) = onMain {
+        if (minutes < 0) return@onMain
+        sleepTimerStep = SLEEP_TIMER_MINUTES.indexOf(minutes).coerceAtLeast(0)
         sleepTimerDeadlineMs = minutes.takeIf { it > 0 }
             ?.let { SystemClock.elapsedRealtime() + it * 60_000L }
         _state.update {
@@ -1375,6 +1540,11 @@ class MusicPlayer @Inject constructor(
         }
     }
     fun clearUpcoming() = onMain {
+        if (isCasting) {
+            _state.update { it.copy(queue = it.queue.take(it.currentIndex + 1), isEndlessQueue = false) }
+            persistPlaybackSession()
+            return@onMain
+        }
         cancelCrossfade()
         disableDiscoverQueue()
         disableRadioQueue()
@@ -1384,6 +1554,7 @@ class MusicPlayer @Inject constructor(
         }
     }
     fun stopAndClear() = onMain {
+        if (isCasting) castPlayback?.disconnect()
         cancelCrossfade()
         resolutionRequests.values.forEach { it.second.cancel() }
         resolutionRequests.clear()
@@ -1403,6 +1574,21 @@ class MusicPlayer @Inject constructor(
         appContext.stopService(Intent(appContext, MusicPlaybackService::class.java))
     }
     fun removeQueueItem(index: Int) = onMain {
+        if (isCasting) {
+            val snapshot = _state.value
+            if (index !in snapshot.queue.indices) return@onMain
+            val queue = snapshot.queue.toMutableList().apply { removeAt(index) }
+            if (queue.isEmpty()) {
+                stopAndClear()
+                return@onMain
+            }
+            val currentIndex = (snapshot.currentIndex - if (index < snapshot.currentIndex) 1 else 0)
+                .coerceIn(queue.indices)
+            _state.value = snapshot.copy(queue = queue, currentIndex = currentIndex, current = queue[currentIndex])
+            if (index == snapshot.currentIndex) seekToQueueItem(currentIndex)
+            persistPlaybackSession()
+            return@onMain
+        }
         cancelCrossfade()
         if (index in 0 until player.mediaItemCount) player.removeMediaItem(index)
     }
@@ -2427,6 +2613,7 @@ class MusicPlayer @Inject constructor(
 
     @MainThread
     private fun refresh(player: Player) {
+        if (isCasting) return
         val previous = _state.value
         val queue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toPlayableTrack() }
         val current = player.currentMediaItem?.toPlayableTrack()

@@ -10,6 +10,7 @@ import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.music.YouTubeMusicTrack
 import com.lastwave.app.data.music.YouTubePlaylistSummary
 import com.lastwave.app.data.playlist.PlaylistImportManager
+import com.lastwave.app.data.playlist.PlaylistRepository
 import com.lastwave.app.data.playlist.SavedPlaylist
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -27,6 +28,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -50,6 +52,7 @@ private data class YtCachedDetail(
     val remoteTrackCount: Int? = null,
     val tracks: List<StoredTrack> = emptyList(),
     val cachedAtMillis: Long = 0L,
+    val playlistContentVersion: Int = 0,
 )
 
 /** Connected YouTube playlists as live library items; importing is optional. */
@@ -60,6 +63,7 @@ class YtMusicLibraryManager @Inject constructor(
     private val preferences: YtMusicPreferences,
     private val innerTube: InnerTubeMusicApi,
     private val importManager: PlaylistImportManager,
+    private val playlistRepository: PlaylistRepository,
     private val applicationScope: CoroutineScope,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -71,18 +75,23 @@ class YtMusicLibraryManager @Inject constructor(
     val accountPlaylists: StateFlow<List<YouTubePlaylistSummary>> = _accountPlaylists.asStateFlow()
     private val _libraryReady = MutableStateFlow(false)
     val libraryReady: StateFlow<Boolean> = _libraryReady.asStateFlow()
+    private val details = ConcurrentHashMap<Long, SavedPlaylist>()
     val playlists: StateFlow<List<SavedPlaylist>> = combine(
         _accountPlaylists,
         preferences.hiddenLibraryPlaylistIds,
         preferences.pinnedLibraryPlaylistIds,
-    ) { account, hiddenIds, pinnedIds ->
-        account.filterNot { it.id in hiddenIds }.map { summary ->
+        preferences.playlistMappings.catch { emit(emptyMap()) },
+        playlistRepository.playlists,
+    ) { account, hiddenIds, pinnedIds, mappings, local ->
+        val localIds = local.mapTo(mutableSetOf()) { it.id }
+        val linkedRemoteIds = mappings.filterKeys { it in localIds }.values
+            .mapTo(mutableSetOf()) { it.remotePlaylistId.removePrefix("VL") }
+        account.filterNot { it.id in hiddenIds || it.id.removePrefix("VL") in linkedRemoteIds }.map { summary ->
             summaryToPlaylist(summary).copy(isPinned = summary.id in pinnedIds)
         }
     }.stateIn(applicationScope, SharingStarted.Eagerly, emptyList())
 
     private val remoteIdsByLocalId = ConcurrentHashMap<Long, String>()
-    private val details = ConcurrentHashMap<Long, SavedPlaylist>()
     private val ownedPlaylistCache = ConcurrentHashMap<Long, Pair<Long, com.lastwave.app.data.music.YtOwnedPlaylist>>()
     private val ownedPlaylistLocks = ConcurrentHashMap<Long, Mutex>()
     private val knownArtworkByRemoteId = ConcurrentHashMap<String, String>()
@@ -238,6 +247,7 @@ class YtMusicLibraryManager @Inject constructor(
             if (!file.exists()) return null
             val raw = file.readText()
             val cached = json.decodeFromString<YtCachedDetail>(raw)
+            if (cached.playlistContentVersion != PLAYLIST_CONTENT_VERSION) return null
             SavedPlaylist(
                 id = cached.id,
                 title = cached.title,
@@ -247,7 +257,7 @@ class YtMusicLibraryManager @Inject constructor(
                 createdAtMillis = 0L,
                 remotePlaylistId = cached.remotePlaylistId,
                 remoteArtworkUrl = cached.remoteArtworkUrl,
-                remoteTrackCount = cached.remoteTrackCount ?: cached.tracks.size,
+                remoteTrackCount = cached.remoteTrackCount,
             )
         } catch (_: Exception) {
             null
@@ -255,6 +265,7 @@ class YtMusicLibraryManager @Inject constructor(
     }
 
     private fun writeToDiskCache(localId: Long, playlist: SavedPlaylist) {
+        if (playlist.remoteTrackCount == null) return
         try {
             val file = File(cacheDir, "$localId.json")
             val cached = YtCachedDetail(
@@ -263,9 +274,10 @@ class YtMusicLibraryManager @Inject constructor(
                 subtitle = playlist.subtitle,
                 remotePlaylistId = playlist.remotePlaylistId ?: return,
                 remoteArtworkUrl = playlist.remoteArtworkUrl,
-                remoteTrackCount = playlist.remoteTrackCount ?: playlist.tracks.size,
+                remoteTrackCount = playlist.remoteTrackCount,
                 tracks = playlist.tracks.map(GeneratedTrack::toStored),
                 cachedAtMillis = System.currentTimeMillis(),
+                playlistContentVersion = PLAYLIST_CONTENT_VERSION,
             )
             file.writeText(json.encodeToString(cached))
         } catch (_: Exception) {
@@ -284,14 +296,14 @@ class YtMusicLibraryManager @Inject constructor(
         onUpdate: ((SavedPlaylist) -> Unit)? = null,
     ): SavedPlaylist? = withContext(Dispatchers.IO) {
         // 1. Check in-memory cache for immediate zero-latency result
-        details[localId]?.takeIf { it.tracks.isNotEmpty() }?.let { mem ->
+        details[localId]?.takeIf { it.tracks.isNotEmpty() && it.remoteTrackCount != null }?.let { mem ->
             onUpdate?.invoke(mem)
             return@withContext mem
         }
 
         // 2. Check persistent disk cache for instant startup load
         val disk = readFromDiskCache(localId)
-        if (disk != null && disk.tracks.isNotEmpty()) {
+        if (disk != null && disk.tracks.isNotEmpty() && disk.remoteTrackCount != null) {
             details[localId] = disk
             onUpdate?.invoke(disk)
             // Trigger background refresh so any playlist changes on YouTube are updated
@@ -327,8 +339,6 @@ class YtMusicLibraryManager @Inject constructor(
         val remoteId = remoteIdsByLocalId[localId] ?: return@withContext details[localId]
         val summary = _accountPlaylists.value.firstOrNull { stableRemoteId(it.id) == localId || it.id == remoteId }
 
-        val totalEstimatedCount = summary?.trackCountText?.substringBefore(' ')?.replace(",", "")?.toIntOrNull()
-
         val result = innerTube.fetchPlaylist(remoteId) { partialSongs ->
             val partialArtwork = summary?.artworkUrl?.takeIf(String::isNotBlank)
                 ?: partialSongs.firstNotNullOfOrNull { it.artworkUrl?.takeIf(String::isNotBlank) }
@@ -342,7 +352,7 @@ class YtMusicLibraryManager @Inject constructor(
                 createdAtMillis = 0L,
                 remotePlaylistId = remoteId,
                 remoteArtworkUrl = partialArtwork,
-                remoteTrackCount = totalEstimatedCount ?: partialSongs.size,
+                remoteTrackCount = null,
             )
             details[localId] = partialPlaylist
             onUpdate?.invoke(partialPlaylist)
@@ -357,11 +367,7 @@ class YtMusicLibraryManager @Inject constructor(
             ?: summary?.artworkUrl?.takeIf(String::isNotBlank)
             ?: result.tracks.firstNotNullOfOrNull { it.artworkUrl?.takeIf(String::isNotBlank) }
         publishArtwork(remoteId, artworkUrl)
-        val trackCount = if (result.trackCount > 0) {
-            result.trackCount
-        } else {
-            totalEstimatedCount ?: result.tracks.size
-        }
+        val trackCount = result.trackCount
 
         val playlist = SavedPlaylist(
             id = localId,
@@ -376,6 +382,7 @@ class YtMusicLibraryManager @Inject constructor(
         )
         details[localId] = playlist
         writeToDiskCache(localId, playlist)
+        updateRemoteTrackCount(remoteId, trackCount)
         onUpdate?.invoke(playlist)
         playlist
     }
@@ -502,10 +509,9 @@ class YtMusicLibraryManager @Inject constructor(
         val playlist = loadDetail(localId) ?: return@withContext null
         val remoteId = playlist.remotePlaylistId ?: return@withContext null
         val target = playlist.tracks.getOrNull(index) ?: return@withContext playlist
-        val targetVideoId = target.youtubeVideoIdOrNull()
+        val targetVideoId = target.youtubeVideoIdOrNull() ?: return@withContext playlist
         val owned = getOwnedPlaylist(localId, remoteId, targetVideoId) ?: return@withContext playlist
-        val item = (if (targetVideoId != null) owned.items.firstOrNull { it.videoId == targetVideoId && it.setVideoId != null } else null)
-            ?: owned.items.getOrNull(index)?.takeIf { it.setVideoId != null }
+        val item = owned.items.firstOrNull { it.videoId == targetVideoId && it.setVideoId != null }
             ?: return@withContext playlist
         if (!innerTube.removeVideosFromRemotePlaylist(remoteId, listOf(item.setVideoId!! to item.videoId))) {
             return@withContext playlist
@@ -513,12 +519,12 @@ class YtMusicLibraryManager @Inject constructor(
         val remainingTracks = playlist.tracks.filterIndexed { i, _ -> i != index }
         val updatedPlaylist = playlist.copy(
             tracks = remainingTracks,
-            remoteTrackCount = (playlist.remoteTrackCount ?: playlist.tracks.size).let { maxOf(0, it - 1) },
+            remoteTrackCount = playlist.remoteTrackCount?.let { maxOf(0, it - 1) },
         )
         ownedPlaylistCache[localId] = System.currentTimeMillis() to owned.copy(items = owned.items.filterNot { it.setVideoId == item.setVideoId })
         details[localId] = updatedPlaylist
         writeToDiskCache(localId, updatedPlaylist)
-        updateRemoteTrackCount(remoteId, updatedPlaylist.remoteTrackCount ?: updatedPlaylist.tracks.size)
+        updatedPlaylist.remoteTrackCount?.let { updateRemoteTrackCount(remoteId, it) }
         updatedPlaylist
     }
 
@@ -541,19 +547,19 @@ class YtMusicLibraryManager @Inject constructor(
                 }
                 ?.let { return@withLock it.second }
             innerTube.fetchOwnedPlaylist(remoteId, targetVideoId)?.let { fetched ->
-                val existing = ownedPlaylistCache[localId]?.second
-                val merged = if (existing == null) fetched else fetched.copy(
-                    items = (existing.items + fetched.items).distinctBy { it.setVideoId ?: it.videoId },
-                )
-                ownedPlaylistCache[localId] = lockedNow to merged
-                merged
+                ownedPlaylistCache[localId] = lockedNow to fetched
+                fetched
             }
         }
     }
 
     private fun updateRemoteTrackCount(remoteId: String, count: Int) {
         _accountPlaylists.value = _accountPlaylists.value.map { summary ->
-            if (summary.id == remoteId) summary.copy(trackCountText = "$count tracks") else summary
+            if (summary.id == remoteId || summary.id.removePrefix("VL") == remoteId.removePrefix("VL")) {
+                summary.copy(trackCountText = "$count tracks")
+            } else {
+                summary
+            }
         }
     }
 
@@ -583,7 +589,11 @@ class YtMusicLibraryManager @Inject constructor(
 
     private fun summaryToPlaylist(summary: YouTubePlaylistSummary): SavedPlaylist {
         val id = stableRemoteId(summary.id)
-        val count = summary.trackCountText?.let(::parseTrackCount)
+        val count = if (summary.id.removePrefix("VL") == "LM") {
+            details[id]?.remoteTrackCount
+        } else {
+            summary.trackCountText?.let(::parseTrackCount)
+        }
         val artwork = summary.artworkUrl ?: knownArtworkByRemoteId[summary.id]
         return SavedPlaylist(
             id = id,
@@ -635,6 +645,7 @@ class YtMusicLibraryManager @Inject constructor(
     )
 
     private companion object {
+        const val PLAYLIST_CONTENT_VERSION = 2
         const val REALTIME_REFRESH_MS = 8_000L
         const val ARTWORK_RETRY_DELAY_MS = 5 * 60 * 1000L
         const val OWNED_PLAYLIST_CACHE_TTL_MS = 10 * 60 * 1000L

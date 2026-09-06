@@ -994,24 +994,13 @@ private fun FeedAlbumCard(
             border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)),
             modifier = Modifier.size(142.dp),
         ) {
-            if (!album.artworkUrl.isNullOrBlank()) {
-                ArtworkImage(
-                    name = album.title,
-                    artist = album.artist,
-                    embeddedUrl = album.artworkUrl,
-                    fallbackIcon = Icons.Filled.Album,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Filled.Album,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.size(48.dp),
-                    )
-                }
-            }
+            ArtworkImage(
+                name = album.title,
+                artist = album.artist,
+                embeddedUrl = album.artworkUrl,
+                fallbackIcon = Icons.Filled.Album,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
         Spacer(Modifier.height(8.dp))
         Text(

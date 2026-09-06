@@ -384,16 +384,15 @@ class SettingsViewModel @Inject constructor(
                     if (it.moveToFirst()) it.getString(0) else null
                 } ?: "Imported Playlist"
 
-                val isM3u = displayName.endsWith(".m3u", ignoreCase = true) || displayName.endsWith(".m3u8", ignoreCase = true)
-                val fileType = if (isM3u) "M3U" else "CSV"
+                val fileType = displayName.substringAfterLast('.', "File").uppercase()
                 _uiState.update { it.copy(toastMessage = "Matching and importing $fileType songs...") }
 
                 val inputStream = context.contentResolver.openInputStream(uri)
                     ?: error("Could not open selected playlist file")
 
-                val (saved, result) = playlistImportManager.importCsvStream(inputStream, displayName)
+                val (saved, result) = inputStream.use { playlistImportManager.importCsvStream(it, displayName) }
                 _uiState.update {
-                    it.copy(toastMessage = "Imported \"${saved.title}\" (${result.matchedCount}/${result.totalRows} verified)")
+                    it.copy(toastMessage = "Imported \"${saved.title}\": ${result.matchedCount} tracks, ${result.totalRows - result.matchedCount} skipped")
                 }
             } catch (e: Exception) {
                 _uiState.update {

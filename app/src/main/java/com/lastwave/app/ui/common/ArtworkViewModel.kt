@@ -20,6 +20,10 @@ class ArtworkViewModel @Inject constructor(
     /** key -> url ("" = confirmed no art anywhere; absent = not yet resolved). */
     val resolved: StateFlow<Map<String, String>> = repository.resolved
 
+    fun refresh(name: String, artist: String) {
+        viewModelScope.launch { repository.forceRefresh(name, artist) }
+    }
+
     fun resolve(name: String, artist: String) {
         viewModelScope.launch {
             // ArtworkRepository.resolve() already never throws — this

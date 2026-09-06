@@ -98,7 +98,7 @@ class AlbumRepository @Inject constructor(
                 browseId = targetBrowseId.orEmpty(),
                 artworkUrl = artwork,
                 releaseYear = releaseYear,
-                trackCountText = ytData?.trackCountText ?: "${tracks.size} songs",
+                trackCountText = if (tracks == ytData?.tracks) ytData?.trackCountText else null,
                 durationText = ytData?.durationText,
                 description = description,
                 genres = genres,

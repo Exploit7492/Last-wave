@@ -51,6 +51,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -64,14 +65,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.local.LyricsAnimation
 import com.lastwave.app.data.lyrics.LyricLine
+import com.lastwave.app.data.lyrics.isRtlText
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.MusicPlayerState
 import com.lastwave.app.playback.PlaybackProgressState
@@ -91,7 +95,9 @@ sealed interface LyricsUiState {
         val plainLyrics: String? = null,
         val isInstrumental: Boolean = false,
         val source: String? = null,
-    ) : LyricsUiState
+    ) : LyricsUiState {
+        val isRtl: Boolean get() = lines.any { it.isRtl } || isRtlText(plainLyrics)
+    }
     data object Empty : LyricsUiState
     data class Error(val message: String) : LyricsUiState
 }
@@ -250,6 +256,12 @@ private fun SyncedLyricsList(
     val listState = rememberLazyListState()
     var userScrolledTime by remember { mutableLongStateOf(0L) }
 
+    val isOverallRtl = remember(lines) {
+        val meaningfulLines = lines.filter { it.text.isNotBlank() && it.text != "♪" }
+        if (meaningfulLines.isEmpty()) false
+        else meaningfulLines.count { it.isRtl } > meaningfulLines.size / 2
+    }
+
     // Active line detection: Exact millisecond vocal onset matching
     val activeIndex by remember(lines, currentPositionMs) {
         androidx.compose.runtime.derivedStateOf {
@@ -297,6 +309,9 @@ private fun SyncedLyricsList(
             val isActive = index == activeIndex
             val isPast = activeIndex >= 0 && index < activeIndex
             val distance = kotlin.math.abs(index - activeIndex)
+            val isLineRtl = remember(line, isOverallRtl) {
+                line.isRtl || (isOverallRtl && (line.text.isBlank() || line.text == "♪"))
+            }
 
             // Each profile gets a distinct motion signature. These targets only
             // change when focus changes (except the short onset pulse below), so
@@ -357,7 +372,8 @@ private fun SyncedLyricsList(
             }
 
             // Horizontal focus tracking / directional entry and exit.
-            val translationXTarget = when (animationStyle) {
+            // Inverted for RTL so lyrics smoothly glide along reading orientation.
+            val rawTranslationXTarget = when (animationStyle) {
                 LyricsAnimation.APPLE_FLUID -> when {
                     isActive -> 4f
                     isPast -> 0f
@@ -377,6 +393,7 @@ private fun SyncedLyricsList(
                 }
                 else -> 0f
             }
+            val translationXTarget = if (isLineRtl) -rawTranslationXTarget else rawTranslationXTarget
             val translationX by animateFloatAsState(
                 targetValue = translationXTarget,
                 animationSpec = when (animationStyle) {
@@ -422,7 +439,7 @@ private fun SyncedLyricsList(
                 label = "lyricTransY_$index",
             )
 
-            val rotationTarget = when (animationStyle) {
+            val rawRotationTarget = when (animationStyle) {
                 LyricsAnimation.KINETIC_SLIDE -> when {
                     isActive -> 0f
                     isPast -> 0.35f
@@ -435,6 +452,7 @@ private fun SyncedLyricsList(
                 }
                 else -> 0f
             }
+            val rotationTarget = if (isLineRtl) -rawRotationTarget else rawRotationTarget
             val rotation by animateFloatAsState(
                 targetValue = rotationTarget,
                 animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow),
@@ -491,54 +509,58 @@ private fun SyncedLyricsList(
                 label = "lyricColor_$index",
             )
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .graphicsLayer {
-                        scaleX = scale * pulseScale
-                        scaleY = scale * pulseScale
-                        this.alpha = alpha
-                        this.translationX = translationX * density
-                        this.translationY = translationY * density
-                        rotationZ = rotation
-                        rotationX = depthRotation
-                        if (depthRotation != 0f) cameraDistance = 24f * density
+            val lineLayoutDirection = if (isLineRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
+            CompositionLocalProvider(LocalLayoutDirection provides lineLayoutDirection) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer {
+                            scaleX = scale * pulseScale
+                            scaleY = scale * pulseScale
+                            this.alpha = alpha
+                            this.translationX = translationX * density
+                            this.translationY = translationY * density
+                            rotationZ = rotation
+                            rotationX = depthRotation
+                            if (depthRotation != 0f) cameraDistance = 24f * density
+                        }
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {
+                            onSeek(line.timeMs)
+                        }
+                        .padding(
+                            horizontal = if (animationStyle == LyricsAnimation.CARD_POP) 16.dp else 12.dp,
+                            vertical = if (isActive) 10.dp else 8.dp,
+                        ),
+                ) {
+                    val fontStyle = if (isActive) {
+                        MaterialTheme.typography.headlineSmall.copy(
+                            fontWeight = if (animationStyle == LyricsAnimation.APPLE_ZOOM) FontWeight.Black else FontWeight.ExtraBold,
+                            letterSpacing = (-0.3).sp,
+                            lineHeight = if (animationStyle == LyricsAnimation.APPLE_ZOOM) 38.sp else 34.sp,
+                        )
+                    } else {
+                        MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            lineHeight = 30.sp,
+                        )
                     }
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) {
-                        onSeek(line.timeMs)
-                    }
-                    .padding(
-                        horizontal = if (animationStyle == LyricsAnimation.CARD_POP) 16.dp else 12.dp,
-                        vertical = if (isActive) 10.dp else 8.dp,
-                    ),
-            ) {
-                val fontStyle = if (isActive) {
-                    MaterialTheme.typography.headlineSmall.copy(
-                        fontWeight = if (animationStyle == LyricsAnimation.APPLE_ZOOM) FontWeight.Black else FontWeight.ExtraBold,
-                        letterSpacing = (-0.3).sp,
-                        lineHeight = if (animationStyle == LyricsAnimation.APPLE_ZOOM) 38.sp else 34.sp,
-                    )
-                } else {
-                    MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        lineHeight = 30.sp,
+
+                    WordByWordLyricLine(
+                        line = line,
+                        currentPositionMs = currentPositionMs,
+                        isActive = isActive,
+                        activeColor = textColor,
+                        inactiveColor = MaterialTheme.colorScheme.onSurface,
+                        liquidGlass = liquidGlass,
+                        accentColor = interactiveColor,
+                        animationStyle = animationStyle,
+                        fontStyle = fontStyle,
+                        isRtl = isLineRtl,
                     )
                 }
-
-                WordByWordLyricLine(
-                    line = line,
-                    currentPositionMs = currentPositionMs,
-                    isActive = isActive,
-                    activeColor = textColor,
-                    inactiveColor = MaterialTheme.colorScheme.onSurface,
-                    liquidGlass = liquidGlass,
-                    accentColor = interactiveColor,
-                    animationStyle = animationStyle,
-                    fontStyle = fontStyle,
-                )
             }
         }
     }
@@ -556,142 +578,169 @@ private fun WordByWordLyricLine(
     accentColor: Color,
     animationStyle: LyricsAnimation,
     fontStyle: TextStyle,
+    isRtl: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    if (!line.hasSyllables || !isActive) {
-        Column(modifier = modifier) {
-            Text(
-                text = line.text.ifBlank { "♪" },
-                style = fontStyle,
-                color = if (isActive) activeColor else inactiveColor,
-                textAlign = TextAlign.Start,
-            )
-            if (!line.transliteration.isNullOrBlank() && isActive) {
+    val lineLayoutDirection = if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
+    CompositionLocalProvider(LocalLayoutDirection provides lineLayoutDirection) {
+        if (!line.hasSyllables || !isActive) {
+            Column(
+                modifier = modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.Start,
+            ) {
                 Text(
-                    text = line.transliteration,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Medium,
-                        letterSpacing = 0.2.sp,
-                    ),
-                    color = activeColor.copy(alpha = 0.72f),
-                    modifier = Modifier.padding(top = 3.dp),
+                    text = line.text.ifBlank { "♪" },
+                    style = fontStyle,
+                    color = if (isActive) activeColor else inactiveColor,
+                    textAlign = TextAlign.Start,
+                    modifier = Modifier.fillMaxWidth(),
                 )
-            }
-        }
-        return
-    }
-
-    Column(modifier = modifier) {
-        FlowRow(
-            horizontalArrangement = Arrangement.Start,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            line.syllables.forEachIndexed { sIndex, syllable ->
-                val sylStart = syllable.timeMs
-                val sylEnd = syllable.timeMs + syllable.durationMs
-                val isSyllableActive = currentPositionMs in sylStart until sylEnd
-                val isSyllablePast = currentPositionMs >= sylEnd
-
-                val sylScaleTarget = if (isSyllableActive) {
-                    when (animationStyle) {
-                        LyricsAnimation.APPLE_FLUID -> 1.08f
-                        LyricsAnimation.KARAOKE_PULSE -> 1.13f
-                        LyricsAnimation.KINETIC_SLIDE -> 1.07f
-                        LyricsAnimation.CINEMATIC_BLUR -> 1.05f
-                        LyricsAnimation.LOSSLESS_GLOW -> 1.09f
-                        LyricsAnimation.CARD_POP -> 1.07f
-                        LyricsAnimation.APPLE_ZOOM -> 1.11f
-                        LyricsAnimation.MINIMAL_WAVE -> 1.02f
-                    }
-                } else 1f
-                val sylScale by animateFloatAsState(
-                    targetValue = sylScaleTarget,
-                    animationSpec = when (animationStyle) {
-                        LyricsAnimation.KARAOKE_PULSE -> spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessLow)
-                        LyricsAnimation.APPLE_FLUID, LyricsAnimation.APPLE_ZOOM -> spring(
-                            dampingRatio = 0.72f,
-                            stiffness = Spring.StiffnessMediumLow,
+                if (!line.transliteration.isNullOrBlank() && isActive) {
+                    val transliterationRtl = isRtlText(line.transliteration)
+                    CompositionLocalProvider(
+                        LocalLayoutDirection provides if (transliterationRtl) LayoutDirection.Rtl else LayoutDirection.Ltr,
+                    ) {
+                        Text(
+                            text = line.transliteration,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Medium,
+                                letterSpacing = 0.2.sp,
+                            ),
+                            color = activeColor.copy(alpha = 0.72f),
+                            textAlign = TextAlign.Start,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 3.dp),
                         )
-                        LyricsAnimation.MINIMAL_WAVE -> tween(70)
-                        else -> spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow)
-                    },
-                    label = "sylScale_${sIndex}",
-                )
-
-                val sylLiftTarget = if (isSyllableActive) {
-                    when (animationStyle) {
-                        LyricsAnimation.KARAOKE_PULSE, LyricsAnimation.CARD_POP, LyricsAnimation.APPLE_ZOOM -> -3f
-                        LyricsAnimation.APPLE_FLUID, LyricsAnimation.KINETIC_SLIDE, LyricsAnimation.LOSSLESS_GLOW -> -2f
-                        LyricsAnimation.CINEMATIC_BLUR -> -1f
-                        LyricsAnimation.MINIMAL_WAVE -> 0f
-                    }
-                } else 0f
-                val sylLift by animateFloatAsState(
-                    targetValue = sylLiftTarget,
-                    animationSpec = if (animationStyle == LyricsAnimation.MINIMAL_WAVE) {
-                        tween(70)
-                    } else {
-                        spring(dampingRatio = 0.76f, stiffness = Spring.StiffnessMediumLow)
-                    },
-                    label = "sylLift_${sIndex}",
-                )
-
-                val sylAlphaTarget = when {
-                    isSyllableActive -> 1f
-                    isSyllablePast -> 0.96f
-                    else -> when (animationStyle) {
-                        LyricsAnimation.CINEMATIC_BLUR -> 0.28f
-                        LyricsAnimation.APPLE_ZOOM -> 0.34f
-                        LyricsAnimation.MINIMAL_WAVE -> 0.52f
-                        else -> 0.40f
                     }
                 }
-                val sylAlpha by animateFloatAsState(
-                    targetValue = sylAlphaTarget,
-                    animationSpec = tween(60),
-                    label = "sylAlpha_${sIndex}",
-                )
-
-                val sylColor by animateColorAsState(
-                    targetValue = when {
-                        isSyllableActive -> if (liquidGlass) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            accentColor
-                        }
-                        isSyllablePast -> activeColor
-                        else -> inactiveColor.copy(alpha = 0.40f)
-                    },
-                    animationSpec = tween(80),
-                    label = "sylColor_${sIndex}",
-                )
-
-                Text(
-                    text = syllable.text,
-                    style = fontStyle,
-                    color = sylColor,
-                    modifier = Modifier
-                        .graphicsLayer {
-                            scaleX = sylScale
-                            scaleY = sylScale
-                            translationY = sylLift * density
-                            alpha = sylAlpha
-                        },
-                )
             }
+            return@CompositionLocalProvider
         }
 
-        if (!line.transliteration.isNullOrBlank()) {
-            Text(
-                text = line.transliteration,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 0.2.sp,
-                ),
-                color = activeColor.copy(alpha = 0.76f),
-                modifier = Modifier.padding(top = 4.dp),
-            )
+        Column(
+            modifier = modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.Start,
+        ) {
+            FlowRow(
+                horizontalArrangement = Arrangement.Start,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                line.syllables.forEachIndexed { sIndex, syllable ->
+                    val sylStart = syllable.timeMs
+                    val sylEnd = syllable.timeMs + syllable.durationMs
+                    val isSyllableActive = currentPositionMs in sylStart until sylEnd
+                    val isSyllablePast = currentPositionMs >= sylEnd
+
+                    val sylScaleTarget = if (isSyllableActive) {
+                        when (animationStyle) {
+                            LyricsAnimation.APPLE_FLUID -> 1.08f
+                            LyricsAnimation.KARAOKE_PULSE -> 1.13f
+                            LyricsAnimation.KINETIC_SLIDE -> 1.07f
+                            LyricsAnimation.CINEMATIC_BLUR -> 1.05f
+                            LyricsAnimation.LOSSLESS_GLOW -> 1.09f
+                            LyricsAnimation.CARD_POP -> 1.07f
+                            LyricsAnimation.APPLE_ZOOM -> 1.11f
+                            LyricsAnimation.MINIMAL_WAVE -> 1.02f
+                        }
+                    } else 1f
+                    val sylScale by animateFloatAsState(
+                        targetValue = sylScaleTarget,
+                        animationSpec = when (animationStyle) {
+                            LyricsAnimation.KARAOKE_PULSE -> spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessLow)
+                            LyricsAnimation.APPLE_FLUID, LyricsAnimation.APPLE_ZOOM -> spring(
+                                dampingRatio = 0.72f,
+                                stiffness = Spring.StiffnessMediumLow,
+                            )
+                            LyricsAnimation.MINIMAL_WAVE -> tween(70)
+                            else -> spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow)
+                        },
+                        label = "sylScale_${sIndex}",
+                    )
+
+                    val sylLiftTarget = if (isSyllableActive) {
+                        when (animationStyle) {
+                            LyricsAnimation.KARAOKE_PULSE, LyricsAnimation.CARD_POP, LyricsAnimation.APPLE_ZOOM -> -3f
+                            LyricsAnimation.APPLE_FLUID, LyricsAnimation.KINETIC_SLIDE, LyricsAnimation.LOSSLESS_GLOW -> -2f
+                            LyricsAnimation.CINEMATIC_BLUR -> -1f
+                            LyricsAnimation.MINIMAL_WAVE -> 0f
+                        }
+                    } else 0f
+                    val sylLift by animateFloatAsState(
+                        targetValue = sylLiftTarget,
+                        animationSpec = if (animationStyle == LyricsAnimation.MINIMAL_WAVE) {
+                            tween(70)
+                        } else {
+                            spring(dampingRatio = 0.76f, stiffness = Spring.StiffnessMediumLow)
+                        },
+                        label = "sylLift_${sIndex}",
+                    )
+
+                    val sylAlphaTarget = when {
+                        isSyllableActive -> 1f
+                        isSyllablePast -> 0.96f
+                        else -> when (animationStyle) {
+                            LyricsAnimation.CINEMATIC_BLUR -> 0.28f
+                            LyricsAnimation.APPLE_ZOOM -> 0.34f
+                            LyricsAnimation.MINIMAL_WAVE -> 0.52f
+                            else -> 0.40f
+                        }
+                    }
+                    val sylAlpha by animateFloatAsState(
+                        targetValue = sylAlphaTarget,
+                        animationSpec = tween(60),
+                        label = "sylAlpha_${sIndex}",
+                    )
+
+                    val sylColor by animateColorAsState(
+                        targetValue = when {
+                            isSyllableActive -> if (liquidGlass) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                accentColor
+                            }
+                            isSyllablePast -> activeColor
+                            else -> inactiveColor.copy(alpha = 0.40f)
+                        },
+                        animationSpec = tween(80),
+                        label = "sylColor_${sIndex}",
+                    )
+
+                    Text(
+                        text = syllable.text,
+                        style = fontStyle,
+                        color = sylColor,
+                        modifier = Modifier
+                            .graphicsLayer {
+                                scaleX = sylScale
+                                scaleY = sylScale
+                                translationY = sylLift * density
+                                alpha = sylAlpha
+                            },
+                    )
+                }
+            }
+
+            if (!line.transliteration.isNullOrBlank()) {
+                val transliterationRtl = isRtlText(line.transliteration)
+                CompositionLocalProvider(
+                    LocalLayoutDirection provides if (transliterationRtl) LayoutDirection.Rtl else LayoutDirection.Ltr,
+                ) {
+                    Text(
+                        text = line.transliteration,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 0.2.sp,
+                        ),
+                        color = activeColor.copy(alpha = 0.76f),
+                        textAlign = TextAlign.Start,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                    )
+                }
+            }
         }
     }
 }
@@ -701,40 +750,46 @@ private fun PlainLyricsView(
     plainLyrics: String,
     modifier: Modifier = Modifier,
 ) {
-    val scrollState = rememberScrollState()
-    Column(
-        modifier = modifier
-            .verticalScroll(scrollState)
-            .padding(top = 24.dp, bottom = 90.dp, start = 16.dp, end = 16.dp),
-    ) {
-        Row(
-            modifier = Modifier.padding(bottom = 20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+    val isRtl = remember(plainLyrics) { isRtlText(plainLyrics) }
+    val layoutDirection = if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
+    CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
+        val scrollState = rememberScrollState()
+        Column(
+            modifier = modifier
+                .verticalScroll(scrollState)
+                .padding(top = 24.dp, bottom = 90.dp, start = 16.dp, end = 16.dp),
         ) {
-            Icon(
-                Icons.Filled.SyncDisabled,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
+            Row(
+                modifier = Modifier.padding(bottom = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    Icons.Filled.SyncDisabled,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    "Lyrics not time-synced",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             Text(
-                "Lyrics not time-synced",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = plainLyrics,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = 19.sp,
+                    lineHeight = 32.sp,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.1.sp,
+                ),
+                textAlign = TextAlign.Start,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.94f),
+                modifier = Modifier.fillMaxWidth(),
             )
         }
-
-        Text(
-            text = plainLyrics,
-            style = MaterialTheme.typography.bodyLarge.copy(
-                fontSize = 19.sp,
-                lineHeight = 32.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 0.1.sp,
-            ),
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.94f),
-        )
     }
 }
 

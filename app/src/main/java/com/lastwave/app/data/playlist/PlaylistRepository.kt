@@ -74,6 +74,7 @@ class PlaylistRepository @Inject constructor(
     private val _changes = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val changes = _changes.asSharedFlow()
     private val likedSongsMutex = Mutex()
+    private val saveMutex = Mutex()
 
     val playlists: Flow<List<SavedPlaylist>> = flow {
         emit(getAll())
@@ -139,20 +140,19 @@ class PlaylistRepository @Inject constructor(
 
     /**
      * Saves a new playlist. Guards against accidental double-saves the same
-     * way the original's savePlaylist() does: skips saving if an existing
-     * playlist has the same title AND the same first track (name+artist).
+     * way the original's savePlaylist() does: skips saving only when an existing
+     * playlist has the same title and complete ordered track identity.
      * Returns the saved playlist, or the pre-existing duplicate if skipped.
      */
-    suspend fun save(title: String, subtitle: String, mode: String, tracks: List<GeneratedTrack>, discoverSignature: String? = null): SavedPlaylist {
+    suspend fun save(title: String, subtitle: String, mode: String, tracks: List<GeneratedTrack>, discoverSignature: String? = null): SavedPlaylist = saveMutex.withLock {
         val existing = runCatching { getAll() }.getOrDefault(emptyList())
         val playableTracks = if (mode == "custom" && tracks.isEmpty()) emptyList() else filterPlayable(tracks)
-        val firstKey = playableTracks.firstOrNull()?.key
         existing.firstOrNull {
             it.mode == mode &&
                 it.title.equals(title, ignoreCase = true) &&
-                it.tracks.firstOrNull()?.key == firstKey
+                sameOrderedTrackIdentity(it.tracks, playableTracks)
         }
-            ?.let { return it }
+            ?.let { return@withLock it }
 
         val entity = SavedPlaylistEntity(
             id = System.currentTimeMillis(),
@@ -185,7 +185,17 @@ class PlaylistRepository @Inject constructor(
             }
         }
 
-        return saved
+        saved
+    }
+
+    private fun sameOrderedTrackIdentity(
+        existing: List<GeneratedTrack>,
+        incoming: List<GeneratedTrack>,
+    ): Boolean = existing.size == incoming.size && existing.zip(incoming).all { (left, right) ->
+        if (left.key != right.key) return@all false
+        val leftVideoId = left.youtubeVideoIdOrNull()
+        val rightVideoId = right.youtubeVideoIdOrNull()
+        leftVideoId == null || rightVideoId == null || leftVideoId == rightVideoId
     }
 
     suspend fun createCustom(title: String): SavedPlaylist {
@@ -303,11 +313,16 @@ class PlaylistRepository @Inject constructor(
     }
 
     /** Internal sync write: unlike normal editing, this also updates generated/imported playlists. */
-    suspend fun replaceTracksForSync(id: Long, tracks: List<GeneratedTrack>): SavedPlaylist? {
+    suspend fun replaceTracksForSync(
+        id: Long,
+        tracks: List<GeneratedTrack>,
+        expectedTracks: List<GeneratedTrack>? = null,
+    ): SavedPlaylist? {
         awaitStartupSync()
         val entity = dao.getById(id) ?: return null
+        if (expectedTracks != null && entity.toDomain().tracks != expectedTracks) return null
         val updated = entity.copy(tracksJson = json.encodeToString(tracks.map { it.toStored() }))
-        dao.upsert(updated)
+        if (dao.updateTracksIfUnchanged(id, entity.tracksJson, updated.tracksJson) == 0) return null
         syncPublicMirror()
         _changes.tryEmit(Unit)
         return updated.toDomain()

@@ -1,6 +1,7 @@
 package com.lastwave.app.data.repository
 
 import com.lastwave.app.data.local.SessionPreferences
+import com.lastwave.app.data.artwork.ArtworkNormalizer
 import com.lastwave.app.data.model.ArtistAlbumItem
 import com.lastwave.app.data.model.ArtistPageData
 import com.lastwave.app.data.model.ArtistSummaryItem
@@ -35,13 +36,14 @@ class ArtistRepository @Inject constructor(
     ): ArtistPageData = withContext(Dispatchers.IO) {
         val cleanName = artistName.trim()
         var targetBrowseId = browseId?.takeIf(String::isNotBlank)
+        var searchArtwork: String? = null
 
         // 1. Resolve browseId if missing
         if (targetBrowseId == null && cleanName.isNotBlank()) {
             val searchResults = runCatching { innerTube.searchArtists(cleanName, limit = 5) }.getOrNull().orEmpty()
             val match = searchResults.firstOrNull { it.name.equals(cleanName, ignoreCase = true) }
-                ?: searchResults.firstOrNull()
             targetBrowseId = match?.browseId
+            searchArtwork = match?.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage)
         }
 
         coroutineScope {
@@ -63,8 +65,16 @@ class ArtistRepository @Inject constructor(
 
             // Merge InnerTube rich playable songs & discography with Last.fm bio & tags
             val finalName = ytData?.name?.takeIf(String::isNotBlank) ?: cleanName.ifBlank { "Artist" }
-            val artwork = ytData?.artworkUrl ?: lfmData?.artworkUrl
-            val banner = ytData?.bannerUrl ?: artwork
+            if (!ArtworkNormalizer.isRealImage(ytData?.artworkUrl) && searchArtwork == null) {
+                searchArtwork = runCatching {
+                    innerTube.searchArtists(cleanName, limit = 5)
+                        .firstOrNull { it.name.equals(cleanName, ignoreCase = true) }
+                        ?.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage)
+                }.getOrNull()
+            }
+            val artwork = ytData?.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage)
+                ?: searchArtwork ?: lfmData?.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage)
+            val banner = ytData?.bannerUrl?.takeIf(ArtworkNormalizer::isRealImage) ?: artwork
             val bio = ytData?.bio?.takeIf(String::isNotBlank) ?: lfmData?.bio
             val tags = lfmData?.tags.orEmpty()
             val listeners = ytData?.subscribers ?: lfmData?.listeners
@@ -99,6 +109,7 @@ class ArtistRepository @Inject constructor(
                 name = finalName,
                 browseId = targetBrowseId.orEmpty(),
                 artworkUrl = artwork,
+                fallbackArtworkUrl = searchArtwork,
                 bannerUrl = banner,
                 monthlyListeners = ytData?.monthlyListeners ?: listeners,
                 subscribers = ytData?.subscribers ?: listeners,

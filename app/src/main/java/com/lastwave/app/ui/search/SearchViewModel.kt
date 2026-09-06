@@ -93,7 +93,15 @@ class SearchViewModel @Inject constructor(
     }
 
     fun setTab(tab: SearchTab) {
-        _uiState.update { it.copy(tab = tab, isShowingSuggestions = false) }
+        if (_uiState.value.tab == tab) return
+        _uiState.update {
+            it.copy(
+                tab = tab,
+                isShowingSuggestions = false,
+                results = emptyList(),
+                status = if (it.query.isBlank()) SearchStatus.IDLE else SearchStatus.LOADING,
+            )
+        }
         val q = _uiState.value.query
         if (q.isNotBlank()) {
             debounceJob?.cancel()
@@ -164,21 +172,22 @@ class SearchViewModel @Inject constructor(
                     }, sourceLabel = "Search")
                 }
             }
-            SearchTab.USERS -> Unit
+            SearchTab.PLAYLISTS, SearchTab.USERS -> Unit
         }
     }
 
     private suspend fun runSearch(query: String, saveToHistory: Boolean) {
+        val tab = _uiState.value.tab
         lastIssuedQuery = query
         _uiState.update { it.copy(status = SearchStatus.LOADING) }
         if (saveToHistory) {
             historyRepository.add(query)
         }
         try {
-            val results = repository.search(_uiState.value.tab, query)
+            val results = repository.search(tab, query)
             // Stale-response guard: discard if the user has typed something
             // new since this call was issued.
-            if (lastIssuedQuery != query) return
+            if (lastIssuedQuery != query || _uiState.value.query != query || _uiState.value.tab != tab) return
             _uiState.update {
                 it.copy(
                     status = if (results.isEmpty()) SearchStatus.EMPTY else SearchStatus.RESULTS,
@@ -186,7 +195,7 @@ class SearchViewModel @Inject constructor(
                 )
             }
         } catch (e: Exception) {
-            if (lastIssuedQuery != query) return
+            if (lastIssuedQuery != query || _uiState.value.query != query || _uiState.value.tab != tab) return
             _uiState.update { it.copy(status = SearchStatus.EMPTY, results = emptyList()) }
         }
     }

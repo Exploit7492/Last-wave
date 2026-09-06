@@ -318,8 +318,7 @@ fun PlaylistDetailScreen(
                     // Metadata line (tracks count & date)
                     Text(
                         text = if (playlist.isYouTubeOnly) {
-                            val count = playlist.remoteTrackCount ?: playlist.tracks.size
-                            "$count songs • YouTube Music"
+                            playlist.remoteTrackCount?.let { "$it songs • YouTube Music" } ?: "YouTube Music"
                         } else {
                             "${playlist.tracks.size} songs \u2022 ${formatDate(playlist.createdAtMillis)}"
                         },
@@ -505,7 +504,11 @@ fun PlaylistDetailScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(
-                                "${playlist.remoteTrackCount ?: playlist.tracks.size} tracks",
+                                if (playlist.isYouTubeOnly) {
+                                    playlist.remoteTrackCount?.let { "$it tracks" } ?: "Tracks"
+                                } else {
+                                    "${playlist.tracks.size} tracks"
+                                },
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontWeight = FontWeight.Medium,

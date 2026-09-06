@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
@@ -26,7 +25,7 @@ import javax.inject.Inject
 
 // Last.fm redirects its Custom Tab to this Activity after approval.
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     @Inject
     lateinit var lastFmAuthCallback: LastFmAuthCallbackCoordinator
@@ -154,6 +153,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handlePlaybackIntent(intent: Intent?) {
+        if (intent?.action == android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH) {
+            val playbackIntent = Intent(this, com.lastwave.app.playback.MusicPlaybackService::class.java)
+                .setAction(intent.action)
+            intent.extras?.let { playbackIntent.putExtras(it) }
+            androidx.core.content.ContextCompat.startForegroundService(this, playbackIntent)
+            return
+        }
         val uri = intent?.data
         val host = uri?.host.orEmpty().lowercase()
         val isSupportedMusicLink = intent?.action == Intent.ACTION_VIEW &&

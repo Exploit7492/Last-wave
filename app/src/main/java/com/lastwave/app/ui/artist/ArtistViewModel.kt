@@ -14,6 +14,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
+import com.lastwave.app.data.artwork.ArtworkNormalizer
 import javax.inject.Inject
 
 import com.lastwave.app.data.local.MiscSettings
@@ -43,19 +47,26 @@ class ArtistViewModel @Inject constructor(
 
     private var currentArtistName: String = ""
     private var currentBrowseId: String? = null
+    private var loadJob: Job? = null
 
     fun loadArtist(artistName: String, browseId: String? = null) {
-        if (artistName == currentArtistName && browseId == currentBrowseId && _uiState.value is ArtistUiState.Success) {
+        val cached = (_uiState.value as? ArtistUiState.Success)?.data
+        if (artistName == currentArtistName && browseId == currentBrowseId &&
+            (loadJob?.isActive == true || ArtworkNormalizer.isRealImage(cached?.artworkUrl))) {
             return
         }
         currentArtistName = artistName
         currentBrowseId = browseId
 
-        viewModelScope.launch {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             _uiState.value = ArtistUiState.Loading
             try {
                 val data = repository.getArtistDetails(artistName, browseId)
+                coroutineContext.ensureActive()
                 _uiState.value = ArtistUiState.Success(data)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.value = ArtistUiState.Error(e.message ?: "Failed to load artist details")
             }

@@ -6,10 +6,13 @@ import androidx.lifecycle.viewModelScope
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.music.YouTubeMusicTrack
 import com.lastwave.app.data.music.YouTubePlaylistResult
+import com.lastwave.app.data.playlist.PlaylistImportManager
+import com.lastwave.app.data.playlist.PlaylistRepository
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.PlayableTrack
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,7 +22,12 @@ sealed interface FeedPlaylistDetailUiState {
     data object Loading : FeedPlaylistDetailUiState
 
     @Immutable
-    data class Success(val playlist: YouTubePlaylistResult) : FeedPlaylistDetailUiState
+    data class Success(
+        val playlist: YouTubePlaylistResult,
+        val isSaving: Boolean = false,
+        val savedToLibrary: Boolean = false,
+        val saveError: String? = null,
+    ) : FeedPlaylistDetailUiState
 
     data class Error(val message: String) : FeedPlaylistDetailUiState
 }
@@ -28,6 +36,8 @@ sealed interface FeedPlaylistDetailUiState {
 class FeedPlaylistDetailViewModel @Inject constructor(
     private val innerTube: InnerTubeMusicApi,
     private val musicPlayer: MusicPlayer,
+    private val importManager: PlaylistImportManager,
+    private val playlistRepository: PlaylistRepository,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow<FeedPlaylistDetailUiState>(FeedPlaylistDetailUiState.Loading)
     val uiState: StateFlow<FeedPlaylistDetailUiState> = _uiState.asStateFlow()
@@ -36,7 +46,7 @@ class FeedPlaylistDetailViewModel @Inject constructor(
 
     fun load(playlistId: String) {
         if (playlistId.isBlank()) {
-            _uiState.value = FeedPlaylistDetailUiState.Error("This mix is unavailable.")
+            _uiState.value = FeedPlaylistDetailUiState.Error("This playlist is unavailable.")
             return
         }
         if (playlistId == currentPlaylistId && _uiState.value !is FeedPlaylistDetailUiState.Error) return
@@ -45,14 +55,38 @@ class FeedPlaylistDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = FeedPlaylistDetailUiState.Loading
             val result = runCatching {
-                innerTube.fetchPlaylist(playlistId, maxTracks = FEED_PLAYLIST_TRACK_LIMIT)
+                innerTube.fetchPlaylist(playlistId)
             }.getOrNull()
 
             if (currentPlaylistId != playlistId) return@launch
             _uiState.value = when {
-                result == null -> FeedPlaylistDetailUiState.Error("Couldn't open this mix. Check your connection and try again.")
-                result.tracks.isEmpty() -> FeedPlaylistDetailUiState.Error("This mix doesn't have any playable tracks right now.")
+                result == null -> FeedPlaylistDetailUiState.Error("Couldn't open this playlist. Check your connection and try again.")
+                result.tracks.isEmpty() -> FeedPlaylistDetailUiState.Error("This playlist doesn't have any playable tracks right now.")
                 else -> FeedPlaylistDetailUiState.Success(result)
+            }
+        }
+    }
+
+    fun saveToLibrary() {
+        val current = _uiState.value as? FeedPlaylistDetailUiState.Success ?: return
+        if (current.isSaving || current.savedToLibrary) return
+        val playlistId = currentPlaylistId
+        _uiState.value = current.copy(isSaving = true, saveError = null)
+        viewModelScope.launch {
+            try {
+                val saved = importManager.importYouTubePlaylist(
+                    current.playlist.copy(title = current.playlist.title.ifBlank { "YouTube playlist" }),
+                )
+                checkNotNull(playlistRepository.getById(saved.id)) { "Playlist could not be saved" }
+                if (currentPlaylistId == playlistId) {
+                    _uiState.value = current.copy(savedToLibrary = true)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                if (currentPlaylistId == playlistId) {
+                    _uiState.value = current.copy(saveError = "Couldn't save playlist. Try again.")
+                }
             }
         }
     }
@@ -85,7 +119,4 @@ class FeedPlaylistDetailViewModel @Inject constructor(
         videoId = videoId,
     )
 
-    private companion object {
-        const val FEED_PLAYLIST_TRACK_LIMIT = 100
-    }
 }

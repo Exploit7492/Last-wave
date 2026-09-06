@@ -6,6 +6,9 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -43,6 +46,12 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.ThumbDown
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -67,6 +76,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -78,6 +88,7 @@ import com.lastwave.app.playback.PlayableTrack
 import com.lastwave.app.ui.navigation.ArtistAlbumNavigator
 import com.lastwave.app.ui.player.LocalMusicPlayer
 import com.lastwave.app.ui.player.LocalAddToPlaylist
+import com.lastwave.app.ui.player.PlayerCastMenuRow
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.launch
@@ -248,6 +259,7 @@ fun TrackContextMenuSheet(
     val musicPlayer = LocalMusicPlayer.current
     val addToPlaylist = LocalAddToPlaylist.current
     var showDetailsSheet by remember { mutableStateOf(false) }
+    var showTimerDialog by remember { mutableStateOf(false) }
     var resolvedGenre by remember(target) { mutableStateOf<String?>(null) }
     var resolvingGenre by remember(target) { mutableStateOf(false) }
     val activeDownloads by downloadViewModel.activeDownloads.collectAsState()
@@ -290,6 +302,54 @@ fun TrackContextMenuSheet(
         return
     }
 
+    if (showTimerDialog) {
+        var customMinutes by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+        val customDuration = customMinutes.toIntOrNull()?.takeIf { it > 0 }
+        AlertDialog(
+            onDismissRequest = { showTimerDialog = false },
+            title = { Text("Sleep timer") },
+            text = {
+                Column {
+                    listOf(0, 15, 30, 60).forEach { minutes ->
+                        TextButton(
+                            onClick = {
+                                musicPlayer.setSleepTimerMinutes(minutes)
+                                showTimerDialog = false
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(if (minutes == 0) "Off" else "$minutes minutes") }
+                    }
+                    OutlinedTextField(
+                        value = customMinutes,
+                        onValueChange = { customMinutes = it },
+                        label = { Text("Custom time (minutes)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        isError = customMinutes.isNotEmpty() && customDuration == null,
+                        supportingText = {
+                            if (customMinutes.isNotEmpty() && customDuration == null) {
+                                Text("Enter a positive whole number")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = customDuration != null,
+                    onClick = {
+                        customDuration?.let(musicPlayer::setSleepTimerMinutes)
+                        showTimerDialog = false
+                    },
+                ) { Text("Set timer") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimerDialog = false }) { Text("Cancel") }
+            },
+        )
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -321,10 +381,33 @@ fun TrackContextMenuSheet(
                     else startMixViewModel.startMix(target.name, target.artist, playableTrack?.videoId)
                     onDismiss()
                 }
-                Spacer(Modifier.height(4.dp))
+                val playable = playableTrack ?: PlayableTrack(title = target.name, artist = target.artist)
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        QuickMenuAction(Icons.Filled.PlayCircle, "Play", Modifier.weight(1f)) {
+                            onPlayInLastWave?.invoke() ?: musicPlayer.play(playable, sourceLabel = playbackSourceLabel)
+                            onDismiss()
+                        }
+                        VerticalDivider(Modifier.height(36.dp))
+                        QuickMenuAction(Icons.Filled.QueuePlayNext, "Play next", Modifier.weight(1f)) {
+                            musicPlayer.playNext(playable)
+                            onDismiss()
+                        }
+                        VerticalDivider(Modifier.height(36.dp))
+                        QuickMenuAction(Icons.Filled.Timer, "Timer", Modifier.weight(1f)) {
+                            showTimerDialog = true
+                        }
+                    }
+                }
 
                 val rows = buildList<@Composable () -> Unit> {
                     val t = target
+                    add { PlayerCastMenuRow(musicPlayer) }
                     if (resolvingGenre || !resolvedGenre.isNullOrBlank()) {
                         add {
                             MenuInfoRow(
@@ -335,13 +418,6 @@ fun TrackContextMenuSheet(
                                     { exploreGenre(resolvedGenre!!); onDismiss() }
                                 } else null,
                             )
-                        }
-                    }
-                    val playable = playableTrack ?: PlayableTrack(title = t.name, artist = t.artist)
-                    add {
-                        MenuActionRow(Icons.Filled.PlayCircle, "Play in LastWave") {
-                            onPlayInLastWave?.invoke() ?: musicPlayer.play(playable, sourceLabel = playbackSourceLabel)
-                            onDismiss()
                         }
                     }
                     add { MenuActionRow(Icons.Filled.PlaylistAdd, "Add to playlist") { addToPlaylist(playable); onDismiss() } }
@@ -395,7 +471,6 @@ fun TrackContextMenuSheet(
                             }
                         }
                     }
-                    add { MenuActionRow(Icons.Filled.QueuePlayNext, "Play next") { musicPlayer.playNext(playable); onDismiss() } }
                     add { MenuActionRow(Icons.Filled.QueueMusic, "Add to queue") { musicPlayer.addToQueue(playable); onDismiss() } }
                     add { MenuActionRow(Icons.Filled.Language, "Open in Last.fm") { openUrl(context, buildLastFmUrl(target)); onDismiss() } }
                     if (onRefreshArtwork != null) {
@@ -424,7 +499,16 @@ fun TrackContextMenuSheet(
                         }
                     }
                 }
-                rows.forEach { it() }
+                Column(
+                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp)),
+                ) {
+                    rows.forEachIndexed { index, row ->
+                        if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        row()
+                    }
+                }
             } else if (target is TrackMenuTarget.Artist) {
                 MenuActionRow(Icons.Filled.Person, "View Artist Page") {
                     artistAlbumViewModel.openArtist(target.name)
@@ -516,7 +600,19 @@ private fun StartMixCard(onClick: () -> Unit) {
     }
 }
 
-/** Full-width edge-to-edge action row with tinted icon badge and ripple indication. */
+@Composable
+private fun QuickMenuAction(icon: ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) {
+    Column(
+        modifier.clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+        Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** Full-width action row with tinted icon badge and ripple indication. */
 @Composable
 private fun MenuActionRow(icon: ImageVector, label: String, danger: Boolean = false, onClick: () -> Unit) {
     val contentColor = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface

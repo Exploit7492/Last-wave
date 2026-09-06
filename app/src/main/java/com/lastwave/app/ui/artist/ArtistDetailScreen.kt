@@ -215,12 +215,19 @@ fun ArtistDetailScreen(
                                     )
                                     .clip(RoundedCornerShape(28.dp)),
                             ) {
-                                if (!data.artworkUrl.isNullOrBlank()) {
+                                val artworkCandidates = remember(data) {
+                                    listOfNotNull(data.artworkUrl, data.bannerUrl, data.fallbackArtworkUrl)
+                                        .filter(com.lastwave.app.data.artwork.ArtworkNormalizer::isRealImage).distinct()
+                                }
+                                var artworkIndex by remember(data) { mutableStateOf(0) }
+                                val artistArtwork = artworkCandidates.getOrNull(artworkIndex)
+                                if (artistArtwork != null) {
                                     AsyncImage(
-                                        model = data.artworkUrl,
+                                        model = artistArtwork,
                                         contentDescription = data.name,
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize(),
+                                        onError = { artworkIndex++ },
                                     )
                                 } else {
                                     Surface(

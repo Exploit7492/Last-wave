@@ -23,7 +23,7 @@ import java.net.URLEncoder
 import javax.inject.Inject
 import javax.inject.Singleton
 
-enum class SearchTab { TRACKS, ARTISTS, ALBUMS, USERS }
+enum class SearchTab { TRACKS, ARTISTS, ALBUMS, PLAYLISTS, USERS }
 
 @Immutable
 data class SearchResultItem(
@@ -38,7 +38,7 @@ data class SearchResultItem(
 )
 
 /**
- * Account-free YouTube Music search for songs, artists and albums. Last.fm
+ * Account-free YouTube Music search for songs, artists, albums and playlists. Last.fm
  * is used only for its explicitly labelled exact-user lookup tab.
  */
 @Singleton
@@ -100,6 +100,15 @@ class SearchRepository @Inject constructor(
                     artworkUrl = album.artworkUrl,
                     subtitle = album.subtitle,
                     entityId = album.browseId,
+                )
+            }
+            SearchTab.PLAYLISTS -> innerTube.searchPlaylists(query).map { playlist ->
+                SearchResultItem(
+                    name = playlist.title,
+                    artist = playlist.author,
+                    artworkUrl = playlist.artworkUrl,
+                    subtitle = playlist.author?.takeIf(String::isNotBlank) ?: "YouTube Music playlist",
+                    entityId = playlist.id,
                 )
             }
             SearchTab.USERS -> {

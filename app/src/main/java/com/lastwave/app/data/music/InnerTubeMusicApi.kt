@@ -268,17 +268,26 @@ class InnerTubeMusicApi @Inject constructor(
 
         val trackLimit = maxTracks?.coerceAtLeast(1)
         val songs = mutableListOf<YouTubeMusicTrack>()
-        val initialSongs = parseSongRenderers(root).let { parsed ->
+        val playlistPage = browseId.startsWith("VL")
+        fun trackContainers(page: JsonElement): List<JsonElement> =
+            if (playlistPage) playlistTrackContainers(page) else listOf(page)
+        val containers = trackContainers(root)
+        if (containers.isEmpty()) return@withContext null
+        val initialSongs = containers.flatMap(::parseSongRenderers).distinctBy { it.videoId }.let { parsed ->
             trackLimit?.let { parsed.take(it) } ?: parsed
         }
         songs += initialSongs
-        if (songs.isNotEmpty()) {
-            onPageLoaded?.invoke(songs.toList())
-        }
 
         // Follow continuation pages until gone. Safety cap is enormous on
         // purpose (60k tracks) — it only exists to bound a pathological loop.
-        var token = playlistShelfContinuationToken(root)
+        fun continuation(containers: List<JsonElement>): String? = containers.firstNotNullOfOrNull {
+            if (playlistPage) playlistTrackContinuationToken(it) else genericContinuationToken(it)
+        }
+        var token = continuation(containers)
+        if (trackLimit != null && songs.isNotEmpty()) {
+            onPageLoaded?.invoke(songs.toList())
+        }
+        val seenTokens = mutableSetOf<String>()
         var page = 0
         while (
             !token.isNullOrBlank() &&
@@ -286,21 +295,24 @@ class InnerTubeMusicApi @Inject constructor(
             (trackLimit == null || songs.size < trackLimit)
         ) {
             val currentToken = token ?: break
+            if (!seenTokens.add(currentToken)) return@withContext null
             val nextPage = runCatching {
-                browseContinuation(browseId, currentToken, authenticated = authenticatedAs)
-            }.getOrNull() ?: break
-            val pageSongs = parseSongRenderers(nextPage)
-            if (pageSongs.isEmpty()) break
+                browseContinuation(currentToken, authenticated = authenticatedAs)
+            }.getOrNull() ?: return@withContext null
+            val pageContainers = trackContainers(nextPage)
+            if (pageContainers.isEmpty()) return@withContext null
+            val pageSongs = pageContainers.flatMap(::parseSongRenderers)
             val knownVideoIds = songs.mapTo(mutableSetOf()) { it.videoId }
             val newSongs = pageSongs
-                .filterNot { it.videoId in knownVideoIds }
+                .filter { knownVideoIds.add(it.videoId) }
                 .let { parsed -> trackLimit?.let { parsed.take(it - songs.size) } ?: parsed }
-            if (newSongs.isEmpty()) break
             songs += newSongs
-            onPageLoaded?.invoke(songs.toList())
-            token = playlistShelfContinuationToken(nextPage)
+            if (trackLimit != null) onPageLoaded?.invoke(songs.toList())
+            token = continuation(pageContainers)
             page++
         }
+        if (!token.isNullOrBlank() && (trackLimit == null || songs.size < trackLimit)) return@withContext null
+        if (trackLimit == null && songs.isNotEmpty()) onPageLoaded?.invoke(songs.toList())
 
         songs.take(3).forEach { prefetchStream(it.videoId) }
         YouTubePlaylistResult(
@@ -494,7 +506,7 @@ class InnerTubeMusicApi @Inject constructor(
 
     suspend fun fetchNewReleases(): List<YouTubePlaylistSummary> = withContext(Dispatchers.IO) {
         runCatching {
-            val root = browseRoot(YT_NEW_RELEASES_BROWSE_ID, authenticated = false)
+            val root = browseRoot(YT_NEW_RELEASES_BROWSE_ID, authenticated = ytAuth.connection.value.isConnected)
             parsePlaylistRenderers(root)
         }.getOrDefault(emptyList())
     }
@@ -670,8 +682,8 @@ class InnerTubeMusicApi @Inject constructor(
                 ?.joinToString("") { it.asObject()?.string("text").orEmpty() }
             ?: "Playlist"
 
-        val shelves = mutableListOf<JsonObject>()
-        collectObjects(root, "musicPlaylistShelfRenderer", shelves)
+        val shelves = playlistTrackContainers(root)
+        if (shelves.isEmpty()) return@withContext null
 
         val items = mutableListOf<YtOwnedPlaylistItem>()
         val seenEntries = mutableSetOf<String>()
@@ -691,21 +703,25 @@ class InnerTubeMusicApi @Inject constructor(
             }
         }
         shelves.forEach(::absorb)
-        if (shelves.isEmpty()) absorb(root)
 
-        var token = playlistShelfContinuationToken(root)
+        var token = shelves.firstNotNullOfOrNull(::playlistTrackContinuationToken)
+        val seenTokens = mutableSetOf<String>()
         var page = 0
         fun targetFound() = stopAfterVideoId != null && items.any {
             it.videoId == stopAfterVideoId && !it.setVideoId.isNullOrBlank()
         }
         while (!targetFound() && !token.isNullOrBlank() && page < MAX_CONTINUATION_PAGES) {
             val currentToken = token ?: break
-            val nextPage = runCatching { browseContinuation(browseId, currentToken, authenticated = true) }
-                .getOrNull() ?: break
-            absorb(nextPage)
-            token = playlistShelfContinuationToken(nextPage)
+            if (!seenTokens.add(currentToken)) return@withContext null
+            val nextPage = runCatching { browseContinuation(currentToken, authenticated = true) }
+                .getOrNull() ?: return@withContext null
+            val pageContainers = playlistTrackContainers(nextPage)
+            if (pageContainers.isEmpty()) return@withContext null
+            pageContainers.forEach(::absorb)
+            token = pageContainers.firstNotNullOfOrNull(::playlistTrackContinuationToken)
             page++
         }
+        if (!targetFound() && !token.isNullOrBlank()) return@withContext null
 
         YtOwnedPlaylist(id = rawId, title = title, items = items)
     }
@@ -748,13 +764,12 @@ class InnerTubeMusicApi @Inject constructor(
         )
     }
 
-    private suspend fun browseContinuation(browseId: String, token: String, authenticated: Boolean): JsonObject {
+    private suspend fun browseContinuation(token: String, authenticated: Boolean): JsonObject {
         val config = getWebConfig()
         return post(
             url = "$MUSIC_API/browse?key=${config.apiKey}&prettyPrint=false",
             body = buildJsonObject {
                 put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
-                put("browseId", browseId)
                 put("continuation", token)
             },
             clientName = "WEB_REMIX",
@@ -764,17 +779,42 @@ class InnerTubeMusicApi @Inject constructor(
         )
     }
 
-    /** Continuation of the playlist track shelf specifically (not other shelves). */
-    private fun playlistShelfContinuationToken(root: JsonElement): String? {
+    /** Only playlist rows and their continuation, excluding recommendation shelves. */
+    private fun playlistTrackContainers(root: JsonElement): List<JsonElement> {
         val shelves = mutableListOf<JsonObject>()
         collectObjects(root, "musicPlaylistShelfRenderer", shelves)
-        for (shelf in shelves) {
-            val continuations = shelf.array("continuations") ?: continue
-            val token = continuations.firstOrNull()?.asObject()
-                ?.obj("nextContinuationData")?.string("continuation")
-            if (!token.isNullOrBlank()) return token
+        collectObjects(root, "musicPlaylistShelfContinuation", shelves)
+        collectObjects(root, "playlistVideoListRenderer", shelves)
+        collectObjects(root, "playlistVideoListContinuation", shelves)
+        if (shelves.isNotEmpty()) return shelves
+
+        val continuations = root.obj("continuationContents")
+        continuations?.obj("musicShelfContinuation")?.let { return listOf(it) }
+        return listOf("onResponseReceivedActions", "onResponseReceivedEndpoints", "onResponseReceivedCommands")
+            .flatMap { key -> root.array(key).orEmpty() }
+            .mapNotNull { action ->
+                (action.obj("appendContinuationItemsAction") ?: action.obj("reloadContinuationItemsCommand"))
+                    ?.array("continuationItems")
+            }
+    }
+
+    private fun playlistTrackContinuationToken(container: JsonElement): String? {
+        val contents = (container as? JsonArray) ?: container.array("contents")
+        val endpoint = contents?.lastOrNull()?.obj("continuationItemRenderer")?.obj("continuationEndpoint")
+        if (endpoint != null) {
+            val commands = mutableListOf<JsonObject>()
+            collectObjects(endpoint, "continuationCommand", commands)
+            commands.firstNotNullOfOrNull { command ->
+                command.string("token")?.takeIf {
+                    it.isNotBlank() && command.string("request").let { request ->
+                        request == null || request == "CONTINUATION_REQUEST_TYPE_BROWSE"
+                    }
+                }
+            }?.let { return it }
         }
-        return genericContinuationToken(root)
+        return container.array("continuations")?.firstNotNullOfOrNull {
+            it.obj("nextContinuationData")?.string("continuation")?.takeIf(String::isNotBlank)
+        } ?: genericContinuationToken(container)
     }
 
     /** First continuation token anywhere in the tree (grid/list fallbacks). */
@@ -910,7 +950,9 @@ class InnerTubeMusicApi @Inject constructor(
             ?: bannerThumbs
 
         val artworkUrl = avatarThumbs?.lastOrNull()?.asObject()?.string("url")?.highResolutionArtwork()
+            ?: header?.let(::extractThumbnailsUrl)
         val bannerUrl = bannerThumbs?.lastOrNull()?.asObject()?.string("url")?.highResolutionArtwork()
+            ?: artworkUrl
 
         val shelves = mutableListOf<JsonObject>()
         collectObjects(root, "musicShelfRenderer", shelves)
@@ -1049,7 +1091,6 @@ class InnerTubeMusicApi @Inject constructor(
         val releaseYear = subRuns.mapNotNull { it.string("text") }.firstOrNull { it.trim().matches(Regex("^(19|20)\\d{2}$")) }
 
         val secondSubtitleRuns = header?.obj("secondSubtitle")?.array("runs")?.mapNotNull { it.asObject()?.string("text") }.orEmpty()
-        val trackCountText = secondSubtitleRuns.firstOrNull { "song" in it.lowercase() || "track" in it.lowercase() }
         val durationText = secondSubtitleRuns.firstOrNull { "min" in it.lowercase() || "hour" in it.lowercase() || "sec" in it.lowercase() }
 
         val descRuns = header?.obj("description")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
@@ -1059,8 +1100,8 @@ class InnerTubeMusicApi @Inject constructor(
             ?: header?.obj("thumbnail")?.array("thumbnails")
         val artworkUrl = thumbs?.lastOrNull()?.asObject()?.string("url")?.highResolutionArtwork()
 
-        val parsedSongs = parseSongRenderers(root)
-        val tracks = parsedSongs.map { track ->
+        val songPages = collectBrowseSongPages(root, limit = null)
+        val tracks = songPages.tracks.map { track ->
             com.lastwave.app.playback.PlayableTrack(
                 title = track.title,
                 artist = track.artist.takeUnless { it == "Unknown artist" } ?: artist,
@@ -1091,7 +1132,7 @@ class InnerTubeMusicApi @Inject constructor(
             browseId = browseId,
             artworkUrl = artworkUrl,
             releaseYear = releaseYear,
-            trackCountText = trackCountText ?: "${tracks.size} songs",
+            trackCountText = if (songPages.isComplete) "${tracks.size} songs" else null,
             durationText = durationText,
             description = descRuns?.takeIf(String::isNotBlank),
             tracks = tracks,
@@ -1167,6 +1208,14 @@ class InnerTubeMusicApi @Inject constructor(
             clientVersion = config.clientVersion,
             userAgent = WEB_USER_AGENT,
         )
+        val result = collectBrowseSongPages(root, limit).tracks
+        result.take(2).forEach { prefetchStream(it.videoId) }
+        result
+    }
+
+    private data class BrowseSongPages(val tracks: List<YouTubeMusicTrack>, val isComplete: Boolean)
+
+    private suspend fun collectBrowseSongPages(root: JsonElement, limit: Int?): BrowseSongPages {
         val shelves = mutableListOf<JsonObject>()
         collectObjects(root, "musicShelfRenderer", shelves)
         collectObjects(root, "musicPlaylistShelfRenderer", shelves)
@@ -1178,28 +1227,28 @@ class InnerTubeMusicApi @Inject constructor(
 
         val songs = mutableListOf<YouTubeMusicTrack>()
         songs.addAll(parseSongRenderers(primaryShelf ?: root))
+        if (primaryShelf == null) return BrowseSongPages(songs.take(limit ?: songs.size), isComplete = false)
 
-        // Follow continuations to collect every song by the artist
-        var token = playlistShelfContinuationToken(root)
+        var token = playlistTrackContinuationToken(primaryShelf)
+        val seenTokens = mutableSetOf<String>()
+        val knownVideoIds = songs.mapTo(mutableSetOf()) { it.videoId }
         var page = 0
         while (!token.isNullOrBlank() && page < MAX_CONTINUATION_PAGES && (limit == null || songs.size < limit)) {
             val currentToken = token ?: break
+            if (!seenTokens.add(currentToken)) break
             val nextPage = runCatching {
-                browseContinuation(browseId, currentToken, authenticated = false)
+                browseContinuation(currentToken, authenticated = false)
             }.getOrNull() ?: break
-            val pageSongs = parseSongRenderers(nextPage)
-            if (pageSongs.isEmpty()) break
-            val knownVideoIds = songs.mapTo(mutableSetOf()) { it.videoId }
-            val newSongs = pageSongs.filterNot { it.videoId in knownVideoIds }
-            if (newSongs.isEmpty()) break
-            songs.addAll(newSongs)
-            token = playlistShelfContinuationToken(nextPage)
+            val containers = playlistTrackContainers(nextPage)
+            if (containers.isEmpty()) break
+            val pageSongs = containers.flatMap(::parseSongRenderers)
+            songs.addAll(pageSongs.filter { knownVideoIds.add(it.videoId) })
+            token = containers.firstNotNullOfOrNull(::playlistTrackContinuationToken)
             page++
         }
 
         val result = if (limit != null) songs.take(limit) else songs
-        result.take(2).forEach { prefetchStream(it.videoId) }
-        result
+        return BrowseSongPages(result, token.isNullOrBlank() && result.size == songs.size)
     }
 
     private suspend fun searchEntities(
@@ -2307,7 +2356,10 @@ class InnerTubeMusicApi @Inject constructor(
             val subtitleRuns = renderer.array("flexColumns")?.getOrNull(1)?.asObject()
                 ?.obj("musicResponsiveListItemFlexColumnRenderer")?.obj("text")?.array("runs")
                 ?: renderer.obj("subtitle")?.array("runs")
-            val author = subtitleRuns?.firstOrNull()?.asObject()?.string("text")
+            val author = subtitleRuns?.firstOrNull {
+                it.obj("navigationEndpoint")?.obj("browseEndpoint")?.string("browseId")?.startsWith("UC") == true
+            }?.string("text") ?: subtitleRuns?.firstOrNull()?.string("text")
+                ?.takeUnless { it.equals("Playlist", ignoreCase = true) }
 
             val trackCountText = subtitleRuns?.mapNotNull { it.asObject()?.string("text") }?.lastOrNull { "song" in it.lowercase() || "track" in it.lowercase() }
 
@@ -2432,10 +2484,13 @@ class InnerTubeMusicApi @Inject constructor(
         .replace(FEATURING_CLAUSE, " ")
         .replace(VERSION_CLAUSE, " ")
 
-    private fun String.highResolutionArtwork(): String = when {
-        (contains("googleusercontent.com") || contains("ggpht.com")) && '=' in this ->
-            substringBeforeLast('=') + "=w512-h512-l90-rj"
-        else -> this
+    private fun String.highResolutionArtwork(): String {
+        val url = if (startsWith("//")) "https:$this" else this
+        return when {
+            (url.contains("googleusercontent.com") || url.contains("ggpht.com")) && '=' in url ->
+                url.substringBeforeLast('=') + "=w512-h512-l90-rj"
+            else -> url
+        }
     }
 
     private fun normalize(value: String): String = Normalizer.normalize(value.lowercase(), Normalizer.Form.NFD)

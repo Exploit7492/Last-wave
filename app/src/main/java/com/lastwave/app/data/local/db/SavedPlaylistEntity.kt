@@ -46,6 +46,9 @@ interface SavedPlaylistDao {
     @Upsert
     suspend fun upsert(entity: SavedPlaylistEntity)
 
+    @Query("UPDATE saved_playlists SET tracksJson = :tracksJson WHERE id = :id AND tracksJson = :expectedTracksJson")
+    suspend fun updateTracksIfUnchanged(id: Long, expectedTracksJson: String, tracksJson: String): Int
+
     @Upsert
     suspend fun upsertAll(entities: List<SavedPlaylistEntity>)
 

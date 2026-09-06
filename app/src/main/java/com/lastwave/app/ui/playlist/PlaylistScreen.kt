@@ -158,7 +158,11 @@ fun PlaylistScreen(
             var sortMenuExpanded by remember { mutableStateOf(false) }
             ExpressiveHeader(
                 title = "Playlist",
-                subtitle = "${state.playlists.size} Playlists \u00b7 ${state.playlists.sumOf { it.remoteTrackCount ?: it.tracks.size }} Tracks",
+                subtitle = if (state.playlists.any { it.isYouTubeOnly && it.remoteTrackCount == null }) {
+                    "${state.playlists.size} Playlists"
+                } else {
+                    "${state.playlists.size} Playlists \u00b7 ${state.playlists.sumOf { it.remoteTrackCount ?: it.tracks.size }} Tracks"
+                },
                 actions = {
                     IconButton(
                         onClick = viewModel::openCreateDialog,

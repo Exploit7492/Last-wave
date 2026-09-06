@@ -42,6 +42,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -55,13 +56,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextMotion
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.lyrics.LyricLine
+import com.lastwave.app.data.lyrics.isRtlText
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.MusicPlayerState
 import com.lastwave.app.playback.PlaybackProgressState
@@ -168,8 +172,13 @@ fun ModernLyricsPanel(
                             onRetry = onRetry,
                         )
                     } else if (targetState.isSynced && targetState.lines.isNotEmpty()) {
-                        val syncedLyrics = remember(targetState.lines, track.title, track.artist) {
-                            targetState.lines.toSyncedLyrics(track.title, track.artist)
+                        val isOverallRtl = remember(targetState.lines) {
+                            val meaningful = targetState.lines.filter { it.text.isNotBlank() && it.text != "♪" }
+                            if (meaningful.isEmpty()) false
+                            else meaningful.count { it.isRtl } > meaningful.size / 2
+                        }
+                        val syncedLyrics = remember(targetState.lines, track.title, track.artist, isOverallRtl) {
+                            targetState.lines.toSyncedLyrics(track.title, track.artist, isOverallRtl)
                         }
 
                         val initialLineIndex = remember(syncedLyrics) {
@@ -179,30 +188,33 @@ fun ModernLyricsPanel(
                         }
                         val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialLineIndex)
 
-                        KaraokeLyricsView(
-                            listState = listState,
-                            lyrics = syncedLyrics,
-                            showTranslation = true,
-                            showPhonetic = true,
-                            currentPosition = { smoothedPositionMs.toInt() },
-                            onLineClicked = { line ->
-                                player.seekTo(line.start.toLong())
-                            },
-                            onLinePressed = {},
-                            modifier = Modifier.fillMaxSize(),
-                            offset = 64.dp,
-                            normalLineTextStyle = LocalTextStyle.current.copy(
-                                fontSize = 34.sp,
-                                fontWeight = FontWeight.Black,
-                                textMotion = TextMotion.Animated,
-                            ),
-                            accompanimentLineTextStyle = LocalTextStyle.current.copy(
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                textMotion = TextMotion.Animated,
-                            ),
-                            textColor = Color.White,
-                        )
+                        val layoutDirection = if (isOverallRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
+                        CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
+                            KaraokeLyricsView(
+                                listState = listState,
+                                lyrics = syncedLyrics,
+                                showTranslation = true,
+                                showPhonetic = true,
+                                currentPosition = { smoothedPositionMs.toInt() },
+                                onLineClicked = { line ->
+                                    player.seekTo(line.start.toLong())
+                                },
+                                onLinePressed = {},
+                                modifier = Modifier.fillMaxSize(),
+                                offset = 64.dp,
+                                normalLineTextStyle = LocalTextStyle.current.copy(
+                                    fontSize = 34.sp,
+                                    fontWeight = FontWeight.Black,
+                                    textMotion = TextMotion.Animated,
+                                ),
+                                accompanimentLineTextStyle = LocalTextStyle.current.copy(
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    textMotion = TextMotion.Animated,
+                                ),
+                                textColor = Color.White,
+                            )
+                        }
                     } else if (!targetState.plainLyrics.isNullOrBlank()) {
                         ModernPlainLyricsView(
                             plainLyrics = targetState.plainLyrics,
@@ -237,11 +249,13 @@ fun ModernLyricsPanel(
     }
 }
 
-private fun LyricLine.toISyncedLine(): ISyncedLine {
+private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine {
     val lineStart = timeMs.toInt()
     val lineEnd = if (durationMs > 0) (timeMs + durationMs).toInt()
     else if (syllables.isNotEmpty()) (syllables.last().timeMs + syllables.last().durationMs).toInt()
     else lineStart + 1500
+
+    val isLineRtl = isRtl || (isOverallRtl && (text.isBlank() || text == "♪"))
 
     return if (hasSyllables) {
         KaraokeLine.MainKaraokeLine(
@@ -256,7 +270,7 @@ private fun LyricLine.toISyncedLine(): ISyncedLine {
             },
             translation = null,
             phonetic = transliteration,
-            alignment = KaraokeAlignment.Unspecified,
+            alignment = if (isLineRtl) KaraokeAlignment.End else KaraokeAlignment.Start,
             start = lineStart,
             end = lineEnd.coerceAtLeast(lineStart),
         )
@@ -270,9 +284,9 @@ private fun LyricLine.toISyncedLine(): ISyncedLine {
     }
 }
 
-private fun List<LyricLine>.toSyncedLyrics(title: String, artist: String): SyncedLyrics {
+private fun List<LyricLine>.toSyncedLyrics(title: String, artist: String, isOverallRtl: Boolean = false): SyncedLyrics {
     return SyncedLyrics(
-        lines = map { it.toISyncedLine() },
+        lines = map { it.toISyncedLine(isOverallRtl) },
         title = title,
         artists = listOf(Artist(type = "artist", name = artist)),
     )
@@ -283,40 +297,46 @@ private fun ModernPlainLyricsView(
     plainLyrics: String,
     modifier: Modifier = Modifier,
 ) {
-    val scrollState = rememberScrollState()
-    Column(
-        modifier = modifier
-            .verticalScroll(scrollState)
-            .padding(top = 24.dp, bottom = 90.dp, start = 16.dp, end = 16.dp),
-    ) {
-        Row(
-            modifier = Modifier.padding(bottom = 20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+    val isRtl = remember(plainLyrics) { isRtlText(plainLyrics) }
+    val layoutDirection = if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
+    CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
+        val scrollState = rememberScrollState()
+        Column(
+            modifier = modifier
+                .verticalScroll(scrollState)
+                .padding(top = 24.dp, bottom = 90.dp, start = 16.dp, end = 16.dp),
         ) {
-            Icon(
-                Icons.Filled.SyncDisabled,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
+            Row(
+                modifier = Modifier.padding(bottom = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    Icons.Filled.SyncDisabled,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    "Lyrics not time-synced",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             Text(
-                "Lyrics not time-synced",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = plainLyrics,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = 19.sp,
+                    lineHeight = 32.sp,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.1.sp,
+                ),
+                textAlign = TextAlign.Start,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.94f),
+                modifier = Modifier.fillMaxWidth(),
             )
         }
-
-        Text(
-            text = plainLyrics,
-            style = MaterialTheme.typography.bodyLarge.copy(
-                fontSize = 19.sp,
-                lineHeight = 32.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 0.1.sp,
-            ),
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.94f),
-        )
     }
 }
 

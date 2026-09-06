@@ -351,7 +351,7 @@ class PlaylistViewModel @Inject constructor(
                 current.copy(
                     detailPlaylist = before.copy(
                         tracks = before.tracks.filterIndexed { trackIndex, _ -> trackIndex != index },
-                        remoteTrackCount = (before.remoteTrackCount ?: before.tracks.size).let { maxOf(0, it - 1) },
+                        remoteTrackCount = before.remoteTrackCount?.let { maxOf(0, it - 1) },
                     ),
                 )
             }

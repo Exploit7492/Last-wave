@@ -401,6 +401,10 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!promoteForPlayback()) return START_NOT_STICKY
         when (intent?.action) {
+            Intent.ACTION_MEDIA_BUTTON -> androidx.media.session.MediaButtonReceiver.handleIntent(mediaSession, intent)
+            MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH -> playCarSearch(
+                resolveCarSearchQuery(intent.getStringExtra(android.app.SearchManager.QUERY), intent.extras),
+            )
             ACTION_PREVIOUS -> musicPlayer.previous()
             ACTION_TOGGLE -> musicPlayer.togglePlayPause()
             ACTION_NEXT -> musicPlayer.next()

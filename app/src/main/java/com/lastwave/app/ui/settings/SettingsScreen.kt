@@ -758,7 +758,7 @@ fun SettingsScreen(
                             iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                             iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                             title = "Import Playlist from File",
-                            subtitle = "M3U, M3U8, or CSV exports (Spotify, Soundiiz, Apple Music)",
+                            subtitle = "CSV, TSV, M3U/M3U8, or TXT • uncertain tracks are skipped",
                             onClick = {
                                 runCatching {
                                     csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/csv", "audio/x-mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "*/*"))
@@ -3422,4 +3422,3 @@ private fun LyricsAnimationSheet(
         }
     }
 }
-

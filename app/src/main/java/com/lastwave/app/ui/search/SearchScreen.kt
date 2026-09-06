@@ -32,6 +32,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
@@ -122,6 +124,7 @@ fun SearchScreen(
     onBack: () -> Unit = {},
     onOpenArtist: (name: String, browseId: String?) -> Unit = { _, _ -> },
     onOpenAlbum: (title: String, artist: String, browseId: String?) -> Unit = { _, _, _ -> },
+    onOpenPlaylist: (playlistId: String) -> Unit = {},
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -460,6 +463,7 @@ fun SearchScreen(
                                                     when (state.tab) {
                                                         SearchTab.ARTISTS -> onOpenArtist(topResult.name, topResult.entityId)
                                                         SearchTab.ALBUMS -> onOpenAlbum(topResult.name, topResult.artist.orEmpty(), topResult.entityId)
+                                                        SearchTab.PLAYLISTS -> topResult.entityId?.let(onOpenPlaylist)
                                                         else -> viewModel.playResult(topResult)
                                                     }
                                                 },
@@ -468,7 +472,7 @@ fun SearchScreen(
                                                         SearchTab.TRACKS -> TrackMenuTarget.Track(topResult.name, topResult.artist.orEmpty(), topResult.url)
                                                         SearchTab.ARTISTS -> TrackMenuTarget.Artist(topResult.name, topResult.url)
                                                         SearchTab.ALBUMS -> TrackMenuTarget.Album(topResult.name, topResult.artist.orEmpty(), topResult.url)
-                                                        SearchTab.USERS -> null
+                                                        SearchTab.PLAYLISTS, SearchTab.USERS -> null
                                                     }
                                                 },
                                             )
@@ -493,6 +497,7 @@ fun SearchScreen(
                                                 when (state.tab) {
                                                     SearchTab.ARTISTS -> onOpenArtist(item.name, item.entityId)
                                                     SearchTab.ALBUMS -> onOpenAlbum(item.name, item.artist.orEmpty(), item.entityId)
+                                                    SearchTab.PLAYLISTS -> item.entityId?.let(onOpenPlaylist)
                                                     else -> viewModel.playResult(item)
                                                 }
                                             },
@@ -514,7 +519,7 @@ fun SearchScreen(
                                                     SearchTab.TRACKS -> TrackMenuTarget.Track(item.name, item.artist.orEmpty(), item.url)
                                                     SearchTab.ARTISTS -> TrackMenuTarget.Artist(item.name, item.url)
                                                     SearchTab.ALBUMS -> TrackMenuTarget.Album(item.name, item.artist.orEmpty(), item.url)
-                                                    SearchTab.USERS -> null
+                                                    SearchTab.PLAYLISTS, SearchTab.USERS -> null
                                                 }
                                             },
                                         )
@@ -582,6 +587,7 @@ private fun TopResultCard(
                 SearchTab.TRACKS -> if (isPlaying) Icons.Filled.GraphicEq else Icons.Filled.MusicNote
                 SearchTab.ARTISTS -> Icons.Filled.Person
                 SearchTab.ALBUMS -> Icons.Filled.Album
+                SearchTab.PLAYLISTS -> Icons.AutoMirrored.Filled.QueueMusic
                 SearchTab.USERS -> Icons.Filled.Person
             }
             Box(
@@ -614,6 +620,7 @@ private fun TopResultCard(
                             SearchTab.TRACKS -> "TOP SONG"
                             SearchTab.ARTISTS -> "TOP ARTIST"
                             SearchTab.ALBUMS -> "TOP ALBUM"
+                            SearchTab.PLAYLISTS -> "TOP PLAYLIST"
                             SearchTab.USERS -> "USER"
                         },
                         style = MaterialTheme.typography.labelSmall,
@@ -632,6 +639,7 @@ private fun TopResultCard(
                 val subtitle = when (tab) {
                     SearchTab.TRACKS -> item.artist.orEmpty()
                     SearchTab.ALBUMS -> item.artist.orEmpty()
+                    SearchTab.PLAYLISTS -> item.subtitle.orEmpty()
                     SearchTab.ARTISTS -> item.subtitle.orEmpty().ifBlank { "Artist" }
                     SearchTab.USERS -> item.artist.orEmpty()
                 }
@@ -657,8 +665,8 @@ private fun TopResultCard(
                 modifier = Modifier.size(46.dp),
             ) {
                 Icon(
-                    Icons.Filled.PlayArrow,
-                    contentDescription = "Play top result",
+                    if (tab == SearchTab.PLAYLISTS) Icons.AutoMirrored.Filled.ArrowForward else Icons.Filled.PlayArrow,
+                    contentDescription = if (tab == SearchTab.PLAYLISTS) "Open playlist" else "Play top result",
                     tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(26.dp),
                 )
@@ -829,6 +837,7 @@ private fun SearchResultRow(
             SearchTab.TRACKS -> if (isPlaying) Icons.Filled.GraphicEq else Icons.Filled.MusicNote
             SearchTab.ARTISTS -> Icons.Filled.Person
             SearchTab.ALBUMS -> Icons.Filled.Album
+            SearchTab.PLAYLISTS -> Icons.AutoMirrored.Filled.QueueMusic
             SearchTab.USERS -> Icons.Filled.Person
         }
         Box(modifier = Modifier.size(44.dp)) {
@@ -857,6 +866,7 @@ private fun SearchResultRow(
             val subtitle = when (tab) {
                 SearchTab.TRACKS -> listOfNotNull(item.artist, item.subtitle).joinToString(" \u00b7 ")
                 SearchTab.ALBUMS -> item.subtitle ?: item.artist.orEmpty()
+                SearchTab.PLAYLISTS -> item.subtitle.orEmpty()
                 SearchTab.ARTISTS -> item.subtitle.orEmpty()
                 SearchTab.USERS -> listOfNotNull(item.artist, item.listeners?.let { "$it scrobbles" }).joinToString(" \u00b7 ")
             }
@@ -871,7 +881,7 @@ private fun SearchResultRow(
             IconButton(onClick = { openLastFm("/+removefriend") }) {
                 Icon(Icons.Filled.PersonRemove, contentDescription = "Unfollow ${item.name} on Last.fm")
             }
-        } else {
+        } else if (tab != SearchTab.PLAYLISTS) {
             com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenu)
         }
     }
@@ -888,6 +898,7 @@ private fun SearchFilterPills(
         SearchTab.TRACKS to "Tracks",
         SearchTab.ARTISTS to "Artists",
         SearchTab.ALBUMS to "Albums",
+        SearchTab.PLAYLISTS to "Playlists",
         SearchTab.USERS to "Users",
     )
     Row(

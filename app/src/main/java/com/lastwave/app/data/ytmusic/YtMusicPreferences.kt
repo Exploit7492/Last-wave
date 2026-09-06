@@ -1,6 +1,5 @@
 package com.lastwave.app.data.ytmusic
 
-import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -13,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.MapSerializer
@@ -70,6 +70,7 @@ class YtMusicPreferences @Inject constructor(
     private val dataStore: DataStore<Preferences>,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+    internal val playlistSyncMutex = Mutex()
 
     val connection: Flow<YtConnection> = dataStore.data
         .recoverPreferences("YtMusicPreferences")
@@ -111,28 +112,28 @@ class YtMusicPreferences @Inject constructor(
         .recoverPreferences("YtMusicPreferences")
         .map { it.safeLong(LAST_SYNC_KEY) }
 
-    suspend fun mappings(): Map<Long, YtPlaylistMapping> =
-        withContext(Dispatchers.IO) {
-            dataStore.data.recoverPreferences("YtMusicPreferences").first().readSafely(MAPPINGS_KEY)?.let { raw ->
-                runCatching {
+    val playlistMappings: Flow<Map<Long, YtPlaylistMapping>> = dataStore.data
+        .recoverPreferences("YtMusicPreferences")
+        .map { prefs ->
+            runCatching {
+                prefs.readSafely(MAPPINGS_KEY)?.let { raw ->
                     json.decodeFromString<Map<String, YtPlaylistMapping>>(raw)
-                        .mapNotNull { (key, mapping) ->
-                            key.toLongOrNull()?.let { it to mapping }
-                        }.toMap()
-                }.getOrNull()
-            } ?: emptyMap()
+                        .mapNotNull { (key, mapping) -> key.toLongOrNull()?.let { it to mapping } }
+                        .toMap()
+                } ?: emptyMap()
+            }.getOrDefault(emptyMap())
         }
+
+    suspend fun mappings(): Map<Long, YtPlaylistMapping> = playlistMappings.first()
 
     suspend fun setMappings(mappings: Map<Long, YtPlaylistMapping>) {
         withContext(Dispatchers.IO) {
-            runCatching {
-                dataStore.edit { prefs ->
-                    prefs[MAPPINGS_KEY] = json.encodeToString(
-                        YtPlaylistMappingStringMapSerializer,
-                        mappings.mapKeys { (k, _) -> k.toString() },
-                    )
-                }
-            }.onFailure { Log.w(TAG, "Failed to persist YT playlist mappings", it) }
+            dataStore.edit { prefs ->
+                prefs[MAPPINGS_KEY] = json.encodeToString(
+                    YtPlaylistMappingStringMapSerializer,
+                    mappings.mapKeys { (k, _) -> k.toString() },
+                )
+            }
         }
     }
 

@@ -384,6 +384,9 @@ fun LastWaveNavHost(
                     onOpenAlbum = { title, artist, browseId ->
                         navController.navigate(Screen.AlbumDetail.createRoute(title, artist, browseId))
                     },
+                    onOpenPlaylist = { playlistId ->
+                        navController.navigate(Screen.FeedPlaylistDetail.createRoute(playlistId))
+                    },
                 )
             }
         }

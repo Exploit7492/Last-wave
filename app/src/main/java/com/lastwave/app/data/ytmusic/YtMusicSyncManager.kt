@@ -18,7 +18,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
@@ -72,7 +71,6 @@ class YtMusicSyncManager @Inject constructor(
     private val _state = MutableStateFlow<YtSyncState>(YtSyncState.Idle)
     val state: StateFlow<YtSyncState> = _state.asStateFlow()
 
-    private val syncMutex = Mutex()
     private val negativeMatchCache = ConcurrentHashMap<String, Long>()
     @Volatile private var started = false
 
@@ -107,7 +105,7 @@ class YtMusicSyncManager @Inject constructor(
      * One full reconcile pass. Returns false when skipped (not connected /
      * sync disabled / already running) or when it failed outright.
      */
-    suspend fun syncNow(reason: String = "manual"): Boolean = syncMutex.withLock {
+    suspend fun syncNow(reason: String = "manual"): Boolean = preferences.playlistSyncMutex.withLock {
         val conn = ytAuth.connection.value
         if (!conn.isConnected) {
             _state.value = YtSyncState.Idle
@@ -186,11 +184,13 @@ class YtMusicSyncManager @Inject constructor(
         var mapping = allMappings[playlist.id]
         var remoteId = mapping?.remotePlaylistId
 
-        // Verify an existing mapping still points at a real owned playlist;
-        // recreate if the remote was deleted out from under us.
-        var remote = remoteId?.let { runCatching { innerTube.fetchOwnedPlaylist(it) }.getOrNull() }
+        // A failed read is not evidence that the mapped playlist was deleted.
+        val remote = remoteId?.let {
+            innerTube.fetchOwnedPlaylist(it)
+                ?: throw IllegalStateException("Could not read linked YouTube Music playlist")
+        }
         var mutatedRemote = false
-        if (remote == null) {
+        if (remoteId == null) {
             remoteId = innerTube.createRemotePlaylist(playlist.title)
                 ?: throw IllegalStateException("Could not create YouTube Music playlist")
             mapping = YtPlaylistMapping(remoteId, playlist.title)
@@ -244,11 +244,11 @@ class YtMusicSyncManager @Inject constructor(
         // Fresh read-back only when we mutated the remote this pass (create /
         // rename); otherwise the top verification fetch is already current.
         val currentRemote = if (mutatedRemote) {
-            runCatching { innerTube.fetchOwnedPlaylist(remoteId) }.getOrNull() ?: remote
+            innerTube.fetchOwnedPlaylist(remoteId)
         } else {
             remote
-        }
-        val remoteItems = currentRemote?.items.orEmpty()
+        } ?: throw IllegalStateException("Could not read complete YouTube Music playlist")
+        val remoteItems = currentRemote.items
         val remoteVideoIds = remoteItems.map { it.videoId }
         val baseline = mapping?.lastSyncedVideoIds.orEmpty().toSet()
         val localSet = desiredVideoIds.toSet()
@@ -259,8 +259,15 @@ class YtMusicSyncManager @Inject constructor(
         // a removal instead of being resurrected by the unchanged copy.
         val removedLocally = baseline - localSet
         val removedRemotely = baseline - remoteSet
-        val finalSet = (baseline - removedLocally - removedRemotely) +
-            (localSet - baseline) + (remoteSet - baseline)
+        val finalSet = if (baseline.isEmpty()) {
+            // A newly linked mirror has no shared history yet; LastWave is
+            // authoritative for that first pass so stale remote entries do
+            // not get imported as random local songs.
+            localSet
+        } else {
+            (baseline - removedLocally - removedRemotely) +
+                (localSet - baseline) + (remoteSet - baseline)
+        }
         val finalVideoIds = buildList {
             desiredVideoIds.filterTo(this) { it in finalSet }
             remoteVideoIds.filterTo(this) { it in finalSet && it !in this }
@@ -268,7 +275,9 @@ class YtMusicSyncManager @Inject constructor(
 
         val toRemove = remoteItems
             .filter { it.videoId !in finalSet }
-            .mapNotNull { item -> item.setVideoId?.let { it to item.videoId } }
+            .map { item ->
+                checkNotNull(item.setVideoId) { "Missing YouTube Music removal token" } to item.videoId
+            }
         val toAdd = finalVideoIds.filter { it !in remoteSet }
 
         if (toRemove.isNotEmpty()) {
@@ -285,7 +294,9 @@ class YtMusicSyncManager @Inject constructor(
         // Pull account-side additions/removals into the local copy. Unmatched
         // local tracks are preserved because they have no reliable video ID.
         if (finalVideoIds != desiredVideoIds) {
-            val remoteMetadata = innerTube.fetchPlaylist(remoteId)?.tracks.orEmpty()
+            val remoteMetadata = checkNotNull(innerTube.fetchPlaylist(remoteId)) {
+                "Could not read YouTube Music track metadata"
+            }.tracks
                 .associateBy { it.videoId }
             val localByVideoId = resolvedVideoIds.mapIndexedNotNull { index, videoId ->
                 videoId?.let { it to playlist.tracks[index] }
@@ -299,10 +310,12 @@ class YtMusicSyncManager @Inject constructor(
                 finalVideoIds.filterNot { it in represented }.forEach { videoId ->
                     val track = localByVideoId[videoId]
                         ?: remoteMetadata[videoId]?.toGeneratedTrack()
-                    if (track != null) add(track)
+                    add(checkNotNull(track) { "Missing YouTube Music track metadata" })
                 }
             }
-            playlistRepository.replaceTracksForSync(playlist.id, mergedTracks)
+            checkNotNull(playlistRepository.replaceTracksForSync(playlist.id, mergedTracks, playlist.tracks)) {
+                "Playlist changed during sync; retry on the next pass"
+            }
         }
 
         allMappings[playlist.id] = (allMappings[playlist.id] ?: YtPlaylistMapping(remoteId, playlist.title))
