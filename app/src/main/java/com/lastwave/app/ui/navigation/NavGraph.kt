@@ -15,6 +15,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.lastwave.app.ui.theme.liquidGlassSource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -122,6 +123,7 @@ fun LastWaveNavHost(
 
     NavHost(
         navController = navController,
+        modifier = if (currentRoute == Screen.MainShell.route) Modifier else Modifier.liquidGlassSource(),
         startDestination = Screen.Splash.route,
         enterTransition = { ExpressiveMotion.forwardEnter() },
         exitTransition = { ExpressiveMotion.forwardExit() },

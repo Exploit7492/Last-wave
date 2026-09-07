@@ -5,7 +5,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -593,7 +592,6 @@ fun ArtistDetailScreen(
                                         },
                                         shape = RoundedCornerShape(24.dp),
                                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                                     ) {
                                         Row(
                                             modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),

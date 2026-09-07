@@ -65,6 +65,10 @@ import com.lastwave.app.ui.playlist.PlaylistScreen
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.ui.theme.LocalLiquidGlass
 import com.lastwave.app.ui.theme.liquidGlassChrome
+import com.lastwave.app.ui.theme.liquidGlassSource
+import com.lastwave.app.ui.theme.liquidGlassContainerColor
+import com.lastwave.app.ui.theme.LocalLiquidGlassOverlayBackdrop
+import com.lastwave.app.ui.theme.LiquidGlassPreset
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.launch
@@ -158,7 +162,7 @@ fun MainShell(
         HorizontalPager(
             state = pagerState,
             beyondViewportPageCount = 0,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().liquidGlassSource(),
         ) { page ->
             val isCurrent = page == pagerState.currentPage
             PredictiveBackScreen(
@@ -297,6 +301,7 @@ private fun FloatingNavBar(
     modifier: Modifier = Modifier,
 ) {
     val liquidGlass = LocalLiquidGlass.current
+    val backdrop = LocalLiquidGlassOverlayBackdrop.current
     Box(
         modifier = modifier
             .windowInsetsPadding(
@@ -312,10 +317,10 @@ private fun FloatingNavBar(
         ) {
             Surface(
                 shape = DockShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh, backdrop = backdrop),
                 tonalElevation = 6.dp,
                 shadowElevation = 12.dp,
-                modifier = Modifier.liquidGlassChrome(DockShape, liquidGlass),
+                modifier = Modifier.liquidGlassChrome(DockShape, liquidGlass, LiquidGlassPreset.BottomNavigation, backdrop),
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
@@ -348,12 +353,12 @@ private fun FloatingNavBar(
                     Spacer(Modifier.width(10.dp))
                     Surface(
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primaryContainer,
+                        color = liquidGlassContainerColor(MaterialTheme.colorScheme.primaryContainer, backdrop = backdrop),
                         shadowElevation = 10.dp,
                         tonalElevation = 4.dp,
                         modifier = Modifier
                             .size(56.dp)
-                            .liquidGlassChrome(CircleShape, liquidGlass)
+                            .liquidGlassChrome(CircleShape, liquidGlass, LiquidGlassPreset.FloatingControls, backdrop)
                             .clickable(onClick = onOpenGenerator),
                     ) {
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {

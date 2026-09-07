@@ -74,8 +74,11 @@ data class FeedSpotlight(
 data class FeedData(
     val isYtConnected: Boolean = false,
     val ytAccountName: String? = null,
+    val userName: String? = null,
     val hasYtRecommendations: Boolean = false,
     val hasYtMixes: Boolean = false,
+    val hasPersonalContent: Boolean = false,
+    val tasteTags: List<String> = emptyList(),
     val ytSuggestedPlaylists: List<YouTubePlaylistSummary> = emptyList(),
     val spotlight: FeedSpotlight? = null,
     val quickTiles: List<FeedQuickTile> = emptyList(),
@@ -90,7 +93,9 @@ data class FeedData(
     val ytLikedSongs: List<YouTubeMusicTrack> = emptyList(),
     val ytRecentSongs: List<YouTubeMusicTrack> = emptyList(),
     val becauseYouListenTo: FeedSectionData<YouTubeMusicTrack>? = null,
+    val freshFinds: List<YouTubeMusicTrack> = emptyList(),
     val friends: List<FriendEntry> = emptyList(),
+    val lastUpdatedMillis: Long = 0L,
 )
 
 @Singleton
@@ -101,7 +106,21 @@ class FeedRepository @Inject constructor(
     private val ytAuth: YtMusicAuthManager,
     private val playlistRepository: PlaylistRepository,
 ) {
-    suspend fun loadFeed(username: String?): FeedData = coroutineScope {
+    // Short-lived in-memory cache so tab switches / recompositions don't
+    // re-fire ~30 network calls. Pull-to-refresh bypasses it via forceRefresh.
+    private var cachedFeed: FeedData? = null
+    private var cachedKey: String? = null
+    private var cachedAtMillis: Long = 0L
+
+    suspend fun loadFeed(username: String?, forceRefresh: Boolean = false): FeedData = coroutineScope {
+        val connectionPre = runCatching { ytAuth.awaitLoadedConnection() }.getOrNull()
+        val cacheKey = "${username.orEmpty()}|${connectionPre?.accountName.orEmpty()}|${connectionPre?.isConnected}|${java.time.LocalDate.now().toEpochDay()}"
+        if (!forceRefresh) {
+            val hit = cachedFeed
+            if (hit != null && cachedKey == cacheKey && System.currentTimeMillis() - cachedAtMillis < 5L * 60 * 1000) {
+                return@coroutineScope hit
+            }
+        }
         val connection = ytAuth.awaitLoadedConnection()
         val isYtConnected = connection.isConnected
 
@@ -164,19 +183,76 @@ class FeedRepository @Inject constructor(
         val ytRecentSongs = ytTaste?.recentTracks.orEmpty()
         val ytQuickPicks = ytTaste?.feedTracks.orEmpty().ifEmpty { homeSongs }
 
+        val affinity = tasteProfile?.artistAffinity.orEmpty()
+        val daySeed = java.time.LocalDate.now().toEpochDay()
+        fun trackScore(t: YouTubeMusicTrack, index: Int, sourceBoost: Double): Double {
+            val keys = ArtistHelper.splitArtists(t.artist).map { it.trim().lowercase() }.ifEmpty { listOf(t.artist.trim().lowercase()) }
+            val aff = keys.maxOfOrNull { affinity[it] ?: 0.0 } ?: 0.0
+            val hasVideo = t.videoId.isNotBlank()
+            val hasArt = ArtworkNormalizer.isRealImage(t.artworkUrl)
+            val positionDecay = 1.0 / (1.0 + index / 9.0)
+            val jitter = kotlin.random.Random(daySeed * 31 + (t.title + t.artist).hashCode()).nextDouble()
+            return aff * 60.0 + sourceBoost * 14.0 * positionDecay +
+                (if (hasVideo) 10.0 else -6.0) + (if (hasArt) 4.0 else 0.0) + jitter * 3.0
+        }
+        fun <T> diversify(
+            items: List<T>,
+            artistOf: (T) -> String,
+            maxPerArtist: Int = 2,
+        ): List<T> {
+            val counts = mutableMapOf<String, Int>()
+            val out = ArrayList<T>(items.size)
+            val deferred = ArrayList<T>()
+            for (item in items) {
+                val key = ArtistHelper.splitArtists(artistOf(item)).firstOrNull()?.trim()?.lowercase()
+                    ?: artistOf(item).trim().lowercase()
+                if ((counts[key] ?: 0) < maxPerArtist) {
+                    counts[key] = (counts[key] ?: 0) + 1
+                    out.add(item)
+                } else deferred.add(item)
+            }
+            // Second pass fills remaining slots so shelves never look short.
+            for (item in deferred) {
+                val key = ArtistHelper.splitArtists(artistOf(item)).firstOrNull()?.trim()?.lowercase()
+                    ?: artistOf(item).trim().lowercase()
+                if ((counts[key] ?: 0) < maxPerArtist + 1) {
+                    counts[key] = (counts[key] ?: 0) + 1
+                    out.add(item)
+                }
+            }
+            return out
+        }
+
         val regularPicks = tasteProfile?.topTracksRaw.orEmpty().map {
             YouTubeMusicTrack(it.youtubeVideoIdOrNull().orEmpty(), it.name, it.artist, it.album, it.artworkUrl)
         }
-        val quickPicks = buildList {
-            repeat(15) { index ->
-                regularPicks.getOrNull(index)?.let { add(it) }
-                ytQuickPicks.getOrNull(index)?.let { add(it) }
-                ytLikedSongs.getOrNull(index)?.let { add(it) }
-            }
+        // Scored interleave: every source competes on affinity + freshness +
+        // playability instead of naive round-robin, then artist-capped so one
+        // act can't dominate the shelf. Daily jitter keeps the feed fresh but
+        // stable within the same day.
+        val quickCandidates = buildList {
+            ytQuickPicks.forEachIndexed { i, t -> add(t to trackScore(t, i, 3.0)) }
+            ytLikedSongs.forEachIndexed { i, t -> add(t to trackScore(t, i, 2.2)) }
+            ytRecentSongs.forEachIndexed { i, t -> add(t to trackScore(t, i, 1.6)) }
+            regularPicks.forEachIndexed { i, t -> add(t to trackScore(t, i, 2.6)) }
+            homeSongs.forEachIndexed { i, t -> add(t to trackScore(t, i, 1.2)) }
         }
+            .distinctBy { (t, _) -> t.artist.trim().lowercase() to t.title.trim().lowercase() }
+            .sortedByDescending { it.second }
+            .map { it.first }
+        val quickPicks = diversify(quickCandidates, YouTubeMusicTrack::artist, maxPerArtist = 2)
+            .take(18)
             .ifEmpty { charts }
             .distinctBy { it.artist.trim().lowercase() to it.title.trim().lowercase() }
             .take(15)
+
+        // Fresh finds: trending + home feed tracks OUTSIDE the user's known
+        // artists — the discovery shelf. Scored so real artwork + playable
+        // ids surface first.
+        val knownArtists = buildSet {
+            addAll(affinity.keys)
+            addAll(recentTracks.flatMap { ArtistHelper.splitArtists(it.artist.displayName) }.map { it.trim().lowercase() })
+        }
 
         val artistSignalTracks = ytRecentSongs + ytLikedSongs + ytQuickPicks + homeSongs + charts
         val ytArtistNames = (ytRecentSongs + ytLikedSongs)
@@ -198,7 +274,7 @@ class FeedRepository @Inject constructor(
                 rank?.let { release to it }
             }.sortedBy { it.second }.map { it.first }.distinctBy { it.id }.take(15)
         val topArtistNames = buildList {
-            repeat(maxOf(ytArtistNames.size, listeningArtists.size).coerceAtMost(10)) { index ->
+            repeat(maxOf(ytArtistNames.size, listeningArtists.size).coerceAtMost(8)) { index ->
                 ytArtistNames.getOrNull(index)?.let { add(it) }
                 listeningArtists.getOrNull(index)?.let { add(it) }
             }
@@ -208,7 +284,7 @@ class FeedRepository @Inject constructor(
             .flatMap(ArtistHelper::splitArtists)
             .filter { it.isNotBlank() && !it.equals("Unknown artist", ignoreCase = true) }
             .distinctBy { it.lowercase() }
-            .take(10)
+            .take(8)
 
         val topArtists = topArtistNames.map { name ->
             async(Dispatchers.IO) {
@@ -228,8 +304,9 @@ class FeedRepository @Inject constructor(
         }.awaitAll()
 
         val releaseYear = java.time.Year.now().value.toString()
-        val artistReleases = topArtists.filter { it.name.lowercase() in artistRanks }
-            .take(5).map { artist ->
+        val artistReleases = if (artistRanks.isEmpty()) emptyList() else topArtists
+            .filter { it.name.lowercase() in artistRanks }
+            .take(4).map { artist ->
                 async(Dispatchers.IO) {
                     val page = artist.browseId?.let { id ->
                         runCatching { innerTube.fetchArtistPage(id, artist.name) }.getOrNull()
@@ -244,30 +321,62 @@ class FeedRepository @Inject constructor(
             }.awaitAll().flatten()
         val newReleases = (matchedReleases + artistReleases).distinctBy { it.id }.take(15)
 
-        val heavyRotation = buildList {
-            repeat(15) { index ->
-                tasteProfile?.topTracksRaw?.getOrNull(index)?.let { add(it) }
-                ytLikedSongs.getOrNull(index)?.let {
-                    add(GeneratedTrack(it.title, it.artist, it.artworkUrl,
-                        url = "https://www.youtube.com/watch?v=${it.videoId}", album = it.album))
+        // Fresh-finds shelf resolved after artist signals exist so the
+        // known-artist exclusion is accurate.
+        val freshFinds = diversify(
+            (charts + homeSongs)
+                .distinctBy { it.videoId.ifBlank { it.title.lowercase() + "|" + it.artist.lowercase() } }
+                .filter { t ->
+                    val keys = ArtistHelper.splitArtists(t.artist).map { it.trim().lowercase() }
+                    keys.none { it in knownArtists } && t.videoId.isNotBlank()
                 }
-            }
-        }.distinctBy(GeneratedTrack::key).take(15)
+                .sortedWith(
+                    compareByDescending<YouTubeMusicTrack> { ArtworkNormalizer.isRealImage(it.artworkUrl) }
+                        .thenBy { ArtistHelper.splitArtists(it.artist).firstOrNull()?.lowercase() ?: it.artist.lowercase() },
+                ),
+            YouTubeMusicTrack::artist,
+            maxPerArtist = 1,
+        ).take(12)
 
-        val jumpBackIn = buildList {
-            repeat(15) { index ->
-                ytRecentSongs.getOrNull(index)?.let {
-                    add(RecentTrack(
+        // Heavy rotation blends long-term taste + liked signals, scored by
+        // affinity so the shelf reflects who you actually replay — not just
+        // list position.
+        val heavyCandidates = buildList {
+            tasteProfile?.topTracksRaw?.forEachIndexed { i, t ->
+                val aff = ArtistHelper.splitArtists(t.artist).maxOfOrNull { affinity[it.trim().lowercase()] ?: 0.0 } ?: 0.0
+                add(t to (aff * 40 + 20.0 / (1 + i / 6.0)))
+            }
+            ytLikedSongs.forEachIndexed { i, it ->
+                add(
+                    GeneratedTrack(
+                        it.title, it.artist, it.artworkUrl,
+                        url = "https://www.youtube.com/watch?v=${it.videoId}", album = it.album,
+                    ) to (12.0 / (1 + i / 6.0) + (affinity[it.artist.trim().lowercase()] ?: 0.0) * 30),
+                )
+            }
+        }.distinctBy { (t, _) -> t.key }
+            .sortedByDescending { it.second }
+            .map { it.first }
+        val heavyRotation = heavyCandidates.distinctBy(GeneratedTrack::key).take(15)
+
+        // Jump-back-in keeps true recency order (YT history first, then
+        // scrobbles) but dedupes and caps per artist so one binge doesn't
+        // fill the whole shelf.
+        val jumpCandidates = buildList {
+            ytRecentSongs.forEach {
+                add(
+                    RecentTrack(
                         name = it.title,
                         artist = ArtistRef(name = it.artist),
                         album = ArtistRef(name = it.album.orEmpty()),
                         image = it.artworkUrl?.let { url -> listOf(ImageDto(url, "extralarge")) }.orEmpty(),
                         url = "https://www.youtube.com/watch?v=${it.videoId}",
-                    ))
-                }
-                recentTracks.getOrNull(index)?.let { add(it) }
+                    ),
+                )
             }
-        }.distinctBy { it.artist.displayName.trim().lowercase() to it.name.trim().lowercase() }.take(15)
+            addAll(recentTracks)
+        }.distinctBy { it.artist.displayName.trim().lowercase() to it.name.trim().lowercase() }
+        val jumpBackIn = diversify(jumpCandidates, { it.artist.displayName }, maxPerArtist = 2).take(15)
 
         val albumArtworkRequests = Semaphore(4)
         val recentAlbums = buildList {
@@ -296,7 +405,7 @@ class FeedRepository @Inject constructor(
             }
         }
             .distinctBy { "${it.artist.trim().lowercase()}_${it.title.trim().lowercase()}" }
-            .take(14)
+            .take(12)
             .map { album ->
                 async(Dispatchers.IO) {
                     if (ArtworkNormalizer.isRealImage(album.artworkUrl)) album else albumArtworkRequests.withPermit {
@@ -313,8 +422,10 @@ class FeedRepository @Inject constructor(
                 }
             }.awaitAll()
 
-        // Spotlight artist banner
-        val topSpotlightArtist = topArtists.firstOrNull()
+        // Spotlight: highest-affinity artist with real artwork wins, so the
+        // hero always reflects current taste rather than list position.
+        val topSpotlightArtist = topArtists.maxByOrNull { affinity[it.name.trim().lowercase()] ?: 0.0 }
+            ?: topArtists.firstOrNull()
         val spotlight = if (topSpotlightArtist != null) {
             val topTrackTitle = heavyRotation
                 .firstOrNull { it.artist.equals(topSpotlightArtist.name, ignoreCase = true) }
@@ -332,7 +443,18 @@ class FeedRepository @Inject constructor(
         } else null
 
         val topArtist = topArtistNames.firstOrNull()
-        val personalRadioSeed = (ytRecentSongs + ytLikedSongs).firstOrNull()
+        // Affinity-weighted radio seed: the strongest known artist among
+        // recent + liked + top picks becomes "Because you listen to X".
+        fun seedScore(t: YouTubeMusicTrack, boost: Double): Double {
+            val aff = ArtistHelper.splitArtists(t.artist).maxOfOrNull { affinity[it.trim().lowercase()] ?: 0.0 } ?: 0.0
+            return aff * 50 + boost + (if (t.videoId.isNotBlank()) 8.0 else -10.0)
+        }
+        val seedCandidates = buildList {
+            ytRecentSongs.forEach { add(it to seedScore(it, 12.0)) }
+            ytLikedSongs.forEach { add(it to seedScore(it, 10.0)) }
+            quickPicks.take(6).forEach { add(it to seedScore(it, 6.0)) }
+        }.sortedByDescending { it.second }
+        val personalRadioSeed = seedCandidates.firstOrNull { it.first.videoId.isNotBlank() }?.first
             ?: heavyRotation.firstOrNull()?.takeIf { tasteProfile?.hasPersonalSignals == true }?.let { seed ->
                 try {
                     innerTube.findBestMatchOrNull(seed.name, seed.artist, prefetchStreams = false)
@@ -342,8 +464,9 @@ class FeedRepository @Inject constructor(
                     null
                 }
             }
-        val radioSeed = personalRadioSeed ?: (quickPicks + homeSongs + charts).firstOrNull()
-        val radioTracks = radioSeed?.let { seed ->
+        val radioSeed = personalRadioSeed ?: (quickPicks + homeSongs + charts).firstOrNull { it.videoId.isNotBlank() }
+            ?: (quickPicks + homeSongs + charts).firstOrNull()
+        val radioTracks = radioSeed?.takeIf { it.videoId.isNotBlank() }?.let { seed ->
             try {
                 innerTube.fetchRelatedSongs(seed.videoId, limit = 15, prefetchStreams = false)
             } catch (cancellation: CancellationException) {
@@ -362,7 +485,12 @@ class FeedRepository @Inject constructor(
                 emptyList()
             }
         } else emptyList()
-        val becauseSection = (radioTracks.ifEmpty { radioFallback })
+        val becauseTracks = diversify(
+            (radioTracks.ifEmpty { radioFallback }).distinctBy { it.videoId.ifBlank { it.title + "|" + it.artist } },
+            YouTubeMusicTrack::artist,
+            maxPerArtist = 2,
+        ).take(15)
+        val becauseSection = becauseTracks
             .takeIf { it.isNotEmpty() }
             ?.let { tracks ->
                 FeedSectionData(
@@ -396,16 +524,28 @@ class FeedRepository @Inject constructor(
             newReleases.firstOrNull()?.let {
                 add(FeedQuickTile(title = it.title, subtitle = it.author ?: "New Release", artworkUrl = it.artworkUrl, playlistId = it.id))
             }
-            charts.firstOrNull()?.let {
-                add(FeedQuickTile(title = it.title, subtitle = it.artist, artworkUrl = it.artworkUrl, actionVideoId = it.videoId))
+            run {
+                val pickedKeys = quickPicks.map { it.artist.trim().lowercase() to it.title.trim().lowercase() }.toSet()
+                val topChartTile = charts.firstOrNull { (it.artist.trim().lowercase() to it.title.trim().lowercase()) !in pickedKeys }
+                    ?: charts.firstOrNull()
+                topChartTile?.let {
+                    add(FeedQuickTile(title = it.title, subtitle = it.artist, artworkUrl = it.artworkUrl, actionVideoId = it.videoId))
+                }
             }
         }.distinctBy { it.localPlaylistId?.toString() ?: it.playlistId ?: it.actionVideoId }.take(6)
 
-        FeedData(
+        val tasteTags = tasteProfile?.topTags.orEmpty().take(8)
+        val hasPersonalContent = tasteProfile?.hasPersonalSignals == true ||
+            ytRecentSongs.isNotEmpty() || ytLikedSongs.isNotEmpty() || recentTracks.isNotEmpty()
+
+        val result = FeedData(
             isYtConnected = isYtConnected,
             ytAccountName = connection.accountName.takeIf { isYtConnected },
+            userName = username?.takeIf { it.isNotBlank() },
             hasYtRecommendations = ytTaste?.feedTracks?.isNotEmpty() == true,
             hasYtMixes = hasYtMixes,
+            hasPersonalContent = hasPersonalContent,
+            tasteTags = tasteTags,
             ytSuggestedPlaylists = ytSuggestedPlaylists,
             spotlight = spotlight,
             quickTiles = quickTiles,
@@ -420,8 +560,14 @@ class FeedRepository @Inject constructor(
             ytLikedSongs = ytLikedSongs,
             ytRecentSongs = ytRecentSongs,
             becauseYouListenTo = becauseSection,
+            freshFinds = freshFinds,
             friends = friends.take(10),
+            lastUpdatedMillis = System.currentTimeMillis(),
         )
+        cachedFeed = result
+        cachedKey = cacheKey
+        cachedAtMillis = System.currentTimeMillis()
+        result
     }
 
     private fun YouTubePlaylistSummary.isMixOrRadio(): Boolean = MIX_OR_RADIO_TITLE.containsMatchIn(title)

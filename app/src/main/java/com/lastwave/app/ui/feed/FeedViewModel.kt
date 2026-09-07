@@ -82,7 +82,7 @@ class FeedViewModel @Inject constructor(
             try {
                 val connection = ytAuth.awaitLoadedConnection()
                 val username = sessionPreferences.session.value.username.takeIf(String::isNotBlank)
-                val data = repository.loadFeed(username)
+                val data = repository.loadFeed(username, forceRefresh = refreshing)
                 ensureActive()
                 if (ytAuth.connection.value != connection ||
                     sessionPreferences.session.value.username.takeIf(String::isNotBlank) != username
@@ -110,6 +110,16 @@ class FeedViewModel @Inject constructor(
 
     fun playTrack(track: YouTubeMusicTrack, sourceLabel: String = "Feed") {
         musicPlayer.play(track.toPlayableTrack(), sourceLabel = sourceLabel, startRadio = true)
+    }
+
+    fun shuffleTracksQueue(tracks: List<YouTubeMusicTrack>, sourceLabel: String = "Feed") {
+        if (tracks.isEmpty()) return
+        val shuffled = tracks.shuffled()
+        musicPlayer.playQueue(
+            shuffled.map { it.toPlayableTrack() },
+            startIndex = 0,
+            sourceLabel = "$sourceLabel Shuffle",
+        )
     }
 
     fun playTracksQueue(tracks: List<YouTubeMusicTrack>, startIndex: Int = 0, sourceLabel: String = "Feed") {

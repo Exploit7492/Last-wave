@@ -5,6 +5,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
@@ -12,7 +13,7 @@ plugins {
 
 android {
     namespace = "com.lastwave.app"
-    compileSdk = 35
+    compileSdk = 36
 
     val localProps = Properties().apply {
         val localPropsFile = rootProject.file("local.properties")
@@ -183,9 +184,6 @@ android {
             version = "3.22.1"
         }
     }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
-    }
 
     packaging {
         resources {
@@ -229,6 +227,7 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
+    implementation(libs.kyant.backdrop)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
@@ -303,11 +302,7 @@ dependencies {
 configurations.all {
     resolutionStrategy.eachDependency {
         if (requested.group == "org.jetbrains.kotlin") {
-            if (requested.name.startsWith("kotlin-stdlib")) {
-                useVersion("2.1.21")
-            } else {
-                useVersion("1.9.24")
-            }
+            useVersion("2.2.21")
         }
         if (requested.group == "org.jetbrains.kotlinx" && requested.name.startsWith("kotlinx-coroutines")) {
             useVersion("1.8.1")

@@ -20,9 +20,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -1034,18 +1032,6 @@ private fun NativeTrackRow(
                         MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f),
                     ),
                 ),
-            )
-            .border(
-                BorderStroke(
-                    1.dp,
-                    Brush.horizontalGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.40f),
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        ),
-                    ),
-                ),
-                shape = RoundedCornerShape(14.dp),
             )
             .graphicsLayer {
                 scaleX = rowScale

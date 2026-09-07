@@ -1,7 +1,12 @@
 package com.lastwave.app.ui.feed
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
@@ -19,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -30,13 +36,17 @@ import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -57,12 +67,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -100,6 +113,7 @@ import com.lastwave.app.ui.player.PlayingWaveBars
 import com.lastwave.app.ui.shell.FloatingNavDefaults
 import com.lastwave.app.ui.theme.LocalLiquidGlass
 import com.lastwave.app.ui.theme.liquidGlassChrome
+import com.lastwave.app.ui.theme.liquidGlassContainerColor
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -124,8 +138,15 @@ fun FeedScreen(
         quickTiles.isNotEmpty() || mixes.isNotEmpty() || topArtists.isNotEmpty() ||
             quickPicks.isNotEmpty() || jumpBackIn.isNotEmpty() || recentAlbums.isNotEmpty() ||
             heavyRotation.isNotEmpty() || ytLikedSongs.isNotEmpty() || ytRecentSongs.isNotEmpty() ||
-            (becauseYouListenTo?.items?.isNotEmpty() == true) || spotlight != null ||
-            charts.isNotEmpty() || newReleases.isNotEmpty() || friends.isNotEmpty()
+            (becauseYouListenTo?.items?.isNotEmpty() == true) || freshFinds.isNotEmpty() ||
+            spotlight != null || charts.isNotEmpty() || newReleases.isNotEmpty() || friends.isNotEmpty()
+    }
+    val headerSubtitle = remember(state.feedData) {
+        val picks = state.feedData.quickPicks.size
+        val date = try {
+            java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMM d"))
+        } catch (_: Exception) { "" }
+        if (picks > 0) "$date · $picks picks for you" else date
     }
     LaunchedEffect(state.error, hasFeedContent) {
         val error = state.error ?: return@LaunchedEffect
@@ -146,7 +167,8 @@ fun FeedScreen(
                 .adaptiveContentWidth(maxWidth = 920.dp),
         ) {
             ExpressiveHeader(
-                title = "LastWave",
+                title = "Home",
+                subtitle = headerSubtitle.takeIf { it.isNotBlank() },
                 actions = {
                     HeaderActionIcon(Icons.Filled.Explore, "Discover Radar", onOpenDiscover)
                     HeaderActionIcon(Icons.Filled.Search, "Search", onOpenSearch)
@@ -162,9 +184,7 @@ fun FeedScreen(
                     .fillMaxWidth(),
             ) {
                 if (state.isLoading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    ExpressiveLoadingIndicator()
-                }
+                FeedLoadingSkeleton()
             } else if (!hasFeedContent) {
                 FeedEmptyState(
                     message = if (state.error != null) {
@@ -180,12 +200,22 @@ fun FeedScreen(
                     modifier = Modifier.fillMaxSize().safeHorizontalContentPadding(),
                     contentPadding = PaddingValues(
                         bottom = FloatingNavDefaults.contentBottomPadding(),
-                        top = 10.dp,
+                        top = 12.dp,
                     ),
-                    verticalArrangement = Arrangement.spacedBy(28.dp),
+                    verticalArrangement = Arrangement.spacedBy(24.dp),
                 ) {
-                    item(key = "welcome") {
-                        FeedWelcome(onOpenGenerator = onOpenGenerator)
+                    item(key = "hero") {
+                        ForYouHero(
+                            userName = state.feedData.userName ?: state.feedData.ytAccountName,
+                            quickPicks = state.feedData.quickPicks,
+                            topArtists = state.feedData.topArtists,
+                            tasteTags = state.feedData.tasteTags,
+                            spotlight = state.feedData.spotlight,
+                            hasPersonalContent = state.feedData.hasPersonalContent,
+                            onPlay = { viewModel.playTracksQueue(state.feedData.quickPicks, 0, "For You") },
+                            onShuffle = { viewModel.shuffleTracksQueue(state.feedData.quickPicks, "For You") },
+                            onOpenGenerator = onOpenGenerator,
+                        )
                     }
 
                     if (state.feedData.quickTiles.isNotEmpty()) {
@@ -203,13 +233,25 @@ fun FeedScreen(
                         }
                     }
 
+                    if (state.feedData.tasteTags.isNotEmpty()) {
+                        item(key = "taste_strip") {
+                            TasteStrip(
+                                tags = state.feedData.tasteTags,
+                                launching = state.launchingRadio,
+                                onTagClick = { tag -> viewModel.playDiscoveryQuery(tag.displayName(), tag) },
+                            )
+                        }
+                    }
+
                     if (state.feedData.quickPicks.isNotEmpty()) {
                         item(key = "quick_picks") {
                             val title = if (state.feedData.hasYtRecommendations) "Picked for you" else "Quick picks"
                             val subtitle = if (state.feedData.hasYtRecommendations) {
-                                "From your YouTube Music home"
+                                "From your YouTube Music home · updated daily"
+                            } else if (state.feedData.hasPersonalContent) {
+                                "Matched to your taste profile"
                             } else {
-                                "Songs worth playing now"
+                                "Trending songs worth playing now"
                             }
                             FeedSectionHeader(
                                 title = title,
@@ -217,6 +259,7 @@ fun FeedScreen(
                                 actionText = "Play all",
                                 actionIcon = Icons.Filled.PlayArrow,
                                 onActionClick = { viewModel.playTracksQueue(state.feedData.quickPicks, 0, "Quick Picks") },
+                                onShuffleClick = { viewModel.shuffleTracksQueue(state.feedData.quickPicks, "Quick Picks") },
                             )
                             QuickPicksRows(
                                 tracks = state.feedData.quickPicks,
@@ -237,18 +280,20 @@ fun FeedScreen(
                                 actionIcon = Icons.Filled.PlayArrow,
                                 onActionClick = { viewModel.playTracksQueue(state.feedData.ytLikedSongs, 0, "YouTube Liked") },
                             )
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 24.dp),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                modifier = Modifier.padding(top = 12.dp),
-                            ) {
-                                itemsIndexed(state.feedData.ytLikedSongs) { index, track ->
-                                    SongTrackCard(
-                                        track = track,
-                                        onClick = { viewModel.playTracksQueue(state.feedData.ytLikedSongs, index, "YouTube Liked") },
-                                    )
-                                }
-                            }
+                            FeedMediaRow(
+                                content = {
+                                    itemsIndexed(state.feedData.ytLikedSongs) { index, track ->
+                                        FeedMediaCard(
+                                            title = track.title,
+                                            subtitle = track.artist,
+                                            artworkUrl = track.artworkUrl,
+                                            fallbackIcon = Icons.Filled.Favorite,
+                                            onClick = { viewModel.playTracksQueue(state.feedData.ytLikedSongs, index, "YouTube Liked") },
+                                            onPlayClick = { viewModel.playTracksQueue(state.feedData.ytLikedSongs, index, "YouTube Liked") },
+                                        )
+                                    }
+                                },
+                            )
                         }
                     }
 
@@ -261,18 +306,20 @@ fun FeedScreen(
                                 actionIcon = Icons.Filled.PlayArrow,
                                 onActionClick = { viewModel.playTracksQueue(state.feedData.ytRecentSongs, 0, "YouTube History") },
                             )
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 24.dp),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                modifier = Modifier.padding(top = 12.dp),
-                            ) {
-                                itemsIndexed(state.feedData.ytRecentSongs) { index, track ->
-                                    SongTrackCard(
-                                        track = track,
-                                        onClick = { viewModel.playTracksQueue(state.feedData.ytRecentSongs, index, "YouTube History") },
-                                    )
-                                }
-                            }
+                            FeedMediaRow(
+                                content = {
+                                    itemsIndexed(state.feedData.ytRecentSongs) { index, track ->
+                                        FeedMediaCard(
+                                            title = track.title,
+                                            subtitle = track.artist,
+                                            artworkUrl = track.artworkUrl,
+                                            fallbackIcon = Icons.Filled.History,
+                                            onClick = { viewModel.playTracksQueue(state.feedData.ytRecentSongs, index, "YouTube History") },
+                                            onPlayClick = { viewModel.playTracksQueue(state.feedData.ytRecentSongs, index, "YouTube History") },
+                                        )
+                                    }
+                                },
+                            )
                         }
                     }
 
@@ -284,19 +331,50 @@ fun FeedScreen(
                                 actionText = "Play all",
                                 actionIcon = Icons.Filled.PlayArrow,
                                 onActionClick = { viewModel.playTracksQueue(section.items, 0, section.title) },
+                                onShuffleClick = { viewModel.shuffleTracksQueue(section.items, section.title) },
                             )
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 24.dp),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                modifier = Modifier.padding(top = 12.dp),
-                            ) {
-                                itemsIndexed(section.items) { index, track ->
-                                    SongTrackCard(
-                                        track = track,
-                                        onClick = { viewModel.playTracksQueue(section.items, index, section.title) },
-                                    )
-                                }
-                            }
+                            FeedMediaRow(
+                                content = {
+                                    itemsIndexed(section.items) { index, track ->
+                                        FeedMediaCard(
+                                            title = track.title,
+                                            subtitle = track.artist,
+                                            artworkUrl = track.artworkUrl,
+                                            fallbackIcon = Icons.Filled.MusicNote,
+                                            onClick = { viewModel.playTracksQueue(section.items, index, section.title) },
+                                            onPlayClick = { viewModel.playTracksQueue(section.items, index, section.title) },
+                                        )
+                                    }
+                                },
+                            )
+                        }
+                    }
+
+                    if (state.feedData.freshFinds.isNotEmpty()) {
+                        item(key = "fresh_finds") {
+                            FeedSectionHeader(
+                                title = "Fresh finds",
+                                subtitle = "Beyond your usual rotation · outside your top artists",
+                                actionText = "Play all",
+                                actionIcon = Icons.Filled.PlayArrow,
+                                onActionClick = { viewModel.playTracksQueue(state.feedData.freshFinds, 0, "Fresh Finds") },
+                                onShuffleClick = { viewModel.shuffleTracksQueue(state.feedData.freshFinds, "Fresh Finds") },
+                            )
+                            FeedMediaRow(
+                                content = {
+                                    itemsIndexed(state.feedData.freshFinds) { index, track ->
+                                        FeedMediaCard(
+                                            title = track.title,
+                                            subtitle = track.artist,
+                                            artworkUrl = track.artworkUrl,
+                                            fallbackIcon = Icons.Filled.Whatshot,
+                                            badgeText = "NEW",
+                                            onClick = { viewModel.playTracksQueue(state.feedData.freshFinds, index, "Fresh Finds") },
+                                            onPlayClick = { viewModel.playTracksQueue(state.feedData.freshFinds, index, "Fresh Finds") },
+                                        )
+                                    }
+                                },
+                            )
                         }
                     }
 
@@ -309,18 +387,16 @@ fun FeedScreen(
                                 actionIcon = Icons.Filled.PlayArrow,
                                 onActionClick = { viewModel.playRecentQueue(state.feedData.jumpBackIn, 0) },
                             )
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 24.dp),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                modifier = Modifier.padding(top = 12.dp),
-                            ) {
-                                itemsIndexed(state.feedData.jumpBackIn) { index, track ->
-                                    RecentTrackCard(
-                                        track = track,
-                                        onClick = { viewModel.playRecentQueue(state.feedData.jumpBackIn, index) },
-                                    )
-                                }
-                            }
+                            FeedMediaRow(
+                                content = {
+                                    itemsIndexed(state.feedData.jumpBackIn) { index, track ->
+                                        RecentTrackCard(
+                                            track = track,
+                                            onClick = { viewModel.playRecentQueue(state.feedData.jumpBackIn, index) },
+                                        )
+                                    }
+                                },
+                            )
                         }
                     }
 
@@ -335,18 +411,19 @@ fun FeedScreen(
                                     state.feedData.mixes.randomOrNull()?.let(viewModel::playPlaylistSummary)
                                 },
                             )
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 24.dp),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                modifier = Modifier.padding(top = 12.dp),
-                            ) {
-                                items(state.feedData.mixes, key = YouTubePlaylistSummary::id) { summary ->
-                                    PlaylistSummaryCard(
-                                        summary = summary,
-                                        onClick = { onOpenFeedPlaylist(summary.id) },
-                                    )
-                                }
-                            }
+                            FeedMediaRow(
+                                content = {
+                                    items(state.feedData.mixes, key = YouTubePlaylistSummary::id) { summary ->
+                                        FeedPlaylistCard(
+                                            title = summary.title,
+                                            subtitle = summary.author ?: summary.trackCountText ?: "Mix",
+                                            artworkUrl = summary.artworkUrl,
+                                            onClick = { onOpenFeedPlaylist(summary.id) },
+                                            onPlayClick = { viewModel.playPlaylistSummary(summary) },
+                                        )
+                                    }
+                                },
+                            )
                         }
                     }
 
@@ -371,13 +448,14 @@ fun FeedScreen(
                                 subtitle = "Worth another listen",
                             )
                             LazyRow(
-                                contentPadding = PaddingValues(horizontal = 24.dp),
-                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
                                 modifier = Modifier.padding(top = 12.dp),
                             ) {
-                                items(state.feedData.topArtists) { artist ->
+                                itemsIndexed(state.feedData.topArtists) { index, artist ->
                                     ArtistAvatarCard(
                                         artist = artist,
+                                        isTop = index < 3,
                                         onClick = {
                                             artistAlbumNavigator.openArtist(
                                                 name = artist.name,
@@ -399,18 +477,20 @@ fun FeedScreen(
                                 actionIcon = Icons.Filled.PlayArrow,
                                 onActionClick = { viewModel.playGeneratedQueue(state.feedData.heavyRotation, 0, "Heavy Rotation") },
                             )
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 24.dp),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                modifier = Modifier.padding(top = 12.dp),
-                            ) {
-                                itemsIndexed(state.feedData.heavyRotation) { index, track ->
-                                    GeneratedTrackCard(
-                                        track = track,
-                                        onClick = { viewModel.playGeneratedQueue(state.feedData.heavyRotation, index, "Heavy Rotation") },
-                                    )
-                                }
-                            }
+                            FeedMediaRow(
+                                content = {
+                                    itemsIndexed(state.feedData.heavyRotation) { index, track ->
+                                        FeedMediaCard(
+                                            title = track.name,
+                                            subtitle = track.artist,
+                                            artworkUrl = track.artworkUrl,
+                                            fallbackIcon = Icons.Filled.MusicNote,
+                                            onClick = { viewModel.playGeneratedQueue(state.feedData.heavyRotation, index, "Heavy Rotation") },
+                                            onPlayClick = { viewModel.playGeneratedQueue(state.feedData.heavyRotation, index, "Heavy Rotation") },
+                                        )
+                                    }
+                                },
+                            )
                         }
                     }
 
@@ -420,24 +500,25 @@ fun FeedScreen(
                                 title = "Albums for you",
                                 subtitle = "From your listening and recommendations",
                             )
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 24.dp),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                modifier = Modifier.padding(top = 12.dp),
-                            ) {
-                                items(state.feedData.recentAlbums) { album ->
-                                    FeedAlbumCard(
-                                        album = album,
-                                        onClick = {
-                                            artistAlbumNavigator.openAlbum(
-                                                title = album.title,
-                                                artist = album.artist,
-                                                browseId = album.browseId ?: "",
-                                            )
-                                        },
-                                    )
-                                }
-                            }
+                            FeedMediaRow(
+                                content = {
+                                    items(state.feedData.recentAlbums) { album ->
+                                        FeedMediaCard(
+                                            title = album.title,
+                                            subtitle = album.artist,
+                                            artworkUrl = album.artworkUrl,
+                                            fallbackIcon = Icons.Filled.Album,
+                                            onClick = {
+                                                artistAlbumNavigator.openAlbum(
+                                                    title = album.title,
+                                                    artist = album.artist,
+                                                    browseId = album.browseId ?: "",
+                                                )
+                                            },
+                                        )
+                                    }
+                                },
+                            )
                         }
                     }
 
@@ -445,14 +526,15 @@ fun FeedScreen(
                         item(key = "trending_charts") {
                             FeedSectionHeader(
                                 title = "Trending now",
-                                subtitle = "Most popular right now",
+                                subtitle = "Most popular right now · tap a rank to play",
                                 actionText = "Play all",
                                 actionIcon = Icons.Filled.PlayArrow,
                                 onActionClick = { viewModel.playTracksQueue(state.feedData.charts, 0, "Top Charts") },
+                                onShuffleClick = { viewModel.shuffleTracksQueue(state.feedData.charts, "Top Charts") },
                             )
                             LazyRow(
-                                contentPadding = PaddingValues(horizontal = 24.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 modifier = Modifier.padding(top = 12.dp),
                             ) {
                                 itemsIndexed(state.feedData.charts.take(15)) { index, track ->
@@ -472,24 +554,26 @@ fun FeedScreen(
                                 title = "New releases",
                                 subtitle = "Fresh drops and new albums",
                             )
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 24.dp),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                modifier = Modifier.padding(top = 12.dp),
-                            ) {
-                                items(state.feedData.newReleases) { summary ->
-                                    AlbumReleaseCard(
-                                        summary = summary,
-                                        onClick = {
-                                            artistAlbumNavigator.openAlbum(
-                                                title = summary.title,
-                                                artist = summary.author ?: "",
-                                                browseId = summary.id,
-                                            )
-                                        },
-                                    )
-                                }
-                            }
+                            FeedMediaRow(
+                                content = {
+                                    items(state.feedData.newReleases) { summary ->
+                                        FeedMediaCard(
+                                            title = summary.title,
+                                            subtitle = summary.author ?: "Album",
+                                            artworkUrl = summary.artworkUrl,
+                                            fallbackIcon = Icons.Filled.NewReleases,
+                                            badgeText = "NEW",
+                                            onClick = {
+                                                artistAlbumNavigator.openAlbum(
+                                                    title = summary.title,
+                                                    artist = summary.author ?: "",
+                                                    browseId = summary.id,
+                                                )
+                                            },
+                                        )
+                                    }
+                                },
+                            )
                         }
                     }
 
@@ -503,7 +587,7 @@ fun FeedScreen(
                                 onActionClick = onOpenFriends,
                             )
                             LazyRow(
-                                contentPadding = PaddingValues(horizontal = 24.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                                 modifier = Modifier.padding(top = 12.dp),
                             ) {
@@ -517,6 +601,10 @@ fun FeedScreen(
                                 }
                             }
                         }
+                    }
+
+                    item(key = "feed_footer") {
+                        FeedFooter(lastUpdatedMillis = state.feedData.lastUpdatedMillis)
                     }
                 }
             }
@@ -547,65 +635,403 @@ fun FeedScreen(
     }
 }
 
+private fun feedGreeting(): String {
+    return when (java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)) {
+        in 5..11 -> "Good morning"
+        in 12..17 -> "Good afternoon"
+        in 18..22 -> "Good evening"
+        else -> "Good night"
+    }
+}
+
+private fun String.displayName(): String =
+    split(" ", "-", "_").filter { it.isNotBlank() }.joinToString(" ") {
+        it.replaceFirstChar { c -> c.uppercase() }
+    }
+
+private fun relativeTime(uts: String?): String? {
+    val epoch = uts?.toLongOrNull() ?: return null
+    val now = System.currentTimeMillis() / 1000
+    val diff = (now - epoch).coerceAtLeast(0)
+    return when {
+        diff < 3600 -> "${(diff / 60).coerceAtLeast(1)}m ago"
+        diff < 86400 -> "${diff / 3600}h ago"
+        diff < 86400 * 7 -> "${diff / 86400}d ago"
+        diff < 86400 * 30 -> "${diff / (86400 * 7)}w ago"
+        else -> "${diff / (86400 * 30)}mo ago"
+    }
+}
+
 @Composable
-private fun FeedWelcome(
+private fun ForYouHero(
+    userName: String?,
+    quickPicks: List<YouTubeMusicTrack>,
+    topArtists: List<FeedArtist>,
+    tasteTags: List<String>,
+    spotlight: FeedSpotlight?,
+    hasPersonalContent: Boolean,
+    onPlay: () -> Unit,
+    onShuffle: () -> Unit,
     onOpenGenerator: () -> Unit,
 ) {
-    val greeting = remember {
-        when (java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)) {
-            in 5..11 -> "Good morning"
-            in 12..17 -> "Good afternoon"
-            in 18..22 -> "Good evening"
-            else -> "Good night"
-        }
+    val liquidGlass = LocalLiquidGlass.current
+    val haptics = LocalHapticFeedback.current
+    val greeting = remember { feedGreeting() }
+    val heroArt = quickPicks.firstOrNull { !it.artworkUrl.isNullOrBlank() }?.artworkUrl
+        ?: spotlight?.artworkUrl
+        ?: topArtists.firstOrNull()?.artworkUrl
+    val heroShape = RoundedCornerShape(28.dp)
+    val statsLine = buildList {
+        if (topArtists.isNotEmpty()) add("${topArtists.size} artists")
+        if (tasteTags.isNotEmpty()) add("${tasteTags.size} vibes")
+        if (quickPicks.isNotEmpty()) add("${quickPicks.size} picks")
+    }.joinToString(" · ")
+    val titleLine = if (!userName.isNullOrBlank() && hasPersonalContent) {
+        "$greeting, ${userName.displayName()}"
+    } else greeting
+    val subtitleLine = when {
+        hasPersonalContent && spotlight != null -> "Featuring ${spotlight.artistName} · $statsLine"
+        hasPersonalContent && statsLine.isNotBlank() -> "Made for your taste · $statsLine"
+        statsLine.isNotBlank() -> "Today's soundtrack · $statsLine"
+        else -> "A soundtrack curated for your day"
     }
-    Row(
+    Surface(
+        shape = heroShape,
+        color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainer),
+        tonalElevation = 2.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+            .padding(horizontal = 16.dp)
+            .liquidGlassChrome(heroShape, liquidGlass),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = greeting,
-                style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp, letterSpacing = (-0.3).sp),
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.semantics { heading() },
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = "A soundtrack curated for your day",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-            )
-        }
-        Surface(
-            onClick = onOpenGenerator,
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.75f),
-            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                Icon(
-                    Icons.Filled.AutoAwesome,
+        Box(modifier = Modifier.fillMaxWidth()) {
+            if (!heroArt.isNullOrBlank()) {
+                AsyncImage(
+                    model = heroArt,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(15.dp),
-                )
-                Text(
-                    "Mix studio",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(208.dp)
+                        .alpha(0.32f),
                 )
             }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(208.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+                                MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.55f),
+                                MaterialTheme.colorScheme.surfaceContainer,
+                            ),
+                        ),
+                    ),
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.AutoAwesome,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(12.dp),
+                            )
+                            Text(
+                                if (hasPersonalContent) "FOR YOU · DAILY MIX" else "FOR YOU · TRENDING",
+                                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.1.sp),
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Surface(
+                        onClick = onOpenGenerator,
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.AutoAwesome,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Text(
+                                "Mix studio",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = titleLine,
+                    style = MaterialTheme.typography.headlineSmall.copy(fontSize = 24.sp, letterSpacing = (-0.4).sp),
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.semantics { heading() },
+                )
+                Text(
+                    text = subtitleLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Button(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onPlay()
+                        },
+                        enabled = quickPicks.isNotEmpty(),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                        modifier = Modifier.height(44.dp),
+                    ) {
+                        Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Play", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    }
+                    Surface(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onShuffle()
+                        },
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.9f),
+                        modifier = Modifier.height(44.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 18.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.Shuffle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(17.dp),
+                            )
+                            Text(
+                                "Shuffle",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun TasteStrip(
+    tags: List<String>,
+    launching: String?,
+    onTagClick: (String) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        FeedSectionHeader(
+            title = "Your sound",
+            subtitle = "Tap a vibe to start instant radio",
+        )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(top = 10.dp),
+        ) {
+            items(tags, key = { it }) { tag ->
+                val isLoading = launching?.equals(tag.displayName(), ignoreCase = true) == true
+                Surface(
+                    onClick = { onTagClick(tag) },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary),
+                        )
+                        Text(
+                            tag.displayName(),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        if (isLoading) {
+                            Icon(
+                                Icons.Filled.Refresh,
+                                contentDescription = "Starting radio",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeedLoadingSkeleton() {
+    val transition = rememberInfiniteTransition(label = "feedSkeleton")
+    val pulse by transition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(animation = tween(900), repeatMode = RepeatMode.Reverse),
+        label = "skeletonPulse",
+    )
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            bottom = FloatingNavDefaults.contentBottomPadding(),
+            top = 12.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        item {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .height(208.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f * pulse + 0.3f)),
+            )
+        }
+        item {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                repeat(2) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        repeat(2) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(64.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.7f * pulse + 0.3f)),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        items(3) { row ->
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 18.dp)
+                        .width((140 + row * 30).dp)
+                        .height(20.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f * pulse + 0.3f)),
+                )
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    userScrollEnabled = false,
+                ) {
+                    items(4) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(148.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f * pulse + 0.3f)),
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .width(110.dp)
+                                    .height(12.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f * pulse + 0.3f)),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeedFooter(lastUpdatedMillis: Long) {
+    val label = remember(lastUpdatedMillis) {
+        if (lastUpdatedMillis <= 0L) "Made for you from your taste"
+        else try {
+            val time = java.time.Instant.ofEpochMilli(lastUpdatedMillis)
+                .atZone(java.time.ZoneId.systemDefault())
+                .format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
+            "Updated $time · Made for you from your taste"
+        } catch (_: Exception) {
+            "Made for you from your taste"
+        }
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp, bottom = 4.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -631,13 +1057,13 @@ private fun QuickTilesGrid(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         rows.forEach { rowItems ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 rowItems.forEach { tile ->
                     QuickTileCard(
@@ -660,14 +1086,21 @@ private fun QuickTilesGrid(
 @Composable
 private fun QuickTileCard(tile: FeedQuickTile, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val liquidGlass = LocalLiquidGlass.current
+    val tileShape = RoundedCornerShape(18.dp)
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.7f),
-        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+        shape = tileShape,
+        color = liquidGlassContainerColor(
+            if (tile.isLiked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+            else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.75f),
+        ),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+        ),
         modifier = modifier
-            .height(56.dp)
-            .liquidGlassChrome(RoundedCornerShape(12.dp), liquidGlass),
+            .height(64.dp)
+            .liquidGlassChrome(tileShape, liquidGlass),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -675,10 +1108,10 @@ private fun QuickTileCard(tile: FeedQuickTile, modifier: Modifier = Modifier, on
         ) {
             Box(
                 modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp))
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp))
                     .background(
-                        if (tile.isLiked) MaterialTheme.colorScheme.primaryContainer
+                        if (tile.isLiked) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
                         else MaterialTheme.colorScheme.surfaceContainerHighest
                     ),
                 contentAlignment = Alignment.Center,
@@ -687,8 +1120,8 @@ private fun QuickTileCard(tile: FeedQuickTile, modifier: Modifier = Modifier, on
                     Icon(
                         Icons.Filled.Favorite,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(22.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp),
                     )
                 } else if (!tile.artworkUrl.isNullOrBlank()) {
                     AsyncImage(
@@ -702,22 +1135,49 @@ private fun QuickTileCard(tile: FeedQuickTile, modifier: Modifier = Modifier, on
                         Icons.Filled.MusicNote,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier.size(22.dp),
+                        modifier = Modifier.size(24.dp),
                     )
                 }
             }
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = tile.title,
-                style = MaterialTheme.typography.bodySmall.copy(lineHeight = 16.sp),
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface,
+            Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(end = 12.dp, start = 2.dp),
-            )
+                    .padding(start = 12.dp, end = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+                Text(
+                    text = tile.title,
+                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 17.sp),
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = tile.subtitle ?: if (tile.actionVideoId != null) "Track" else "Playlist",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                )
+            }
+            if (tile.actionVideoId != null) {
+                Box(
+                    modifier = Modifier
+                        .padding(end = 10.dp)
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.PlayArrow,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
         }
     }
 }
@@ -738,24 +1198,27 @@ private fun QuickPicksRows(
     }
     val columns = remember(tracks) { tracks.chunked(3) }
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 24.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.padding(top = 12.dp),
     ) {
         itemsIndexed(columns) { columnIndex, column ->
             Column(
                 modifier = Modifier.fillParentMaxWidth(widthFraction),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 column.forEachIndexed { rowIndex, track ->
                     val overallIndex = columnIndex * 3 + rowIndex
                     val isCurrent = track.videoId.isNotBlank() && track.videoId == currentPlayingVideoId
                     Surface(
                         onClick = { onTrackClick(overallIndex) },
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                        else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
-                        border = if (isCurrent) BorderStroke(0.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)) else null,
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                        else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.65f),
+                        border = if (isCurrent) androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                        ) else null,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Row(
@@ -821,306 +1284,225 @@ private fun QuickPicksRows(
 }
 
 @Composable
-private fun SongTrackCard(
-    track: YouTubeMusicTrack,
-    onClick: () -> Unit,
+private fun FeedMediaRow(
+    content: LazyListScope.() -> Unit,
 ) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.padding(top = 12.dp),
+        content = content,
+    )
+}
+
+@Composable
+private fun FeedMediaCard(
+    title: String,
+    subtitle: String,
+    artworkUrl: String?,
+    fallbackIcon: ImageVector,
+    onClick: () -> Unit,
+    onPlayClick: (() -> Unit)? = null,
+    badgeText: String? = null,
+    cardWidth: androidx.compose.ui.unit.Dp = 148.dp,
+) {
+    val haptics = LocalHapticFeedback.current
     Column(
         modifier = Modifier
-            .width(142.dp)
-            .clickable(onClick = onClick),
+            .width(cardWidth)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                },
+            ),
     ) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)),
-            modifier = Modifier.size(142.dp),
-        ) {
-            if (!track.artworkUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = track.artworkUrl,
-                    contentDescription = track.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Filled.MusicNote,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.size(36.dp),
-                    )
+        Box(modifier = Modifier.size(cardWidth)) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 1.dp,
+                modifier = Modifier.fillMaxSize(),
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                },
+            ) {
+                Box(Modifier.fillMaxSize()) {
+                    if (!artworkUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = artworkUrl,
+                            contentDescription = title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(
+                                fallbackIcon,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.size(38.dp),
+                            )
+                        }
+                    }
+                    if (badgeText != null) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(8.dp),
+                        ) {
+                            Text(
+                                badgeText,
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            if (onPlayClick != null) {
+                Surface(
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onPlayClick()
+                    },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shadowElevation = 6.dp,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 8.dp, bottom = 8.dp)
+                        .size(38.dp),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Filled.PlayArrow,
+                            contentDescription = "Play $title",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
             }
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            text = track.title,
+            text = title,
             style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Bold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(horizontal = 4.dp),
         )
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(1.dp))
         Text(
-            text = track.artist,
-            style = MaterialTheme.typography.bodySmall,
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
             modifier = Modifier.padding(horizontal = 4.dp),
         )
     }
 }
 
 @Composable
-private fun PlaylistSummaryCard(
-    summary: YouTubePlaylistSummary,
+private fun FeedPlaylistCard(
+    title: String,
+    subtitle: String,
+    artworkUrl: String?,
     onClick: () -> Unit,
+    onPlayClick: (() -> Unit)? = null,
 ) {
-    Column(
-        modifier = Modifier
-            .width(142.dp)
-            .clickable(onClick = onClick),
-    ) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)),
-            modifier = Modifier.size(142.dp),
-        ) {
-            if (!summary.artworkUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = summary.artworkUrl,
-                    contentDescription = summary.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Filled.Album,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.size(48.dp),
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = summary.title,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = summary.author ?: summary.trackCountText ?: "Mix",
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-    }
+    FeedMediaCard(
+        title = title,
+        subtitle = subtitle,
+        artworkUrl = artworkUrl,
+        fallbackIcon = Icons.Filled.Album,
+        onClick = onClick,
+        onPlayClick = onPlayClick,
+        cardWidth = 156.dp,
+    )
 }
+
+// Legacy card variants were consolidated into FeedMediaCard / FeedPlaylistCard
+// so every shelf shares one artwork, type and play-affordance language.
 
 @Composable
 private fun RecentTrackCard(
     track: RecentTrack,
     onClick: () -> Unit,
 ) {
+    val ago = remember(track.date?.uts, track.url) { relativeTime(track.date?.uts) }
+    val subtitle = if (ago != null) "${track.artist.displayName} · $ago" else track.artist.displayName
     Column(
         modifier = Modifier
-            .width(142.dp)
-            .clickable(onClick = onClick),
+            .width(148.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            ),
     ) {
         Surface(
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(18.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)),
-            modifier = Modifier.size(142.dp),
+            tonalElevation = 1.dp,
+            modifier = Modifier.size(148.dp),
+            onClick = onClick,
         ) {
-            ArtworkImage(
-                name = track.name,
-                artist = track.artist.displayName,
-                embeddedUrl = track.artworkUrl,
-                fallbackIcon = Icons.Filled.MusicNote,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = track.name,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = track.artist.displayName,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-    }
-}
-
-@Composable
-private fun FeedAlbumCard(
-    album: FeedAlbum,
-    onClick: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .width(142.dp)
-            .clickable(onClick = onClick),
-    ) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)),
-            modifier = Modifier.size(142.dp),
-        ) {
-            ArtworkImage(
-                name = album.title,
-                artist = album.artist,
-                embeddedUrl = album.artworkUrl,
-                fallbackIcon = Icons.Filled.Album,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = album.title,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = album.artist,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-    }
-}
-
-@Composable
-private fun GeneratedTrackCard(
-    track: GeneratedTrack,
-    onClick: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .width(142.dp)
-            .clickable(onClick = onClick),
-    ) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)),
-            modifier = Modifier.size(142.dp),
-        ) {
-            ArtworkImage(
-                name = track.name,
-                artist = track.artist,
-                embeddedUrl = track.artworkUrl,
-                fallbackIcon = Icons.Filled.MusicNote,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = track.name,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = track.artist,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-    }
-}
-
-@Composable
-private fun AlbumReleaseCard(
-    summary: YouTubePlaylistSummary,
-    onClick: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .width(142.dp)
-            .clickable(onClick = onClick),
-    ) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)),
-            modifier = Modifier.size(142.dp),
-        ) {
-            if (!summary.artworkUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = summary.artworkUrl,
-                    contentDescription = summary.title,
-                    contentScale = ContentScale.Crop,
+            Box(Modifier.fillMaxSize()) {
+                ArtworkImage(
+                    name = track.name,
+                    artist = track.artist.displayName,
+                    embeddedUrl = track.artworkUrl,
+                    fallbackIcon = Icons.Filled.MusicNote,
                     modifier = Modifier.fillMaxSize(),
                 )
-            } else {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Filled.Album,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.size(44.dp),
-                    )
+                if (ago != null) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.Black.copy(alpha = 0.62f),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(8.dp),
+                    ) {
+                        Text(
+                            ago,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                    }
                 }
             }
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            text = summary.title,
+            text = track.name,
             style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Bold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(horizontal = 4.dp),
         )
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(1.dp))
         Text(
-            text = summary.author ?: "Album",
-            style = MaterialTheme.typography.bodySmall,
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
             modifier = Modifier.padding(horizontal = 4.dp),
         )
     }
@@ -1133,77 +1515,99 @@ private fun ChartTrackCard(
     onClick: () -> Unit,
 ) {
     val isTop3 = rank <= 3
+    val haptics = LocalHapticFeedback.current
     Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.7f),
-        border = BorderStroke(
-            0.5.dp,
-            if (isTop3) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f),
+        onClick = {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onClick()
+        },
+        shape = RoundedCornerShape(18.dp),
+        color = if (isTop3) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+        else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (isTop3) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
         ),
         modifier = Modifier
-            .width(280.dp)
-            .height(72.dp),
+            .width(288.dp)
+            .height(76.dp),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         ) {
-            Box(
-                modifier = Modifier.width(32.dp),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                Text(
-                    text = "$rank",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = if (isTop3) FontWeight.ExtraBold else FontWeight.Medium,
-                    color = if (isTop3) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                )
-            }
+            Text(
+                text = String.format("%02d", rank),
+                style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp),
+                fontWeight = FontWeight.Black,
+                color = if (isTop3) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                modifier = Modifier.width(40.dp),
+            )
             Surface(
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                modifier = Modifier.size(52.dp),
+                modifier = Modifier.size(56.dp),
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onClick()
+                },
             ) {
-                if (!track.artworkUrl.isNullOrBlank()) {
-                    AsyncImage(
-                        model = track.artworkUrl,
-                        contentDescription = track.title,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                } else {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize()) {
+                    if (!track.artworkUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = track.artworkUrl,
+                            contentDescription = track.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.TrendingUp,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(3.dp)
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.55f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Icon(
-                            Icons.Filled.MusicNote,
+                            Icons.Filled.PlayArrow,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(24.dp),
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp),
                         )
                     }
                 }
             }
             Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(
                     text = track.title,
                     style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(start = 2.dp),
                 )
                 Text(
                     text = track.artist,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                    modifier = Modifier.padding(start = 2.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                 )
             }
         }
@@ -1227,20 +1631,32 @@ private fun SpotlightHeroCard(
         end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
     )
     Surface(
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+        shape = RoundedCornerShape(28.dp),
+        color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainer),
+        tonalElevation = 2.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp)
-            .liquidGlassChrome(RoundedCornerShape(24.dp), liquidGlass),
+            .padding(horizontal = 16.dp)
+            .liquidGlassChrome(RoundedCornerShape(28.dp), liquidGlass),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(gradientBrush)
-                .padding(20.dp),
-        ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            if (!spotlight.artworkUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = spotlight.artworkUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp)
+                        .alpha(0.28f),
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(gradientBrush)
+                    .padding(20.dp),
+            ) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Surface(
                     shape = CircleShape,
@@ -1275,7 +1691,6 @@ private fun SpotlightHeroCard(
                         onClick = onOpenArtist,
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
                         modifier = Modifier.size(76.dp),
                     ) {
                         if (!spotlight.artworkUrl.isNullOrBlank()) {
@@ -1354,7 +1769,6 @@ private fun SpotlightHeroCard(
                         onClick = onOpenArtist,
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.8f),
-                        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
                         modifier = Modifier.weight(1f).height(42.dp),
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1368,6 +1782,7 @@ private fun SpotlightHeroCard(
                     }
                 }
             }
+            }
         }
     }
 }
@@ -1376,33 +1791,69 @@ private fun SpotlightHeroCard(
 private fun ArtistAvatarCard(
     artist: FeedArtist,
     onClick: () -> Unit,
+    isTop: Boolean = false,
 ) {
+    val haptics = LocalHapticFeedback.current
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .width(96.dp)
-            .clickable(onClick = onClick),
+            .width(100.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                },
+            ),
     ) {
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
-            modifier = Modifier.size(88.dp),
-        ) {
-            if (!artist.artworkUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = artist.artworkUrl,
-                    contentDescription = artist.name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = artist.name.take(1).uppercase(),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
+        Box(modifier = Modifier.size(92.dp), contentAlignment = Alignment.Center) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = if (isTop) androidx.compose.foundation.BorderStroke(
+                    2.dp,
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                ) else androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                ),
+                shadowElevation = if (isTop) 6.dp else 0.dp,
+                modifier = Modifier.size(88.dp),
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                },
+            ) {
+                if (!artist.artworkUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = artist.artworkUrl,
+                        contentDescription = artist.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = artist.name.take(1).uppercase(),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            }
+            if (isTop) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.align(Alignment.BottomEnd),
+                ) {
+                    Icon(
+                        Icons.Filled.Whatshot,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.padding(4.dp).size(12.dp),
                     )
                 }
             }
@@ -1410,13 +1861,14 @@ private fun ArtistAvatarCard(
         Spacer(Modifier.height(8.dp))
         Text(
             text = artist.name,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
+            style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+            fontWeight = FontWeight.Bold,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 4.dp),
+            lineHeight = 15.sp,
+            modifier = Modifier.padding(horizontal = 2.dp),
         )
     }
 }
@@ -1440,7 +1892,6 @@ private fun FriendAvatarCard(
             onClick = onClick,
             shape = CircleShape,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
             modifier = Modifier.size(60.dp),
         ) {
             if (!friend.avatarUrl.isNullOrBlank()) {
@@ -1482,13 +1933,15 @@ private fun FeedSectionHeader(
     actionText: String? = null,
     actionIcon: ImageVector? = null,
     onActionClick: (() -> Unit)? = null,
+    onShuffleClick: (() -> Unit)? = null,
 ) {
+    val haptics = LocalHapticFeedback.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp),
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Column(
             modifier = Modifier
@@ -1505,8 +1958,8 @@ private fun FeedSectionHeader(
         ) {
             Text(
                 title,
-                style = MaterialTheme.typography.titleMedium.copy(fontSize = 19.sp, letterSpacing = (-0.3).sp),
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium.copy(fontSize = 20.sp, letterSpacing = (-0.4).sp),
+                fontWeight = FontWeight.ExtraBold,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1515,28 +1968,53 @@ private fun FeedSectionHeader(
                     .padding(start = 2.dp),
             )
             if (!subtitle.isNullOrBlank()) {
-                Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(1.dp))
                 Text(
                     subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 2.dp),
                 )
             }
         }
+        if (onShuffleClick != null) {
+            Surface(
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onShuffleClick()
+                },
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
+            ) {
+                Box(modifier = Modifier.padding(8.dp), contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Filled.Shuffle,
+                        contentDescription = "Shuffle $title",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+        }
         if (actionText != null && onActionClick != null) {
             Surface(
-                onClick = onActionClick,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onActionClick()
+                },
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.75f),
-                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                ),
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     actionIcon?.let { icon ->
                         Icon(
@@ -1549,7 +2027,7 @@ private fun FeedSectionHeader(
                     Text(
                         actionText,
                         style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
@@ -1622,7 +2100,6 @@ private fun FeedEmptyState(
                 onClick = onRetry,
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
-                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),

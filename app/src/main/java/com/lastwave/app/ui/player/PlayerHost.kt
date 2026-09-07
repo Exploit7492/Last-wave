@@ -192,6 +192,13 @@ import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
 import com.lastwave.app.ui.theme.LocalLiquidGlass
 import com.lastwave.app.ui.theme.liquidGlassChrome
+import com.lastwave.app.ui.theme.liquidGlassContainerColor
+import com.lastwave.app.ui.theme.liquidGlassSource
+import com.lastwave.app.ui.theme.isLiquidGlassBackdropSupported
+import com.lastwave.app.ui.theme.LocalLiquidGlassBackdrop
+import com.lastwave.app.ui.theme.LocalLiquidGlassOverlayBackdrop
+import com.lastwave.app.ui.theme.LiquidGlassPreset
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlin.math.abs
@@ -648,6 +655,7 @@ private fun MiniPlayer(
     // Liquid Glass dressing for the floating mini player (no-op when the
     // experimental setting is off — see ui/theme/LiquidGlass.kt).
     val liquidGlass = LocalLiquidGlass.current
+    val backdrop = LocalLiquidGlassOverlayBackdrop.current
     var dragX by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     var dragY by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     val shownX by animateFloatAsState(dragX, ExpressiveMotion.spatialSpring(), label = "miniPlayerX")
@@ -702,10 +710,10 @@ private fun MiniPlayer(
     ) {
         Surface(
             shape = shape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh, backdrop = backdrop),
             tonalElevation = if (edgeToEdge) 0.dp else 6.dp,
             shadowElevation = if (edgeToEdge) 0.dp else 12.dp,
-            modifier = Modifier.fillMaxWidth().liquidGlassChrome(shape, liquidGlass),
+            modifier = Modifier.fillMaxWidth().liquidGlassChrome(shape, liquidGlass, LiquidGlassPreset.MiniPlayer, backdrop),
         ) {
             Column(
                 modifier = if (edgeToEdge) {
@@ -851,11 +859,17 @@ fun PlayingWaveBars(
     )
 
     val content: @Composable () -> Unit = {
-        androidx.compose.foundation.Canvas(
-            Modifier
-                .fillMaxSize()
-                .padding(horizontal = 5.dp, vertical = 3.5.dp)
+        // Fixed small badge content so it can never expand to fill the cover.
+        // Outer Box is 26x22 (16+5+5, 12+5+5) — always tiny, bottom-end aligned by caller.
+        androidx.compose.foundation.layout.Box(
+            modifier = Modifier
+                .padding(horizontal = 5.dp, vertical = 5.dp)
+                .size(16.dp, 12.dp),
+            contentAlignment = Alignment.Center,
         ) {
+            androidx.compose.foundation.Canvas(
+                Modifier.fillMaxSize(),
+            ) {
             val barCount = 3
             val barWidth = (size.width / 5.2f).coerceAtLeast(1.5f)
             val barGap = barWidth * 0.9f
@@ -878,6 +892,7 @@ fun PlayingWaveBars(
                     size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f, barWidth / 2f),
                 )
+            }
             }
         }
     }
@@ -1096,7 +1111,16 @@ private fun AddToPlaylistDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.liquidGlassChrome(
+            androidx.compose.material3.BottomSheetDefaults.ExpandedShape,
+            LocalLiquidGlass.current,
+            LiquidGlassPreset.ModalSheet,
+            LocalLiquidGlassOverlayBackdrop.current,
+        ),
+        containerColor = liquidGlassContainerColor(
+            MaterialTheme.colorScheme.surfaceContainer,
+            backdrop = LocalLiquidGlassOverlayBackdrop.current,
+        ),
     ) {
         Column(
             modifier = Modifier
@@ -1419,6 +1443,11 @@ private fun FullPlayer(
         }
     }
 
+    val playerBackdrop = if (isLiquidGlassBackdropSupported()) rememberLayerBackdrop() else null
+    CompositionLocalProvider(
+        LocalLiquidGlassBackdrop provides playerBackdrop,
+        LocalLiquidGlassOverlayBackdrop provides playerBackdrop,
+    ) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
         modifier = Modifier
@@ -1431,6 +1460,11 @@ private fun FullPlayer(
             .playerVerticalSwipe(enabled = currentTab == FullPlayerTab.NOW_PLAYING),
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
+            val bgWidth = constraints.maxWidth.toFloat()
+            val bgHeight = constraints.maxHeight.toFloat()
+            val bgMaxDimension = maxOf(bgWidth, bgHeight)
+
+            Box(Modifier.matchParentSize().liquidGlassSource(playerBackdrop)) {
             // Apple Music: Full-bleed scaled & deeply blurred artwork
             PlayerArtwork(
                 track = track,
@@ -1456,10 +1490,10 @@ private fun FullPlayer(
                             0.45f to ambientColor.copy(alpha = 0.22f),
                             1f to Color.Transparent,
                             center = androidx.compose.ui.geometry.Offset(
-                                constraints.maxWidth * 0.25f,
-                                constraints.maxHeight * 0.20f,
+                                bgWidth * 0.25f,
+                                bgHeight * 0.20f,
                             ),
-                            radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.85f,
+                            radius = bgMaxDimension * 0.85f,
                         ),
                     ),
             )
@@ -1472,10 +1506,10 @@ private fun FullPlayer(
                             0.50f to ambientCompanion.copy(alpha = 0.20f),
                             1f to Color.Transparent,
                             center = androidx.compose.ui.geometry.Offset(
-                                constraints.maxWidth * 0.88f,
-                                constraints.maxHeight * 0.65f,
+                                bgWidth * 0.88f,
+                                bgHeight * 0.65f,
                             ),
-                            radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.78f,
+                            radius = bgMaxDimension * 0.78f,
                         ),
                     ),
             )
@@ -1488,10 +1522,10 @@ private fun FullPlayer(
                             0.55f to ambientDeep.copy(alpha = 0.14f),
                             1f to Color.Transparent,
                             center = androidx.compose.ui.geometry.Offset(
-                                constraints.maxWidth * 0.15f,
-                                constraints.maxHeight * 0.82f,
+                                bgWidth * 0.15f,
+                                bgHeight * 0.82f,
                             ),
-                            radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.70f,
+                            radius = bgMaxDimension * 0.70f,
                         ),
                     ),
             )
@@ -1519,13 +1553,14 @@ private fun FullPlayer(
                             0.65f to Color.Transparent,
                             1f to Color.Black.copy(alpha = 0.30f),
                             center = androidx.compose.ui.geometry.Offset(
-                                constraints.maxWidth * 0.50f,
-                                constraints.maxHeight * 0.40f,
+                                bgWidth * 0.50f,
+                                bgHeight * 0.40f,
                             ),
-                            radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.80f,
+                            radius = bgMaxDimension * 0.80f,
                         ),
                     ),
             )
+            }
             Column(
                 Modifier
                     .fillMaxSize()
@@ -2129,6 +2164,7 @@ private fun FullPlayer(
         )
     }
 }
+}
 
 @Composable
 internal fun PlayerProgressSlider(
@@ -2394,12 +2430,13 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
             onClick = player::previous,
             interactionSource = prevInteraction,
             shape = CircleShape,
-            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
+            color = liquidGlassContainerColor(if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)),
             contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             modifier = Modifier
                 .size(if (isTranslucent) 54.dp else 58.dp)
+                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls)
                 .graphicsLayer {
                     scaleX = prevScale
                     scaleY = prevScale
@@ -2440,12 +2477,13 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
             onClick = player::next,
             interactionSource = nextInteraction,
             shape = CircleShape,
-            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
+            color = liquidGlassContainerColor(if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)),
             contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             modifier = Modifier
                 .size(if (isTranslucent) 54.dp else 58.dp)
+                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls)
                 .graphicsLayer {
                     scaleX = nextScale
                     scaleY = nextScale
@@ -2489,11 +2527,12 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         Surface(
             onClick = player::toggleShuffle,
             shape = CircleShape,
-            color = if (state.shuffleEnabled) qualityButtonBackground else edgeButtonBackground,
+            color = liquidGlassContainerColor(if (state.shuffleEnabled) qualityButtonBackground else edgeButtonBackground),
             contentColor = if (state.shuffleEnabled) qualityButtonContent else edgeButtonContent,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
-            modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
+            modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp)
+                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.Shuffle, "Shuffle", modifier = Modifier.size(if (isTranslucent) 19.dp else 20.dp))
@@ -2501,11 +2540,12 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         }
         Surface(
             shape = RoundedCornerShape(24.dp),
-            color = qualityButtonBackground,
+            color = liquidGlassContainerColor(qualityButtonBackground),
             contentColor = qualityButtonContent,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
-            modifier = Modifier.weight(1.3f).height(if (isTranslucent) 44.dp else 48.dp),
+            modifier = Modifier.weight(1.3f).height(if (isTranslucent) 44.dp else 48.dp)
+                .liquidGlassChrome(RoundedCornerShape(24.dp), LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
         ) {
             Row(
                 Modifier.fillMaxSize().padding(horizontal = 8.dp),
@@ -2531,11 +2571,12 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         Surface(
             onClick = player::cycleRepeatMode,
             shape = CircleShape,
-            color = if (state.repeatMode != Player.REPEAT_MODE_OFF) qualityButtonBackground else edgeButtonBackground,
+            color = liquidGlassContainerColor(if (state.repeatMode != Player.REPEAT_MODE_OFF) qualityButtonBackground else edgeButtonBackground),
             contentColor = if (state.repeatMode != Player.REPEAT_MODE_OFF) qualityButtonContent else edgeButtonContent,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
-            modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
+            modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp)
+                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
@@ -2588,11 +2629,14 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                 Surface(
                     onClick = { player.seekToQueueItem(index) },
                     shape = RoundedCornerShape(20.dp),
-                    color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.86f),
+                    color = liquidGlassContainerColor(
+                        if (isCurrent) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.86f),
+                    ),
                     contentColor = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer
                     else MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.animateItem(),
+                    modifier = Modifier.animateItem()
+                        .liquidGlassChrome(RoundedCornerShape(20.dp), LocalLiquidGlass.current),
                 ) {
                     Row(
                         Modifier.fillMaxWidth().padding(9.dp),

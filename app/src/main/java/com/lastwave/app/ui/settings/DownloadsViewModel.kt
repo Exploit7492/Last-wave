@@ -29,13 +29,28 @@ private fun <T> Flow<T>.withDownloadsFallback(fallback: T): Flow<T> =
         emit(fallback)
     }
 
-private fun DownloadedTrackEntity.toPlayableTrack(): PlayableTrack = PlayableTrack(
-    title = title,
-    artist = artist,
-    album = album.takeIf { it.isNotBlank() },
-    artworkUrl = artworkUrl,
-    playbackUrl = mediaStoreUri?.takeIf { it.isNotBlank() } ?: filePath,
-)
+private fun DownloadedTrackEntity.toPlayableTrack(): PlayableTrack {
+    val bestUrl = when {
+        filePath.startsWith("/") && java.io.File(filePath).exists() -> filePath
+        !mediaStoreUri.isNullOrBlank() -> mediaStoreUri
+        else -> filePath
+    }
+    val mime = when {
+        filePath.endsWith(".flac", ignoreCase = true) || formatBadge.contains("FLAC") -> "audio/flac"
+        filePath.endsWith(".m4a", ignoreCase = true) || filePath.endsWith(".mp4", ignoreCase = true) || formatBadge.contains("M4A") -> "audio/mp4"
+        filePath.endsWith(".opus", ignoreCase = true) || formatBadge.contains("OPUS") -> "audio/ogg"
+        filePath.endsWith(".mp3", ignoreCase = true) || formatBadge.contains("MP3") -> "audio/mpeg"
+        else -> "audio/flac"
+    }
+    return PlayableTrack(
+        title = title,
+        artist = artist,
+        album = album.takeIf { it.isNotBlank() },
+        artworkUrl = artworkUrl,
+        playbackUrl = bestUrl,
+        playbackMimeType = mime,
+    )
+}
 
 @HiltViewModel
 class DownloadsViewModel @Inject constructor(

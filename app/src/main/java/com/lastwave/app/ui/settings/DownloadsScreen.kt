@@ -577,7 +577,7 @@ private fun DownloadedTrackCard(
                 )
                 if (isPlaying) {
                     PlayingWaveBars(
-                        Modifier.align(Alignment.BottomEnd).padding(3.dp),
+                        Modifier.align(Alignment.BottomEnd).padding(3.dp).size(24.dp, 18.dp),
                     )
                 }
             }

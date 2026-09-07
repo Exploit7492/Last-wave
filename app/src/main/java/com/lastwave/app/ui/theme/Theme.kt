@@ -1,7 +1,6 @@
 package com.lastwave.app.ui.theme
 
 import android.app.Activity
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -12,6 +11,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.lastwave.app.data.repository.ThemeUiState
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.backdrops.rememberCanvasBackdrop
 
 /**
  * Wraps the whole app. The color scheme itself always comes from
@@ -19,10 +20,8 @@ import com.lastwave.app.data.repository.ThemeUiState
  * a light mode, so neither does this), never from MaterialTheme's own
  * light/dark scheme resolution.
  *
- * When the experimental Liquid Glass setting is on, [LocalLiquidGlass] is
- * provided to everything below and a set of faint cached accent glows is
- * painted directly behind all content (cached drawing, no layout change)
- * so translucent containers gain depth without a permanent animation loop.
+ * Liquid Glass changes individual surfaces, never the selected page background.
+ * Backdrop sources stay separate from the foreground surfaces that sample them.
  */
 @Composable
 fun LastWaveTheme(
@@ -64,14 +63,13 @@ fun LastWaveTheme(
             color = MaterialTheme.colorScheme.background,
         ) {
             CompositionLocalProvider(LocalLiquidGlass provides themeState.liquidGlass) {
-                if (themeState.liquidGlass) {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .liquidGlassAmbient(
-                                primary = MaterialTheme.colorScheme.primary,
-                                tertiary = MaterialTheme.colorScheme.tertiary,
-                            ),
+                if (isLiquidGlassBackdropSupported()) {
+                    val backgroundColor = MaterialTheme.colorScheme.background
+                    val backgroundBackdrop = rememberCanvasBackdrop { drawRect(backgroundColor) }
+                    val contentBackdrop = rememberLayerBackdrop()
+                    CompositionLocalProvider(
+                        LocalLiquidGlassBackdrop provides backgroundBackdrop,
+                        LocalLiquidGlassOverlayBackdrop provides contentBackdrop,
                     ) {
                         content()
                     }

@@ -566,7 +566,7 @@ private fun PlaylistCard(
                 PlaylistCover(playlist = playlist, modifier = Modifier.fillMaxSize(), cornerRadius = 14.dp)
                 if (isThisPlaylistPlaying) {
                     com.lastwave.app.ui.player.PlayingWaveBars(
-                        Modifier.align(Alignment.BottomEnd).padding(4.dp),
+                        Modifier.align(Alignment.BottomEnd).padding(4.dp).size(24.dp, 18.dp),
                     )
                 }
                 if (isRegenerating) {

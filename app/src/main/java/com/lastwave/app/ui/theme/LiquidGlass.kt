@@ -1,6 +1,10 @@
 package com.lastwave.app.ui.theme
 
+import android.os.Build
+import androidx.compose.foundation.shape.CornerBasedShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
@@ -10,22 +14,117 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.colorControls
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.highlight.Highlight
 
 /** Shared opt-in flag for Settings > Experimental > Liquid Glass. */
 val LocalLiquidGlass = staticCompositionLocalOf { false }
 
+// Background-only source for surfaces inside the captured scrolling content.
+val LocalLiquidGlassBackdrop = staticCompositionLocalOf<Backdrop?> { null }
+// Content source for sibling overlays; never attach it to a parent of its consumers.
+val LocalLiquidGlassOverlayBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
+
+enum class LiquidGlassPreset(val blur: Float, val lensHeight: Float, val lensAmount: Float) {
+    MiniPlayer(8f, 14f, 18f),
+    BottomNavigation(6f, 12f, 14f),
+    PlayerControls(6f, 12f, 16f),
+    FloatingControls(5f, 10f, 16f),
+    ModalSheet(12f, 18f, 12f),
+    ContextMenu(10f, 16f, 12f),
+    Overlay(8f, 14f, 16f),
+    Card(4f, 8f, 6f),
+}
+
+@Composable
+fun isLiquidGlassBackdropSupported(): Boolean =
+    LocalLiquidGlass.current && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+        LocalView.current.isHardwareAccelerated && !LocalView.current.isInEditMode
+
+@Composable
+fun Modifier.liquidGlassSource(
+    backdrop: LayerBackdrop? = LocalLiquidGlassOverlayBackdrop.current,
+): Modifier = if (isLiquidGlassBackdropSupported() && backdrop != null) layerBackdrop(backdrop) else this
+
+@Composable
+fun liquidGlassContainerColor(
+    color: Color,
+    enabled: Boolean = LocalLiquidGlass.current,
+    backdrop: Backdrop? = LocalLiquidGlassBackdrop.current,
+): Color = if (enabled && isLiquidGlassBackdropSupported() && backdrop != null) {
+    color.copy(alpha = minOf(color.alpha, 0.12f))
+} else if (enabled) {
+    color.copy(alpha = minOf(color.alpha, 0.78f))
+} else color
+
+private class GlassEffectHealth {
+    var lensAvailable = true
+    var blurAvailable = true
+}
+
 @Composable
 fun isLiquidGlassEnabled(): Boolean = LocalLiquidGlass.current
 
-/**
- * Cached liquid-glass optical stack with a protected foreground plane.
- * Substrate and reflection render behind content; text/icons render once at
- * native sharpness; only the one-pixel Fresnel edge renders afterward.
- */
-fun Modifier.liquidGlassChrome(shape: Shape, enabled: Boolean): Modifier =
+/** Kyant0 renders only the sampled background; foreground text and controls stay sharp. */
+@Composable
+fun Modifier.liquidGlassChrome(
+    shape: Shape,
+    enabled: Boolean,
+    preset: LiquidGlassPreset = LiquidGlassPreset.Card,
+    backdrop: Backdrop? = LocalLiquidGlassBackdrop.current,
+): Modifier {
+    if (!enabled) return this
+    if (!isLiquidGlassBackdropSupported() || backdrop == null) return legacyLiquidGlassChrome(shape, true)
+
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val tint = MaterialTheme.colorScheme.surface.copy(alpha = if (dark) 0.24f else 0.14f)
+    val health = remember(backdrop) { GlassEffectHealth() }
+    val highlight = remember(dark) { Highlight(alpha = if (dark) 0.45f else 0.28f) }
+    return drawBackdrop(
+        backdrop = backdrop,
+        shape = { shape },
+        effects = {
+            if (health.blurAvailable) {
+                try {
+                    colorControls(saturation = if (dark) 1.18f else 1.08f)
+                    blur(preset.blur.dp.toPx())
+                } catch (_: RuntimeException) {
+                    health.blurAvailable = false
+                    renderEffect = null
+                }
+            }
+            if (health.blurAvailable && health.lensAvailable &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && shape is CornerBasedShape
+            ) {
+                val reducedEffect = renderEffect
+                val reducedPadding = padding
+                try {
+                    lens(preset.lensHeight.dp.toPx(), preset.lensAmount.dp.toPx())
+                } catch (_: RuntimeException) {
+                    health.lensAvailable = false
+                    renderEffect = reducedEffect
+                    padding = reducedPadding
+                }
+            }
+        },
+        highlight = { highlight },
+        shadow = null,
+        onDrawSurface = { drawRect(if (health.blurAvailable) tint else tint.copy(alpha = 0.74f)) },
+    )
+}
+
+/** Retained for Android 10/11, software rendering and surfaces without a backdrop. */
+private fun Modifier.legacyLiquidGlassChrome(shape: Shape, enabled: Boolean): Modifier =
     if (!enabled) this else drawWithCache {
         val outline = shape.createOutline(size, layoutDirection, this)
         val path = when (outline) {
@@ -49,17 +148,6 @@ fun Modifier.liquidGlassChrome(shape: Shape, enabled: Boolean): Modifier =
             start = Offset.Zero,
             end = Offset(size.width, size.height),
         )
-        val fresnelEdge = Brush.linearGradient(
-            0f to Color.White.copy(alpha = 0.72f),
-            0.20f to Color.White.copy(alpha = 0.28f),
-            0.58f to Color.White.copy(alpha = 0.07f),
-            1f to Color.White.copy(alpha = 0.34f),
-            start = Offset.Zero,
-            end = Offset(size.width, size.height),
-        )
-        val edgeWidth = 1.dp.toPx()
-        val innerEdgeWidth = 2.5.dp.toPx()
-
         onDrawWithContent {
             clipPath(path) {
                 drawRect(substrate)
@@ -67,61 +155,5 @@ fun Modifier.liquidGlassChrome(shape: Shape, enabled: Boolean): Modifier =
                 drawRect(refraction)
             }
             drawContent()
-            drawPath(
-                path,
-                Color.White.copy(alpha = 0.055f),
-                style = Stroke(width = innerEdgeWidth),
-            )
-            drawPath(path, fresnelEdge, style = Stroke(width = edgeWidth))
-        }
-    }
-
-/** Static, cached accent depth behind the whole app in liquid-glass mode. */
-@Composable
-fun Modifier.liquidGlassAmbient(primary: Color, tertiary: Color): Modifier =
-    drawWithCache {
-        val maxDim = maxOf(size.width, size.height).coerceAtLeast(1f)
-        val topGlow = Brush.radialGradient(
-            colors = listOf(
-                primary.copy(alpha = 0.18f),
-                primary.copy(alpha = 0.055f),
-                primary.copy(alpha = 0f),
-            ),
-            center = Offset(size.width * 0.18f, size.height * 0.14f),
-            radius = maxDim * 0.85f,
-        )
-        val sideGlow = Brush.radialGradient(
-            colors = listOf(
-                tertiary.copy(alpha = 0.14f),
-                tertiary.copy(alpha = 0.045f),
-                tertiary.copy(alpha = 0f),
-            ),
-            center = Offset(size.width * 0.87f, size.height * 0.52f),
-            radius = maxDim * 0.75f,
-        )
-        val bottomGlow = Brush.radialGradient(
-            colors = listOf(
-                primary.copy(alpha = 0.11f),
-                primary.copy(alpha = 0f),
-            ),
-            center = Offset(size.width * 0.52f, size.height * 1.02f),
-            radius = maxDim * 0.90f,
-        )
-        val aurora = Brush.linearGradient(
-            colors = listOf(
-                Color.Transparent,
-                primary.copy(alpha = 0.035f),
-                tertiary.copy(alpha = 0.045f),
-                Color.Transparent,
-            ),
-            start = Offset(0f, size.height * 0.78f),
-            end = Offset(size.width, size.height * 0.18f),
-        )
-
-        onDrawBehind {
-            drawRect(topGlow)
-            drawRect(sideGlow)
-            drawRect(bottomGlow)
-            drawRect(aurora)
         }
     }

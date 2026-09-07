@@ -7,9 +7,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -799,18 +797,6 @@ private fun TrackRow(
                         MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f),
                     ),
                 ),
-            )
-            .border(
-                BorderStroke(
-                    1.dp,
-                    Brush.horizontalGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        ),
-                    ),
-                ),
-                shape = NowPlayingCardShape,
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
     } else {

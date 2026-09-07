@@ -9,10 +9,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -444,7 +442,6 @@ private fun FriendHeroCard(
                         Surface(
                             shape = BadgePillShape,
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -494,18 +491,6 @@ private fun FriendNowPlayingBanner(
                         MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f),
                     ),
                 ),
-            )
-            .border(
-                BorderStroke(
-                    1.dp,
-                    Brush.horizontalGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
-                        ),
-                    ),
-                ),
-                shape = NowPlayingCardShape,
             ),
     ) {
         Column(Modifier.padding(14.dp)) {
@@ -739,7 +724,6 @@ private fun FriendTabSelector(
                 onClick = { onTabSelect(tab) },
                 shape = BadgePillShape,
                 color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-                border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)) else null,
                 modifier = Modifier
                     .weight(1f)
                     .height(38.dp),

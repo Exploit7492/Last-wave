@@ -534,6 +534,72 @@ class InnerTubeMusicApi @Inject constructor(
         }.getOrDefault(emptyList())
     }
 
+    /**
+     * Returns the per-play `videostatsPlaybackUrl` tracking URL for [videoId]
+     * from an AUTHENTICATED `player` response, or null when there is no
+     * connected account or the response carries no tracking URL.
+     *
+     * This mirrors ytmusicapi's `get_song` + `add_history_item` pair: history
+     * is registered by GET-ing this URL (see [submitHistoryPlayback]), never
+     * by merely fetching the song, resolving its stream, or reading history.
+     * The player call MUST be authenticated — per ytmusicapi issue #703 an
+     * anonymous player response yields a tracking URL whose ping returns 204
+     * yet never lands in history.
+     */
+    suspend fun fetchHistoryTrackingUrl(videoId: String): String? = withContext(Dispatchers.IO) {
+        if (!ytAuth.connection.value.isConnected) return@withContext null
+        val config = getWebConfig()
+        val root = post(
+            url = "$MUSIC_API/player?key=${config.apiKey}&prettyPrint=false",
+            body = buildJsonObject {
+                put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
+                put("videoId", videoId)
+                put("contentCheckOk", true)
+                put("racyCheckOk", true)
+            },
+            clientName = "WEB_REMIX",
+            clientVersion = config.clientVersion,
+            userAgent = WEB_USER_AGENT,
+            authenticated = true,
+        )
+        root.obj("playbackTracking")?.obj("videostatsPlaybackUrl")?.string("baseUrl")
+    }
+
+    /**
+     * Registers one listen by GET-ing a [trackingBaseUrl] previously obtained
+     * from [fetchHistoryTrackingUrl], mirroring ytmusicapi's
+     * `add_history_item` (`ver=2`, `c=WEB_REMIX`, random 16-char `cpn`).
+     *
+     * @return the HTTP status code. 2xx means YouTube accepted the ping
+     *   (204 in practice). Note the upstream caveat (ytmusicapi #703): 204
+     *   can also be returned when nothing is recorded, which is why callers
+     *   must only submit URLs from authenticated player responses.
+     *
+     * Privacy: the tracking URL and account cookies are authenticating
+     * material — this function never logs them, only the resulting code.
+     */
+    suspend fun submitHistoryPlayback(trackingBaseUrl: String, cpn: String): Int =
+        withContext(Dispatchers.IO) {
+            val base = trackingBaseUrl.toHttpUrlOrNull()
+                ?: throw IOException("Invalid history tracking URL")
+            val url = base.newBuilder()
+                .addQueryParameter("ver", "2")
+                .addQueryParameter("c", "WEB_REMIX")
+                .addQueryParameter("cpn", cpn)
+                .build()
+            val builder = Request.Builder()
+                .url(url)
+                .get()
+                .header("User-Agent", WEB_USER_AGENT)
+            // Same account surface as every other authenticated call: the
+            // ping is attributed to whoever owns these cookies.
+            ytAuth.cookieHeaderValue()?.let { builder.header("Cookie", it) }
+            ytAuth.authorizationHeaderValue()?.let { builder.header("Authorization", it) }
+            val call = http.newCall(builder.build())
+            call.timeout().timeout(HISTORY_PING_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            call.execute().use { response -> response.code }
+        }
+
     /** Identity of the signed-in account (account_menu endpoint). */
     suspend fun fetchAccountInfo(): YtAccountInfo? = withContext(Dispatchers.IO) {
         if (!ytAuth.connection.value.isConnected) return@withContext null
@@ -2533,7 +2599,9 @@ class InnerTubeMusicApi @Inject constructor(
         }
     }
 
-    private class InnerTubeHttpException(val responseCode: Int) :
+    /** Visible to the history-sync manager so it can tell auth failures
+     *  (drop, never retry) apart from transient ones (bounded retry). */
+    internal class InnerTubeHttpException(val responseCode: Int) :
         IOException("InnerTube HTTP $responseCode")
 
     private data class WebConfig(val apiKey: String, val clientVersion: String, val visitorData: String?)
@@ -2614,6 +2682,7 @@ class InnerTubeMusicApi @Inject constructor(
         const val MAX_PLAYER_REQUEST_ATTEMPTS = 2
         const val CONFIG_REQUEST_TIMEOUT_MS = 4_000L
         const val RELATED_REQUEST_TIMEOUT_MS = 8_000L
+        const val HISTORY_PING_TIMEOUT_MS = 15_000L
         const val URL_EXPIRY_MARGIN_MS = 2 * 60 * 1000L
         const val REQUEST_RETRY_BASE_DELAY_MS = 250L
         const val REQUEST_RETRY_JITTER_MS = 180L

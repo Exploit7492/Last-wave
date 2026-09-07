@@ -43,7 +43,9 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
+import com.lastwave.app.util.BatteryOptimizationHelper
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudDownload
@@ -70,6 +72,7 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FormatListBulleted
@@ -135,6 +138,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.input.pointer.pointerInput
 import com.lastwave.app.ui.theme.LocalLiquidGlass
+import com.lastwave.app.ui.theme.liquidGlassContainerColor
 import com.lastwave.app.ui.theme.liquidGlassChrome
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.R
@@ -241,6 +245,7 @@ fun SettingsScreen(
     val downloadTotalBytes by viewModel.downloadTotalBytes.collectAsStateWithLifecycle()
     val ytConnection by viewModel.ytConnection.collectAsStateWithLifecycle()
     val ytSyncEnabled by viewModel.ytSyncEnabled.collectAsStateWithLifecycle()
+    val ytHistorySyncEnabled by viewModel.ytHistorySyncEnabled.collectAsStateWithLifecycle()
     val ytSyncState by viewModel.ytSyncState.collectAsStateWithLifecycle()
     val ytLastSyncAt by viewModel.ytLastSyncAt.collectAsStateWithLifecycle()
     val syncedPlaylistIds by viewModel.syncedPlaylistIds.collectAsStateWithLifecycle()
@@ -344,7 +349,7 @@ fun SettingsScreen(
                             else if (ytSyncEnabled) "Selected playlists mirror to your account, 24/7" + lastSyncSuffix(ytLastSyncAt)
                             else "Keep your YT Music library in sync with LastWave"
                     }
-                    val ytRowCount = if (ytConnected) 5 else 2
+                    val ytRowCount = if (ytConnected) 6 else 2
                     SettingsGroup(rowCount = ytRowCount) { index, position ->
                         when (index) {
                             0 -> if (ytConnected) {
@@ -428,6 +433,22 @@ fun SettingsScreen(
                                 onClick = onOpenYouTubeImport,
                                 position = position,
                             )
+                            5 -> if (ytConnected) {
+                                SettingsToggleCard(
+                                    icon = Icons.Filled.History,
+                                    iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                    iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    title = "Sync Playback to YouTube Music History",
+                                    subtitle = if (ytHistorySyncEnabled) {
+                                        "On • songs you listen to in LastWave, including lossless & downloads, appear in your YouTube Music history"
+                                    } else {
+                                        "Off • listening in LastWave stays out of your YouTube Music history"
+                                    },
+                                    checked = ytHistorySyncEnabled,
+                                    onCheckedChange = viewModel::setYtHistorySyncEnabled,
+                                    position = position,
+                                )
+                            }
                         }
                     }
                 }
@@ -656,7 +677,7 @@ fun SettingsScreen(
                         else -> "Max (24-bit / 192 kHz FLAC)"
                     }
 
-                    val totalAudioRows = if (misc.crossfadeEnabled) 6 else 5
+                    val totalAudioRows = if (misc.crossfadeEnabled) 7 else 6
                     SettingsGroup(rowCount = totalAudioRows) { index, position ->
                         when (index) {
                             0 -> SettingsActionCard(
@@ -729,20 +750,53 @@ fun SettingsScreen(
                                     position = position,
                                 )
                             }
-                            5 -> SettingsToggleCard(
-                                icon = Icons.Filled.Lyrics,
-                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Download Synced Lyrics",
-                                subtitle = if (misc.downloadLyrics) {
-                                    "Save .lrc companion files & embed lyrics in downloads"
-                                } else {
-                                    "Do not fetch or save lyrics when downloading"
-                                },
-                                checked = misc.downloadLyrics,
-                                onCheckedChange = viewModel::setDownloadLyrics,
-                                position = position,
-                            )
+                            5 -> if (misc.crossfadeEnabled) {
+                                SettingsToggleCard(
+                                    icon = Icons.Filled.Lyrics,
+                                    iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                    iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    title = "Download Synced Lyrics",
+                                    subtitle = if (misc.downloadLyrics) {
+                                        "Save .lrc companion files & embed lyrics in downloads"
+                                    } else {
+                                        "Do not fetch or save lyrics when downloading"
+                                    },
+                                    checked = misc.downloadLyrics,
+                                    onCheckedChange = viewModel::setDownloadLyrics,
+                                    position = position,
+                                )
+                            } else {
+                                val isIgnored = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
+                                SettingsActionCard(
+                                    icon = Icons.Filled.Bolt,
+                                    iconContainer = if (isIgnored) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
+                                    iconTint = if (isIgnored) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                                    title = "Background Playback (Battery Optimization)",
+                                    subtitle = if (isIgnored) {
+                                        "Unrestricted \u2022 Protected against Samsung & OEM background killing"
+                                    } else {
+                                        "Restricted \u2022 Tap to exempt from Samsung Device Care / sleeping apps"
+                                    },
+                                    onClick = { BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context) },
+                                    position = position,
+                                )
+                            }
+                            6 -> {
+                                val isIgnored = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
+                                SettingsActionCard(
+                                    icon = Icons.Filled.Bolt,
+                                    iconContainer = if (isIgnored) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
+                                    iconTint = if (isIgnored) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                                    title = "Background Playback (Battery Optimization)",
+                                    subtitle = if (isIgnored) {
+                                        "Unrestricted \u2022 Protected against Samsung & OEM background killing"
+                                    } else {
+                                        "Restricted \u2022 Tap to exempt from Samsung Device Care / sleeping apps"
+                                    },
+                                    onClick = { BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context) },
+                                    position = position,
+                                )
+                            }
                         }
                     }
                 }
@@ -1551,7 +1605,7 @@ private fun SettingsToggleCard(
     Card(
         onClick = { onCheckedChange(!checked) },
         shape = shape,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        colors = CardDefaults.cardColors(containerColor = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh)),
         // Pinned at 0dp: Material3's Card blends an extra primary-tinted
         // alpha layer on top of containerColor whenever tonalElevation is
         // above 0dp (surfaceColorAtElevation) — with a Switch already
@@ -1612,7 +1666,7 @@ private fun ScrobbleThresholdRow(percent: Int, onPercentChange: (Int) -> Unit, p
     val liquidGlass = LocalLiquidGlass.current
     Card(
         shape = shape,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        colors = CardDefaults.cardColors(containerColor = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = Modifier
             .fillMaxWidth()
@@ -1667,7 +1721,7 @@ private fun CrossfadeDurationRow(
 
     Card(
         shape = shape,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        colors = CardDefaults.cardColors(containerColor = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = Modifier
             .fillMaxWidth()
@@ -1754,7 +1808,7 @@ private fun SettingsActionCard(
     Card(
         onClick = onClick,
         shape = shape,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        colors = CardDefaults.cardColors(containerColor = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         interactionSource = interactionSource,
         modifier = Modifier
@@ -1792,7 +1846,7 @@ private fun YouTubeAccountRow(
     val liquidGlass = LocalLiquidGlass.current
     Card(
         shape = shape,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        colors = CardDefaults.cardColors(containerColor = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = Modifier
             .fillMaxWidth()
@@ -2281,8 +2335,7 @@ private fun ColorWheelSheet(onDismiss: () -> Unit, onApply: (Color) -> Unit) {
                     .fillMaxWidth()
                     .height(80.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(previewColor)
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp)),
+                    .background(previewColor),
             )
             Spacer(Modifier.height(20.dp))
             Text("Hue", style = MaterialTheme.typography.labelLarge)
@@ -3269,9 +3322,6 @@ private fun LyricsAnimationSheet(
                             if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f)
                             else MaterialTheme.colorScheme.surfaceContainerHigh
                         },
-                        border = if (isVerSelected) {
-                            BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
-                        } else null,
                         modifier = Modifier
                             .weight(1f)
                             .clip(chipShape),
@@ -3308,33 +3358,13 @@ private fun LyricsAnimationSheet(
 
                         Surface(
                             shape = cardShape,
-                            color = if (isSelected) {
+                            color = liquidGlassContainerColor(if (isSelected) {
                                 if (liquidGlass) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
                                 else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.70f)
                             } else {
                                 if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.90f)
                                 else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.50f)
-                            },
-                            border = if (isSelected) {
-                                BorderStroke(
-                                    1.5.dp,
-                                    if (liquidGlass) {
-                                        Brush.linearGradient(
-                                            listOf(
-                                                Color.White.copy(alpha = 0.50f),
-                                                MaterialTheme.colorScheme.primary,
-                                                Color.White.copy(alpha = 0.15f),
-                                            ),
-                                        )
-                                    } else {
-                                        Brush.linearGradient(
-                                            listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primary),
-                                        )
-                                    },
-                                )
-                            } else if (liquidGlass) {
-                                BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f))
-                            } else null,
+                            }),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(cardShape)
