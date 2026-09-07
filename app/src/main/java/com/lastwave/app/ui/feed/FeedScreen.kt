@@ -490,7 +490,6 @@ fun FeedScreen(
                                 }
                             }
                         }
-                    }
 
                     if (state.feedData.heavyRotation.isNotEmpty()) {
                         item(key = "heavy_rotation") {
