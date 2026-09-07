@@ -515,6 +515,41 @@ class InnerTubeMusicApi @Inject constructor(
         }.getOrDefault(emptyList())
     }
 
+    data class NewReleasesBrowseBatch(
+        val directTracks: List<YouTubeMusicTrack>,
+        val albums: List<YouTubePlaylistSummary>,
+        val continuationToken: String?,
+    )
+
+    suspend fun fetchNewReleasesPage(continuationToken: String? = null): NewReleasesBrowseBatch = withContext(Dispatchers.IO) {
+        runCatching {
+            val isAuth = ytAuth.connection.value.isConnected
+            val root = if (!continuationToken.isNullOrBlank()) {
+                browseContinuation(continuationToken, authenticated = isAuth)
+            } else {
+                browseRoot(YT_NEW_RELEASES_BROWSE_ID, authenticated = isAuth)
+            }
+            val directTracks = (parseSongRenderers(root) + parseHomeFeedSongs(root)).distinctBy { it.videoId }
+            val albums = parsePlaylistRenderers(root)
+            val nextToken = genericContinuationToken(root)
+            NewReleasesBrowseBatch(directTracks, albums, nextToken)
+        }.getOrDefault(NewReleasesBrowseBatch(emptyList(), emptyList(), null))
+    }
+
+    suspend fun fetchNewReleasesAlbumsGrid(continuationToken: String? = null): Pair<List<YouTubePlaylistSummary>, String?> = withContext(Dispatchers.IO) {
+        runCatching {
+            val isAuth = ytAuth.connection.value.isConnected
+            val root = if (!continuationToken.isNullOrBlank()) {
+                browseContinuation(continuationToken, authenticated = isAuth)
+            } else {
+                browseRoot("FEmusic_new_releases_albums", authenticated = isAuth)
+            }
+            val albums = parsePlaylistRenderers(root)
+            val nextToken = genericContinuationToken(root)
+            albums to nextToken
+        }.getOrDefault(emptyList<YouTubePlaylistSummary>() to null)
+    }
+
     suspend fun fetchCharts(): List<YouTubeMusicTrack> = withContext(Dispatchers.IO) {
         runCatching {
             val root = browseRoot(YT_CHARTS_BROWSE_ID, authenticated = false)

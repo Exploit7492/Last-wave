@@ -132,6 +132,7 @@ fun FeedScreen(
     onOpenGenerator: () -> Unit = {},
     onOpenFriends: () -> Unit = {},
     onOpenFriendProfile: (username: String, displayName: String?, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    onOpenNewReleases: () -> Unit = {},
     viewModel: FeedViewModel = hiltViewModel(),
     artistAlbumNavigator: ArtistAlbumNavigator = hiltViewModel<ArtistAlbumNavBridgeFeed>().navigator,
 ) {
@@ -144,7 +145,6 @@ fun FeedScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    var collection by remember { mutableStateOf<String?>(null) }
     val musicPlayer = LocalMusicPlayer.current
     val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     var menuTrack by remember { mutableStateOf<YouTubeMusicTrack?>(null) }
@@ -237,14 +237,23 @@ fun FeedScreen(
                         }
                     }
 
-                    if (state.feedData.quickTiles.isNotEmpty()) {
+                    val quickTiles = if (state.feedData.isYtConnected) {
+                        state.feedData.quickTiles
+                    } else {
+                        state.feedData.quickTiles.filter {
+                            it.collection != "yt_liked" && it.collection != "yt_recent" &&
+                                it.playlistId != "yt_liked" && it.playlistId != "yt_recent"
+                        }
+                    }
+                    if (quickTiles.isNotEmpty()) {
                         item(key = "quick_tiles") {
                             QuickTilesGrid(
-                                tiles = state.feedData.quickTiles,
+                                tiles = quickTiles,
                                 onTileClick = { tile ->
                                     when {
                                         tile.collection == "radio" -> viewModel.playInfiniteRadio()
-                                        tile.collection != null -> collection = tile.collection
+                                        tile.collection == "yt_liked" || tile.playlistId == "yt_liked" -> onOpenFeedPlaylist("yt_liked")
+                                        tile.collection == "yt_recent" || tile.playlistId == "yt_recent" -> onOpenFeedPlaylist("yt_recent")
                                         tile.localPlaylistId != null -> onOpenPlaylist(tile.localPlaylistId)
                                         tile.playlistId != null -> onOpenFeedPlaylist(tile.playlistId)
                                         else -> viewModel.handleQuickTileClick(tile)
@@ -522,6 +531,9 @@ fun FeedScreen(
                             FeedSectionHeader(
                                 title = "New releases",
                                 subtitle = "Fresh drops and new albums",
+                                actionText = "See all",
+                                actionIcon = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                                onActionClick = onOpenNewReleases,
                             )
                             FeedMediaRow(
                                 content = {
@@ -587,30 +599,7 @@ fun FeedScreen(
                 .padding(bottom = FloatingNavDefaults.contentBottomPadding()),
         )
     }
-    collection?.let { selected ->
-        val tracks = if (selected == "yt_liked") state.feedData.ytLikedSongs else state.feedData.ytRecentSongs
-        val title = if (selected == "yt_liked") "Liked on YouTube" else "Recently played on YouTube"
-        ModalBottomSheet(onDismissRequest = { collection = null }) {
-            FeedSectionHeader(
-                title = title,
-                actionText = "Play all",
-                actionIcon = Icons.Filled.PlayArrow,
-                onActionClick = { viewModel.playTracksQueue(tracks, sourceLabel = title) },
-            )
-            if (tracks.isEmpty()) {
-                Text("No songs available yet", modifier = Modifier.padding(24.dp))
-            } else {
-                QuickPicksRows(
-                    tracks = tracks,
-                    currentPlayingVideoId = playbackState.current?.videoId,
-                    isPlaying = playbackState.isPlaying,
-                    onTrackClick = { viewModel.playTracksQueue(tracks, it, title) },
-                    onMenuClick = { menuTrack = it },
-                )
-            }
-            Spacer(Modifier.height(24.dp))
-        }
-    }
+
 
     menuTrack?.let { track ->
         TrackContextMenuSheet(

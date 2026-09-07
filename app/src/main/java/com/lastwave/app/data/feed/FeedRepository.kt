@@ -112,6 +112,8 @@ class FeedRepository @Inject constructor(
     private var cachedFeed: FeedData? = null
     private var cachedKey: String? = null
 
+    fun getCachedFeed(): FeedData? = cachedFeed
+
     suspend fun loadFeed(
         username: String?,
         onUpdate: (FeedData) -> Unit = {},
@@ -534,10 +536,21 @@ class FeedRepository @Inject constructor(
             } ?: FeedQuickTile(title = "Mix", subtitle = "Made for you",
                 artworkUrl = quickPicks.firstOrNull()?.artworkUrl, collection = "radio"))
             if (isYtConnected) {
-                add(FeedQuickTile(title = "Liked on YouTube", subtitle = "Your favorites",
-                    artworkUrl = ytLikedSongs.firstOrNull()?.artworkUrl, collection = "yt_liked", isLiked = true))
-                add(FeedQuickTile(title = "Recently played", subtitle = "On YouTube",
-                    artworkUrl = ytRecentSongs.firstOrNull()?.artworkUrl, collection = "yt_recent"))
+                add(FeedQuickTile(
+                    title = "Liked on YouTube",
+                    subtitle = "Your favorites",
+                    artworkUrl = ytLikedSongs.firstOrNull()?.artworkUrl,
+                    playlistId = "yt_liked",
+                    collection = "yt_liked",
+                    isLiked = true,
+                ))
+                add(FeedQuickTile(
+                    title = "Recently played",
+                    subtitle = "On YouTube",
+                    artworkUrl = ytRecentSongs.firstOrNull()?.artworkUrl,
+                    playlistId = "yt_recent",
+                    collection = "yt_recent",
+                ))
             }
         }
 

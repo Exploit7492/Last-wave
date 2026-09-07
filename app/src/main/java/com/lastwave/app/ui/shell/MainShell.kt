@@ -74,7 +74,9 @@ import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.ui.playlist.PlaylistScreen
 import com.lastwave.app.ui.theme.LiquidGlassPreset
 import com.lastwave.app.ui.theme.LocalLiquidGlass
-import com.lastwave.app.ui.theme.LocalLiquidGlassOverlayBackdrop
+import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.lastwave.app.ui.theme.isLiquidGlassBackdropSupported
 import com.lastwave.app.ui.theme.liquidGlassChrome
 import com.lastwave.app.ui.theme.liquidGlassContainerColor
 import com.lastwave.app.ui.theme.liquidGlassSource
@@ -141,6 +143,7 @@ fun MainShell(
     onOpenFeedPlaylist: (String) -> Unit,
     onOpenPlaylist: (Long) -> Unit = {},
     onOpenGenerator: () -> Unit = {},
+    onOpenNewReleases: () -> Unit = {},
     mainShellViewModel: MainShellViewModel = hiltViewModel(),
 ) {
     val tabs = MainTab.entries
@@ -149,13 +152,14 @@ fun MainShell(
     val context = LocalContext.current
     val updateInfo by mainShellViewModel.updateInfo.collectAsStateWithLifecycle()
     val showUpdateBanner = updateInfo.isUpdateAvailable && !updateInfo.isDismissed
+    val navigationBackdrop = if (isLiquidGlassBackdropSupported()) rememberLayerBackdrop() else null
 
     Box(Modifier.fillMaxSize()) {
         val feedIndex = tabs.indexOf(MainTab.FEED)
         HorizontalPager(
             state = pagerState,
             beyondViewportPageCount = 0,
-            modifier = Modifier.fillMaxSize().liquidGlassSource(),
+            modifier = Modifier.fillMaxSize().liquidGlassSource(navigationBackdrop),
         ) { page ->
             val isCurrent = page == pagerState.currentPage
             PredictiveBackScreen(
@@ -172,6 +176,7 @@ fun MainShell(
                         onOpenGenerator = onOpenGenerator,
                         onOpenFriends = onOpenFriends,
                         onOpenFriendProfile = onOpenFriendProfile,
+                        onOpenNewReleases = onOpenNewReleases,
                     )
                     MainTab.STATS -> HomeScreen(
                         onOpenSettings = onOpenSettings,
@@ -205,6 +210,7 @@ fun MainShell(
         }
 
         FloatingNavBar(
+            backdrop = navigationBackdrop,
             tabs = tabs,
             selectedIndex = pagerState.currentPage,
             onSelect = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
@@ -283,6 +289,7 @@ private fun UpdatePromptCard(
 
 @Composable
 private fun FloatingNavBar(
+    backdrop: LayerBackdrop?,
     tabs: List<MainTab>,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
@@ -290,7 +297,6 @@ private fun FloatingNavBar(
     modifier: Modifier = Modifier,
 ) {
     val liquidGlass = LocalLiquidGlass.current
-    val backdrop = LocalLiquidGlassOverlayBackdrop.current
     Box(
         modifier = modifier
             .windowInsetsPadding(

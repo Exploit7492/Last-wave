@@ -200,6 +200,7 @@ import com.lastwave.app.ui.theme.isLiquidGlassBackdropSupported
 import com.lastwave.app.ui.theme.LocalLiquidGlassBackdrop
 import com.lastwave.app.ui.theme.LocalLiquidGlassOverlayBackdrop
 import com.lastwave.app.ui.theme.LiquidGlassPreset
+import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -481,13 +482,21 @@ fun PlayerHost(
             }
         }
     }
+    val miniPlayerBackdrop = if (isLiquidGlassBackdropSupported()) rememberLayerBackdrop() else null
+
     CompositionLocalProvider(
         LocalMusicPlayer provides viewModel.player,
         LocalAddToPlaylist provides requestAddToPlaylist,
         LocalMiniPlayerScrollClearance provides if (state.current != null) 88.dp else 0.dp,
     ) {
         Box(Modifier.fillMaxSize()) {
-            content()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .liquidGlassSource(miniPlayerBackdrop),
+            ) {
+                content()
+            }
             if (state.current != null && !expanded) {
                 MiniPlayer(
                     state = state,
@@ -499,6 +508,7 @@ fun PlayerHost(
                     onClose = viewModel.player::stopAndClear,
                     bottomPadding = if (hasBottomNavigation) 92.dp else 12.dp,
                     edgeToEdge = !hasBottomNavigation,
+                    backdrop = miniPlayerBackdrop,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
             }
@@ -650,6 +660,7 @@ private fun MiniPlayer(
     onClose: () -> Unit,
     bottomPadding: androidx.compose.ui.unit.Dp,
     edgeToEdge: Boolean,
+    backdrop: Backdrop? = LocalLiquidGlassBackdrop.current,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -657,7 +668,6 @@ private fun MiniPlayer(
     // Liquid Glass dressing for the floating mini player (no-op when the
     // experimental setting is off — see ui/theme/LiquidGlass.kt).
     val liquidGlass = LocalLiquidGlass.current
-    val backdrop = LocalLiquidGlassBackdrop.current
     var dragX by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     var dragY by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     val shownX by animateFloatAsState(dragX, ExpressiveMotion.spatialSpring(), label = "miniPlayerX")
