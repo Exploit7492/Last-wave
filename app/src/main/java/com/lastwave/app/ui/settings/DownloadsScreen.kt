@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.lastwave.app.ui.settings
 
 import androidx.activity.compose.BackHandler
