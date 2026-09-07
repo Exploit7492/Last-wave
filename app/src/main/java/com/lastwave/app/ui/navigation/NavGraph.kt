@@ -105,16 +105,18 @@ fun LastWaveNavHost(
     val navBridge: ArtistAlbumNavBridge = hiltViewModel()
     LaunchedEffect(Unit) {
         navBridge.navigator.events.collect { target ->
+            // Drill-down destinations MUST push a fresh back-stack entry every
+            // time: launchSingleTop would collapse Artist A -> Artist B (or
+            // Album X -> Album Y) into the top entry since they share one
+            // destination node, leaving taps on similar artists / more-by
+            // albums visibly dead and the detail ViewModel showing stale data.
+            // Rapid double-tap dedup already lives in ArtistAlbumNavigator.
             when (target) {
                 is ArtistAlbumNavTarget.Artist -> {
-                    navController.navigate(Screen.ArtistDetail.createRoute(target.name, target.browseId)) {
-                        launchSingleTop = true
-                    }
+                    navController.navigate(Screen.ArtistDetail.createRoute(target.name, target.browseId))
                 }
                 is ArtistAlbumNavTarget.Album -> {
-                    navController.navigate(Screen.AlbumDetail.createRoute(target.title, target.artist, target.browseId)) {
-                        launchSingleTop = true
-                    }
+                    navController.navigate(Screen.AlbumDetail.createRoute(target.title, target.artist, target.browseId))
                 }
             }
         }

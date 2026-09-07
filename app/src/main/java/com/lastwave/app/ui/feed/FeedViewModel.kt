@@ -53,6 +53,7 @@ class FeedViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(FeedUiState())
     val uiState: StateFlow<FeedUiState> = _uiState.asStateFlow()
     private var feedJob: Job? = null
+    private var lastLoadedMillis: Long = 0L
 
     init {
         viewModelScope.launch {
@@ -78,7 +79,15 @@ class FeedViewModel @Inject constructor(
 
     fun onVisible() {
         if (feedJob?.isActive == true) return
-        refresh()
+        // ON_START fires on every return from a pushed screen (artist, album,
+        // playlist...). Reloading the whole feed each time kept the tabs in
+        // a near-constant loading state and hammered the network — only
+        // refresh when there's nothing yet or the data is stale.
+        val hasContent = _uiState.value.feedData.quickPicks.isNotEmpty() ||
+            _uiState.value.feedData.topArtists.isNotEmpty() ||
+            _uiState.value.feedData.newReleases.isNotEmpty()
+        val stale = System.currentTimeMillis() - lastLoadedMillis > STALE_AFTER_MILLIS
+        if (!hasContent || stale) refresh()
     }
 
     fun playInfiniteRadio() {
@@ -117,6 +126,7 @@ class FeedViewModel @Inject constructor(
                         error = null,
                     )
                 }
+                lastLoadedMillis = System.currentTimeMillis()
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: Exception) {
@@ -268,4 +278,8 @@ class FeedViewModel @Inject constructor(
         artworkUrl = artworkUrl,
         videoId = videoId.takeIf(String::isNotBlank),
     )
+
+    private companion object {
+        const val STALE_AFTER_MILLIS = 90_000L
+    }
 }

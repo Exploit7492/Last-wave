@@ -35,31 +35,34 @@ class ArtistRepository @Inject constructor(
         browseId: String? = null,
     ): ArtistPageData = withContext(Dispatchers.IO) {
         val cleanName = com.lastwave.app.util.ArtistHelper.primaryArtist(artistName).trim()
-        var targetBrowseId = browseId?.takeIf(String::isNotBlank)
-        var searchArtwork: String? = null
+        if (cleanName.isBlank()) throw java.io.IOException("Artist name is empty.")
 
-        // 1. Resolve browseId if missing
-        if (targetBrowseId == null && cleanName.isNotBlank()) {
-            val searchResults = runCatching { innerTube.searchArtists(cleanName, limit = 5) }.getOrNull().orEmpty()
-            val match = searchResults.firstOrNull { it.name.equals(cleanName, ignoreCase = true) }
-                ?: searchResults.firstOrNull()
-            targetBrowseId = match?.browseId
-            searchArtwork = match?.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage)
-        }
+        // The whole resolve + load runs under one timeout so a stalled
+        // lookup can never leave the screen on its spinner forever — a
+        // timeout surfaces as an error with Retry instead.
+        val loaded = kotlinx.coroutines.withTimeoutOrNull(25_000L) {
+            var targetBrowseId = browseId?.takeIf(String::isNotBlank)
+            var searchArtwork: String? = null
 
-        kotlinx.coroutines.withTimeoutOrNull(20_000L) {
+            // 1. Resolve browseId if missing
+            if (targetBrowseId == null) {
+                val searchResults = runCatching { innerTube.searchArtists(cleanName, limit = 5) }.getOrNull().orEmpty()
+                val match = searchResults.firstOrNull { it.name.equals(cleanName, ignoreCase = true) }
+                    ?: searchResults.firstOrNull()
+                targetBrowseId = match?.browseId
+                searchArtwork = match?.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage)
+            }
+            val resolvedId = targetBrowseId
+                ?: throw java.io.IOException("Couldn't find \"$cleanName\" on YouTube Music.")
+
             coroutineScope {
             // Load InnerTube artist data in parallel with Last.fm metadata
             val innerTubeDeferred = async {
-                targetBrowseId?.let { id ->
-                    runCatching { innerTube.fetchArtistPage(id, artistNameFallback = cleanName) }.getOrNull()
-                }
+                runCatching { innerTube.fetchArtistPage(resolvedId, artistNameFallback = cleanName) }.getOrNull()
             }
 
             val lastFmDeferred = async {
-                if (cleanName.isNotBlank()) {
-                    runCatching { fetchLastFmArtistInfo(cleanName) }.getOrNull()
-                } else null
+                runCatching { fetchLastFmArtistInfo(cleanName) }.getOrNull()
             }
 
             val ytData = innerTubeDeferred.await()
@@ -110,7 +113,7 @@ class ArtistRepository @Inject constructor(
 
             ArtistPageData(
                 name = finalName,
-                browseId = targetBrowseId.orEmpty(),
+                browseId = resolvedId,
                 artworkUrl = artwork,
                 fallbackArtworkUrl = searchArtwork,
                 bannerUrl = banner,
@@ -123,11 +126,18 @@ class ArtistRepository @Inject constructor(
                 singles = ytData?.singles.orEmpty(),
                 similarArtists = if (ytData?.similarArtists?.isNotEmpty() == true) ytData.similarArtists else lfmData?.similarArtists.orEmpty(),
             )
-        } } ?: ArtistPageData(
-            name = cleanName.ifBlank { "Artist" },
-            browseId = targetBrowseId.orEmpty(),
-            artworkUrl = searchArtwork,
-        )
+            }
+        } ?: throw java.io.IOException("Couldn't load \"$cleanName\". Check your connection and try again.")
+
+        // Never hand the UI a completely hollow page (no songs, no albums,
+        // no artwork): it looks exactly like a stuck loader with dead play
+        // buttons. Surface an error with Retry instead.
+        if (loaded.topSongs.isEmpty() && loaded.albums.isEmpty() && loaded.singles.isEmpty() &&
+            !ArtworkNormalizer.isRealImage(loaded.artworkUrl)
+        ) {
+            throw java.io.IOException("No playable tracks found for \"$cleanName\" right now.")
+        }
+        loaded
     }
 
     private data class LastFmArtistMeta(

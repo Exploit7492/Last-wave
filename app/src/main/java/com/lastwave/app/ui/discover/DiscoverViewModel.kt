@@ -27,6 +27,7 @@ data class DiscoverUiState(
     val isRefreshing: Boolean = false,
     val saveResultMessage: String? = null,
     val isYtConnected: Boolean = false,
+    val endReached: Boolean = false,
 )
 
 /** Faithful port of discover.js (§7): infinite-scroll feed, pull-to-
@@ -64,7 +65,7 @@ class DiscoverViewModel @Inject constructor(
 
     fun loadInitial() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
+            _uiState.update { it.copy(isLoading = true, error = null, endReached = false) }
             try {
                 val cached = repository.allowedCachedFeed()
                 val needed = (INITIAL_BATCH_SIZE - cached.size).coerceAtLeast(0)
@@ -79,12 +80,15 @@ class DiscoverViewModel @Inject constructor(
     }
 
     fun loadMore() {
-        if (_uiState.value.isLoadingMore) return
+        if (_uiState.value.isLoadingMore || _uiState.value.endReached) return
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMore = true) }
             try {
                 val more = repository.nextBatch(PAGE_SIZE)
-                _uiState.update { it.copy(isLoadingMore = false, tracks = repository.getCachedFeed()) }
+                // An empty batch means the pool is exhausted — stop
+                // auto-paging so sitting at the bottom doesn't re-trigger
+                // loadMore on every size change in an endless network storm.
+                _uiState.update { it.copy(isLoadingMore = false, endReached = more.isEmpty(), tracks = repository.getCachedFeed()) }
                 artworkRepository.enrichBatch(more.map { it.name to it.artist })
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoadingMore = false) }
@@ -94,7 +98,7 @@ class DiscoverViewModel @Inject constructor(
 
     fun refresh() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isRefreshing = true) }
+            _uiState.update { it.copy(isRefreshing = true, endReached = false) }
             repository.reset()
             try {
                 repository.nextBatch(INITIAL_BATCH_SIZE)
@@ -108,7 +112,7 @@ class DiscoverViewModel @Inject constructor(
     fun surpriseMe() {
         viewModelScope.launch {
             repository.reset()
-            _uiState.update { it.copy(isLoading = true) }
+            _uiState.update { it.copy(isLoading = true, endReached = false) }
             try {
                 repository.nextBatch(INITIAL_BATCH_SIZE)
                 _uiState.update { it.copy(isLoading = false, tracks = repository.getCachedFeed()) }

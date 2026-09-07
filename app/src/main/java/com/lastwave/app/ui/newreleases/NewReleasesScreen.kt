@@ -91,7 +91,9 @@ fun NewReleasesScreen(
     val listState = rememberLazyListState()
     var menuTrack by remember { mutableStateOf<YouTubeMusicTrack?>(null) }
 
-    androidx.activity.compose.BackHandler(onBack = onBack)
+    // System back / predictive-back gesture is owned by the wrapping
+    // PredictiveBackScreen in NavGraph (single handler per screen) — the
+    // header back button still pops directly via onBack.
 
     // Infinite scroll trigger: when nearing bottom, load next batch
     val shouldLoadMore by remember(listState, state.tracks.size) {
@@ -102,7 +104,7 @@ fun NewReleasesScreen(
         }
     }
     LaunchedEffect(shouldLoadMore, state.tracks.size) {
-        if (shouldLoadMore && !state.isLoading && !state.isLoadingMore && state.tracks.isNotEmpty()) {
+        if (shouldLoadMore && !state.isLoading && !state.isLoadingMore && !state.endReached && state.tracks.isNotEmpty()) {
             viewModel.loadMore()
         }
     }
@@ -324,6 +326,23 @@ fun NewReleasesScreen(
                                             contentAlignment = Alignment.Center,
                                         ) {
                                             ExpressiveInlineLoadingIndicator()
+                                        }
+                                    }
+                                }
+
+                                if (state.endReached && !state.isLoadingMore) {
+                                    item(key = "end_reached_footer", contentType = "footer") {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(20.dp),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Text(
+                                                "You're all caught up",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
                                         }
                                     }
                                 }

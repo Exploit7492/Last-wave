@@ -131,7 +131,7 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
         }
     }
     LaunchedEffect(shouldLoadMore, state.tracks.size) {
-        if (shouldLoadMore && !state.isLoading && !state.isLoadingMore && state.tracks.isNotEmpty()) viewModel.loadMore()
+        if (shouldLoadMore && !state.isLoading && !state.isLoadingMore && !state.endReached && state.tracks.isNotEmpty()) viewModel.loadMore()
     }
 
     Box(

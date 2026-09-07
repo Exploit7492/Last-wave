@@ -430,16 +430,29 @@ class FeedRepository @Inject constructor(
             .take(12)
             .map { album ->
                 async(Dispatchers.IO) {
-                    if (ArtworkNormalizer.isRealImage(album.artworkUrl)) album else albumArtworkRequests.withPermit {
-                        val match = runCatching {
-                            innerTube.searchAlbums("${album.title} ${album.artist}", limit = 5).firstOrNull {
-                                it.name.equals(album.title, ignoreCase = true) &&
-                                    ArtistHelper.splitArtists(it.artist).any { candidate ->
-                                        ArtistHelper.splitArtists(album.artist).any { candidate.equals(it, ignoreCase = true) }
-                                    }
-                            }
-                        }.getOrNull()
-                        album.copy(artworkUrl = match?.artworkUrl, browseId = match?.browseId)
+                    // Always resolve the browseId (not just when artwork is
+                    // missing): opening an album without one forces the
+                    // detail screen through a slow name search that often
+                    // lands on the wrong release or nothing at all.
+                    if (album.browseId != null && ArtworkNormalizer.isRealImage(album.artworkUrl)) {
+                        album
+                    } else albumArtworkRequests.withPermit {
+                        val candidates = runCatching {
+                            innerTube.searchAlbums("${album.title} ${album.artist}", limit = 5)
+                        }.getOrNull().orEmpty()
+                        val match = candidates.firstOrNull {
+                            it.name.equals(album.title, ignoreCase = true) &&
+                                ArtistHelper.splitArtists(it.artist).any { candidate ->
+                                    ArtistHelper.splitArtists(album.artist).any { candidate.equals(it, ignoreCase = true) }
+                                }
+                        } ?: candidates.firstOrNull {
+                            it.name.equals(album.title, ignoreCase = true)
+                        }
+                        album.copy(
+                            artworkUrl = album.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage)
+                                ?: match?.artworkUrl,
+                            browseId = album.browseId ?: match?.browseId,
+                        )
                     }
                 }
             }.awaitAll()

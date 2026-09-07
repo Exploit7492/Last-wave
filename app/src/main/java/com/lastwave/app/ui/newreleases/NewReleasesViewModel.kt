@@ -22,6 +22,7 @@ data class NewReleasesUiState(
     val tracks: List<YouTubeMusicTrack> = emptyList(),
     val error: String? = null,
     val isRefreshing: Boolean = false,
+    val endReached: Boolean = false,
 )
 
 @HiltViewModel
@@ -39,7 +40,7 @@ class NewReleasesViewModel @Inject constructor(
 
     fun loadInitial() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
+            _uiState.update { it.copy(isLoading = true, error = null, endReached = false) }
             try {
                 val initialTracks = repository.fetchInitialBatch()
                 _uiState.update {
@@ -62,7 +63,7 @@ class NewReleasesViewModel @Inject constructor(
 
     fun loadMore() {
         val current = _uiState.value
-        if (current.isLoading || current.isLoadingMore || current.tracks.isEmpty()) return
+        if (current.isLoading || current.isLoadingMore || current.tracks.isEmpty() || current.endReached) return
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMore = true) }
             try {
@@ -70,6 +71,13 @@ class NewReleasesViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isLoadingMore = false,
+                        // An empty batch means every source (continuations,
+                        // album queue, search fallbacks) is exhausted — stop
+                        // auto-paging, otherwise sitting at the bottom of the
+                        // list re-triggers loadMore on every size change in a
+                        // never-ending network storm that also starves the
+                        // repository mutex for fresh loads.
+                        endReached = more.isEmpty(),
                         tracks = if (more.isNotEmpty()) it.tracks + more else it.tracks,
                     )
                 }
@@ -81,7 +89,7 @@ class NewReleasesViewModel @Inject constructor(
 
     fun refresh() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isRefreshing = true) }
+            _uiState.update { it.copy(isRefreshing = true, endReached = false) }
             try {
                 val refreshed = repository.fetchInitialBatch()
                 _uiState.update {

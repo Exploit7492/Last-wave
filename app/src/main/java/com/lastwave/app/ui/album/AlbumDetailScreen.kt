@@ -113,7 +113,9 @@ fun AlbumDetailScreen(
     val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     val haptic = LocalHapticFeedback.current
 
-    androidx.activity.compose.BackHandler(onBack = onBack)
+    // System back / predictive-back gesture is owned by the wrapping
+    // PredictiveBackScreen in NavGraph (single handler per screen) — the
+    // toolbar button below still pops directly via onBack.
 
     LaunchedEffect(albumTitle, artistName, browseId) {
         viewModel.loadAlbum(albumTitle, artistName, browseId)
@@ -390,6 +392,16 @@ fun AlbumDetailScreen(
                     }
 
                     // 3. Track Items
+                    if (data.tracks.isEmpty()) {
+                        item(key = "tracklist_empty") {
+                            Text(
+                                text = "No tracks listed for this album right now — try again later.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 8.dp),
+                            )
+                        }
+                    }
                     itemsIndexed(
                         data.tracks,
                         key = { index, track -> "${track.videoId ?: track.title}_$index" },

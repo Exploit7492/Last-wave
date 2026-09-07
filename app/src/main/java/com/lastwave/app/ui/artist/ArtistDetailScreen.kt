@@ -125,7 +125,9 @@ fun ArtistDetailScreen(
     val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     val haptic = LocalHapticFeedback.current
 
-    androidx.activity.compose.BackHandler(onBack = onBack)
+    // System back / predictive-back gesture is owned by the wrapping
+    // PredictiveBackScreen in NavGraph (single handler per screen) — the
+    // toolbar button below still pops directly via onBack.
 
     LaunchedEffect(artistName, browseId) {
         viewModel.loadArtist(artistName, browseId)

@@ -35,30 +35,35 @@ class AlbumRepository @Inject constructor(
     ): AlbumPageData = withContext(Dispatchers.IO) {
         val cleanTitle = albumTitle.trim()
         val cleanArtist = artistName.trim()
-        var targetBrowseId = browseId?.takeIf(String::isNotBlank)
+        if (cleanTitle.isBlank()) throw java.io.IOException("Album title is empty.")
 
-        // 1. Resolve browseId if missing
-        if (targetBrowseId == null && cleanTitle.isNotBlank()) {
-            val query = if (cleanArtist.isNotBlank()) "$cleanTitle $cleanArtist" else cleanTitle
-            val searchResults = runCatching { innerTube.searchAlbums(query, limit = 5) }.getOrNull().orEmpty()
-            val match = searchResults.firstOrNull { it.name.equals(cleanTitle, ignoreCase = true) }
-                ?: searchResults.firstOrNull()
-            targetBrowseId = match?.browseId
-        }
+        // The whole resolve + load runs under one timeout so a stalled
+        // lookup can never leave the screen on its spinner forever — a
+        // timeout surfaces as an error with Retry instead.
+        val loaded = kotlinx.coroutines.withTimeoutOrNull(25_000L) {
+            var targetBrowseId = browseId?.takeIf(String::isNotBlank)
 
-        kotlinx.coroutines.withTimeoutOrNull(20_000L) {
+            // 1. Resolve browseId if missing
+            if (targetBrowseId == null) {
+                val query = if (cleanArtist.isNotBlank()) "$cleanTitle $cleanArtist" else cleanTitle
+                val searchResults = runCatching { innerTube.searchAlbums(query, limit = 5) }.getOrNull().orEmpty()
+                val match = searchResults.firstOrNull { it.name.equals(cleanTitle, ignoreCase = true) }
+                    ?: searchResults.firstOrNull()
+                targetBrowseId = match?.browseId
+            }
+            val resolvedId = targetBrowseId
+                ?: throw java.io.IOException("Couldn't find the album \"$cleanTitle\".")
+
             coroutineScope {
                 // Load InnerTube album data in parallel with Last.fm metadata
                 val innerTubeDeferred = async {
-                    targetBrowseId?.let { id ->
-                        runCatching {
-                            innerTube.fetchAlbumPage(id, albumTitleFallback = cleanTitle, artistFallback = cleanArtist)
-                        }.getOrNull()
-                    }
+                    runCatching {
+                        innerTube.fetchAlbumPage(resolvedId, albumTitleFallback = cleanTitle, artistFallback = cleanArtist)
+                    }.getOrNull()
                 }
 
                 val lastFmDeferred = async {
-                    if (cleanTitle.isNotBlank() && cleanArtist.isNotBlank()) {
+                    if (cleanArtist.isNotBlank()) {
                         runCatching { fetchLastFmAlbumInfo(cleanTitle, cleanArtist) }.getOrNull()
                     } else null
                 }
@@ -75,28 +80,48 @@ class AlbumRepository @Inject constructor(
 
                 var tracks = ytData?.tracks.orEmpty()
 
-                // Fallback: If InnerTube returned no tracks, search tracks by album and artist
+                // Fallback: only when the album page itself yielded no tracks,
+                // and only with songs strictly matching this album/artist.
+                // Mapping raw search hits 1:1 used to render a single random
+                // song (or unrelated songs) as the whole "tracklist".
                 if (tracks.isEmpty() && finalTitle.isNotBlank()) {
                     val songs = runCatching {
                         innerTube.searchSongs("$finalTitle $finalArtist", limit = 20)
                     }.getOrDefault(emptyList())
 
-                    tracks = songs.map { track ->
+                    tracks = songs.filter { track ->
+                        if (track.videoId.isBlank()) return@filter false
+                        val artistOk = track.artist.equals(finalArtist, ignoreCase = true) ||
+                            com.lastwave.app.util.ArtistHelper.splitArtists(track.artist)
+                                .any { it.equals(finalArtist, ignoreCase = true) } ||
+                            finalArtist.contains(track.artist, ignoreCase = true) ||
+                            track.artist.equals("Unknown artist", ignoreCase = true)
+                        val albumOk = track.album.isNullOrBlank() ||
+                            track.album.equals(finalTitle, ignoreCase = true)
+                        artistOk && albumOk
+                    }.map { track ->
                         PlayableTrack(
                             title = track.title,
                             artist = track.artist.takeUnless { it == "Unknown artist" } ?: finalArtist,
-                            album = finalTitle,
+                            album = track.album?.takeIf(String::isNotBlank) ?: finalTitle,
                             artworkUrl = track.artworkUrl ?: artwork,
                             videoId = track.videoId,
                         )
                     }
                 }
 
+                // The page never actually loaded and the fallback found
+                // nothing either: report an error with Retry rather than a
+                // hollow page whose play buttons are all dead.
+                if (ytData == null && tracks.isEmpty()) {
+                    throw java.io.IOException("Couldn't load \"$finalTitle\". Check your connection and try again.")
+                }
+
                 AlbumPageData(
                     title = finalTitle,
                     artist = finalArtist,
                     artistBrowseId = ytData?.artistBrowseId,
-                    browseId = targetBrowseId.orEmpty(),
+                    browseId = resolvedId,
                     artworkUrl = artwork,
                     releaseYear = releaseYear,
                     trackCountText = if (tracks == ytData?.tracks) ytData?.trackCountText else null,
@@ -107,11 +132,9 @@ class AlbumRepository @Inject constructor(
                     otherAlbums = ytData?.otherAlbums.orEmpty(),
                 )
             }
-        } ?: AlbumPageData(
-            title = cleanTitle.ifBlank { "Album" },
-            artist = cleanArtist.ifBlank { "Various Artists" },
-            browseId = targetBrowseId.orEmpty(),
-        )
+        } ?: throw java.io.IOException("Couldn't load \"$cleanTitle\". Check your connection and try again.")
+
+        loaded
     }
 
     private data class LastFmAlbumMeta(

@@ -29,33 +29,50 @@ sealed class Screen(val route: String) {
     data object YouTubeLogin : Screen("youtube_login")
     data object NewReleases : Screen("new_releases")
     data object FeedPlaylistDetail : Screen("feed_playlist/{playlistId}") {
-        fun createRoute(playlistId: String) = "feed_playlist/${android.net.Uri.encode(playlistId)}"
+        fun createRoute(playlistId: String) = "feed_playlist/${encodeArg(playlistId)}"
     }
     data object PlaylistDetail : Screen("playlist_detail/{playlistId}") {
         fun createRoute(playlistId: Long) = "playlist_detail/$playlistId"
     }
     data object ArtistDetail : Screen("artist_detail/{artistName}?browseId={browseId}") {
         fun createRoute(artistName: String, browseId: String? = null): String {
-            val encName = android.net.Uri.encode(artistName)
-            val encBrowseId = if (!browseId.isNullOrBlank()) android.net.Uri.encode(browseId) else ""
+            val encName = encodeArg(artistName)
+            val encBrowseId = if (!browseId.isNullOrBlank()) encodeArg(browseId) else ""
             return "artist_detail/$encName?browseId=$encBrowseId"
         }
     }
     data object AlbumDetail : Screen("album_detail/{albumTitle}?artistName={artistName}&browseId={browseId}") {
         fun createRoute(albumTitle: String, artistName: String = "", browseId: String? = null): String {
-            val encTitle = android.net.Uri.encode(albumTitle)
-            val encArtist = android.net.Uri.encode(artistName)
-            val encBrowseId = if (!browseId.isNullOrBlank()) android.net.Uri.encode(browseId) else ""
+            val encTitle = encodeArg(albumTitle)
+            val encArtist = encodeArg(artistName)
+            val encBrowseId = if (!browseId.isNullOrBlank()) encodeArg(browseId) else ""
             return "album_detail/$encTitle?artistName=$encArtist&browseId=$encBrowseId"
         }
     }
     data object FriendProfile : Screen("friend_profile/{username}?displayName={displayName}&avatarUrl={avatarUrl}") {
         fun createRoute(username: String, displayName: String? = null, avatarUrl: String? = null): String {
-            val encName = android.net.Uri.encode(username)
-            val encDisplay = if (!displayName.isNullOrBlank()) android.net.Uri.encode(displayName) else ""
-            val encAvatar = if (!avatarUrl.isNullOrBlank()) android.net.Uri.encode(avatarUrl) else ""
+            val encName = encodeArg(username)
+            val encDisplay = if (!displayName.isNullOrBlank()) encodeArg(displayName) else ""
+            val encAvatar = if (!avatarUrl.isNullOrBlank()) encodeArg(avatarUrl) else ""
             return "friend_profile/$encName?displayName=$encDisplay&avatarUrl=$encAvatar"
         }
+    }
+
+    companion object {
+        /**
+         * Encodes one route argument (path segment or query value) so names
+         * with `/`, `?`, `&` or `#` — e.g. "AC/DC", "Simon & Garfunkel",
+         * "What If...?" — can never split the route into extra segments /
+         * params (which crashed navigation or opened the wrong page).
+         * Navigation decodes the value once on read, so this round-trips.
+         */
+        fun encodeArg(raw: String): String =
+            android.net.Uri.encode(raw)
+                ?.replace("/", "%2F")
+                ?.replace("?", "%3F")
+                ?.replace("&", "%26")
+                ?.replace("#", "%23")
+                .orEmpty()
     }
 }
 

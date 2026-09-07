@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
@@ -20,7 +21,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
-import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 /**
  * Wraps a pushed screen (Settings / Search / Discover / Genres — any
@@ -64,6 +65,7 @@ fun PredictiveBackScreen(
     content: @Composable () -> Unit,
 ) {
     val progress = remember { Animatable(0f) }
+    val gestureScope = rememberCoroutineScope()
 
     // Which edge the gesture started from (BackEventCompat.EDGE_LEFT/RIGHT)
     // and how far down the screen, as a 0..1 fraction of height — together
@@ -73,11 +75,37 @@ fun PredictiveBackScreen(
     var touchYFraction by remember { mutableFloatStateOf(0.5f) }
     var containerHeightPx by remember { mutableFloatStateOf(1f) }
 
-    androidx.activity.compose.BackHandler(enabled = enabled) {
-        onBack()
+    // This is the ONLY back handler for the wrapped screen: every pushed
+    // destination must NOT register its own BackHandler on top of this one.
+    // Two handlers for one press made back behavior order-dependent (double
+    // pops that skipped destinations, or presses that appeared to do
+    // nothing) — see the detail screens, whose toolbar buttons still pop
+    // directly while the gesture path lives here.
+    PredictiveBackHandler(enabled = enabled) { backEvents ->
+        try {
+            backEvents.collect { event ->
+                edge = event.swipeEdge
+                touchYFraction = (event.touchY / containerHeightPx.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                progress.snapTo(event.progress)
+            }
+            // Gesture committed (or a legacy button press, whose flow simply
+            // completes with no per-frame events) — reset the visuals, then
+            // pop exactly once.
+            progress.snapTo(0f)
+            onBack()
+        } finally {
+            // Gesture cancelled mid-drag: the handler coroutine is cancelled
+            // here, so the spring-back runs in the screen's own scope instead
+            // of suspending inside a cancelled one.
+            if (progress.value > 0f) {
+                gestureScope.launch {
+                    progress.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                }
+            }
+        }
     }
 
-    val p = 0f
+    val p = progress.value
     val pivotX = if (edge == BackEventCompat.EDGE_RIGHT) 1f else 0f
     // A small extra push toward the edge/corner being dragged from, on top
     // of the scale — this is what sells "shrinking away from a corner"
