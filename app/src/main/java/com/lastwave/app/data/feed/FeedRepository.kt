@@ -353,8 +353,8 @@ class FeedRepository @Inject constructor(
         val mixes = (quickPicks + ytLikedSongs + discoveryTracks)
             .filter { it.videoId.isNotBlank() }.distinctBy { it.videoId }.shuffled(random)
             .sortedBy { it.videoId in previousMixIds }
-            .distinctBy { it.artist.trim().lowercase() }.take(8)
-            .map { FeedMix(title = "${it.artist} mix", seed = it) }
+            .distinctBy { ArtistHelper.primaryArtist(it.artist).trim().lowercase() }.take(8)
+            .map { FeedMix(title = "${ArtistHelper.primaryArtist(it.artist)} mix", seed = it) }
 
         // Heavy rotation blends long-term taste + liked signals, scored by
         // affinity so the shelf reflects who you actually replay — not just
@@ -369,7 +369,7 @@ class FeedRepository @Inject constructor(
                     GeneratedTrack(
                         it.title, it.artist, it.artworkUrl,
                         url = "https://www.youtube.com/watch?v=${it.videoId}", album = it.album,
-                    ) to (12.0 / (1 + i / 6.0) + (affinity[it.artist.trim().lowercase()] ?: 0.0) * 30),
+                    ) to (12.0 / (1 + i / 6.0) + (affinity[ArtistHelper.primaryArtist(it.artist).trim().lowercase()] ?: 0.0) * 30),
                 )
             }
         }.distinctBy { (t, _) -> t.key }
@@ -382,17 +382,21 @@ class FeedRepository @Inject constructor(
         // fill the whole shelf.
         val jumpCandidates = buildList {
             ytRecentSongs.forEach {
+                val pArtist = ArtistHelper.primaryArtist(it.artist)
                 add(
                     RecentTrack(
                         name = it.title,
-                        artist = ArtistRef(name = it.artist),
+                        artist = ArtistRef(name = pArtist),
                         album = ArtistRef(name = it.album.orEmpty()),
                         image = it.artworkUrl?.let { url -> listOf(ImageDto(url, "extralarge")) }.orEmpty(),
                         url = "https://www.youtube.com/watch?v=${it.videoId}",
                     ),
                 )
             }
-            addAll(recentTracks)
+            recentTracks.forEach {
+                val pArtist = ArtistHelper.primaryArtist(it.artist.displayName)
+                add(it.copy(artist = ArtistRef(name = pArtist)))
+            }
         }.distinctBy { it.artist.displayName.trim().lowercase() to it.name.trim().lowercase() }
         val jumpBackIn = diversify(jumpCandidates, { it.artist.displayName }, maxPerArtist = 2).take(15)
 
@@ -401,7 +405,7 @@ class FeedRepository @Inject constructor(
             (ytRecentSongs + ytLikedSongs).forEach { track ->
                 val album = track.album?.takeIf(String::isNotBlank) ?: return@forEach
                 if (track.artist.isNotBlank()) {
-                    add(FeedAlbum(title = album, artist = track.artist, artworkUrl = track.artworkUrl))
+                    add(FeedAlbum(title = album, artist = ArtistHelper.primaryArtist(track.artist), artworkUrl = track.artworkUrl))
                 }
             }
             recentTracks.forEach { track ->
@@ -409,7 +413,7 @@ class FeedRepository @Inject constructor(
                     add(
                         FeedAlbum(
                             title = track.album.displayName,
-                            artist = track.artist.displayName,
+                            artist = ArtistHelper.primaryArtist(track.artist.displayName),
                             artworkUrl = track.artworkUrl,
                         ),
                     )
@@ -418,7 +422,7 @@ class FeedRepository @Inject constructor(
             artistSignalTracks.forEach { track ->
                 val album = track.album?.takeIf(String::isNotBlank) ?: return@forEach
                 if (track.artist.isNotBlank()) {
-                    add(FeedAlbum(title = album, artist = track.artist, artworkUrl = track.artworkUrl))
+                    add(FeedAlbum(title = album, artist = ArtistHelper.primaryArtist(track.artist), artworkUrl = track.artworkUrl))
                 }
             }
         }

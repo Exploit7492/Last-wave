@@ -829,7 +829,7 @@ private fun TrackRow(
             ) {
                 ArtworkImage(
                     name = track.name,
-                    artist = track.artist,
+                    artist = com.lastwave.app.util.ArtistHelper.primaryArtist(track.artist),
                     embeddedUrl = track.artworkUrl,
                     fallbackIcon = if (isNowPlaying) Icons.Filled.GraphicEq else Icons.Filled.MusicNote,
                     modifier = Modifier.fillMaxSize(),
@@ -851,7 +851,7 @@ private fun TrackRow(
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    track.artist,
+                    com.lastwave.app.util.ArtistHelper.primaryArtist(track.artist),
                     style = MaterialTheme.typography.bodyMedium,
                     color = secondaryTextColor,
                     maxLines = 1,

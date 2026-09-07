@@ -97,6 +97,7 @@ import com.lastwave.app.data.feed.FeedAlbum
 import com.lastwave.app.data.feed.FeedArtist
 import com.lastwave.app.data.feed.FeedQuickTile
 import com.lastwave.app.data.feed.FeedSpotlight
+import com.lastwave.app.util.ArtistHelper
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.model.FriendEntry
 import com.lastwave.app.data.model.RecentTrack
@@ -343,7 +344,7 @@ fun FeedScreen(
                                     itemsIndexed(section.items) { index, track ->
                                         FeedMediaCard(
                                             title = track.title,
-                                            subtitle = track.artist,
+                                            subtitle = ArtistHelper.primaryArtist(track.artist),
                                             artworkUrl = track.artworkUrl,
                                             fallbackIcon = Icons.Filled.MusicNote,
                                             onClick = { viewModel.playTracksQueue(section.items, index, section.title) },
@@ -370,7 +371,7 @@ fun FeedScreen(
                                     itemsIndexed(state.feedData.freshFinds) { index, track ->
                                         FeedMediaCard(
                                             title = track.title,
-                                            subtitle = track.artist,
+                                            subtitle = ArtistHelper.primaryArtist(track.artist),
                                             artworkUrl = track.artworkUrl,
                                             fallbackIcon = Icons.Filled.Whatshot,
                                             badgeText = "NEW",
@@ -437,37 +438,55 @@ fun FeedScreen(
                             SpotlightHeroCard(
                                 spotlight = spotlight,
                                 onPlayRadio = {
-                                    viewModel.playArtistRadio(FeedArtist(spotlight.artistName, spotlight.browseId, spotlight.artworkUrl))
+                                    viewModel.playArtistRadio(FeedArtist(ArtistHelper.primaryArtist(spotlight.artistName), spotlight.browseId, spotlight.artworkUrl))
                                 },
                                 onOpenArtist = {
-                                    artistAlbumNavigator.openArtist(spotlight.artistName, spotlight.browseId ?: "")
+                                    artistAlbumNavigator.openArtist(ArtistHelper.primaryArtist(spotlight.artistName), spotlight.browseId ?: "")
                                 },
                             )
                         }
                     }
 
                     if (state.feedData.topArtists.isNotEmpty()) {
-                        item(key = "top_artists") {
-                            FeedSectionHeader(
-                                title = "Artists for you",
-                                subtitle = "Worth another listen",
-                            )
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                modifier = Modifier.padding(top = 12.dp),
-                            ) {
-                                itemsIndexed(state.feedData.topArtists) { index, artist ->
-                                    ArtistAvatarCard(
-                                        artist = artist,
-                                        isTop = index < 3,
-                                        onClick = {
-                                            artistAlbumNavigator.openArtist(
-                                                name = artist.name,
-                                                browseId = artist.browseId ?: "",
-                                            )
-                                        },
-                                    )
+                        val individualTopArtists = remember(state.feedData.topArtists) {
+                            state.feedData.topArtists.flatMap { artist ->
+                                val split = ArtistHelper.splitArtists(artist.name)
+                                if (split.size <= 1) {
+                                    listOf(artist.copy(name = ArtistHelper.primaryArtist(artist.name)))
+                                } else {
+                                    split.map { singleName ->
+                                        FeedArtist(
+                                            name = singleName,
+                                            browseId = if (singleName.equals(artist.name, ignoreCase = true)) artist.browseId else null,
+                                            artworkUrl = artist.artworkUrl,
+                                        )
+                                    }
+                                }
+                            }.distinctBy { it.name.trim().lowercase() }
+                        }
+                        if (individualTopArtists.isNotEmpty()) {
+                            item(key = "top_artists") {
+                                FeedSectionHeader(
+                                    title = "Artists for you",
+                                    subtitle = "Worth another listen",
+                                )
+                                LazyRow(
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                    modifier = Modifier.padding(top = 12.dp),
+                                ) {
+                                    itemsIndexed(individualTopArtists) { index, artist ->
+                                        ArtistAvatarCard(
+                                            artist = artist,
+                                            isTop = index < 3,
+                                            onClick = {
+                                                artistAlbumNavigator.openArtist(
+                                                    name = ArtistHelper.primaryArtist(artist.name),
+                                                    browseId = artist.browseId ?: "",
+                                                )
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -487,7 +506,7 @@ fun FeedScreen(
                                     itemsIndexed(state.feedData.heavyRotation) { index, track ->
                                         FeedMediaCard(
                                             title = track.name,
-                                            subtitle = track.artist,
+                                            subtitle = ArtistHelper.primaryArtist(track.artist),
                                             artworkUrl = track.artworkUrl,
                                             fallbackIcon = Icons.Filled.MusicNote,
                                             onClick = { viewModel.playGeneratedQueue(state.feedData.heavyRotation, index, "Heavy Rotation") },
@@ -510,13 +529,13 @@ fun FeedScreen(
                                     items(state.feedData.recentAlbums) { album ->
                                         FeedMediaCard(
                                             title = album.title,
-                                            subtitle = album.artist,
+                                            subtitle = ArtistHelper.primaryArtist(album.artist),
                                             artworkUrl = album.artworkUrl,
                                             fallbackIcon = Icons.Filled.Album,
                                             onClick = {
                                                 artistAlbumNavigator.openAlbum(
                                                     title = album.title,
-                                                    artist = album.artist,
+                                                    artist = ArtistHelper.primaryArtist(album.artist),
                                                     browseId = album.browseId ?: "",
                                                 )
                                             },
@@ -567,14 +586,14 @@ fun FeedScreen(
                                     items(state.feedData.newReleases) { summary ->
                                         FeedMediaCard(
                                             title = summary.title,
-                                            subtitle = summary.author ?: "Album",
+                                            subtitle = summary.author?.let(ArtistHelper::primaryArtist) ?: "Album",
                                             artworkUrl = summary.artworkUrl,
                                             fallbackIcon = Icons.Filled.NewReleases,
                                             badgeText = "NEW",
                                             onClick = {
                                                 artistAlbumNavigator.openAlbum(
                                                     title = summary.title,
-                                                    artist = summary.author ?: "",
+                                                    artist = summary.author?.let(ArtistHelper::primaryArtist) ?: "",
                                                     browseId = summary.id,
                                                 )
                                             },
@@ -1165,7 +1184,7 @@ private fun QuickPicksRows(
                             Box(modifier = Modifier.size(56.dp)) {
                                 ArtworkImage(
                                     name = track.title,
-                                    artist = track.artist,
+                                    artist = ArtistHelper.primaryArtist(track.artist),
                                     embeddedUrl = track.artworkUrl,
                                     fallbackIcon = Icons.Filled.MusicNote,
                                     modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
@@ -1190,7 +1209,7 @@ private fun QuickPicksRows(
                                     modifier = Modifier.padding(start = 2.dp),
                                 )
                                 Text(
-                                    track.artist,
+                                    ArtistHelper.primaryArtist(track.artist),
                                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                                     maxLines = 1,
@@ -1366,7 +1385,8 @@ private fun RecentTrackCard(
     onClick: () -> Unit,
 ) {
     val ago = remember(track.date?.uts, track.url) { relativeTime(track.date?.uts) }
-    val subtitle = if (ago != null) "${track.artist.displayName} · $ago" else track.artist.displayName
+    val primaryArtistName = remember(track.artist.displayName) { ArtistHelper.primaryArtist(track.artist.displayName) }
+    val subtitle = if (ago != null) "$primaryArtistName · $ago" else primaryArtistName
     Column(
         modifier = Modifier
             .width(148.dp)
@@ -1386,7 +1406,7 @@ private fun RecentTrackCard(
             Box(Modifier.fillMaxSize()) {
                 ArtworkImage(
                     name = track.name,
-                    artist = track.artist.displayName,
+                    artist = primaryArtistName,
                     embeddedUrl = track.artworkUrl,
                     fallbackIcon = Icons.Filled.MusicNote,
                     modifier = Modifier.fillMaxSize(),
@@ -1483,7 +1503,7 @@ private fun ChartTrackCard(
                 Box(Modifier.fillMaxSize()) {
                     ArtworkImage(
                         name = track.title,
-                        artist = track.artist,
+                        artist = ArtistHelper.primaryArtist(track.artist),
                         embeddedUrl = track.artworkUrl,
                         fallbackIcon = Icons.Filled.TrendingUp,
                         modifier = Modifier.fillMaxSize(),
@@ -1517,7 +1537,7 @@ private fun ChartTrackCard(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = track.artist,
+                    text = ArtistHelper.primaryArtist(track.artist),
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1535,6 +1555,7 @@ private fun SpotlightHeroCard(
     onOpenArtist: () -> Unit,
 ) {
     val liquidGlass = LocalLiquidGlass.current
+    val primaryArtistName = remember(spotlight.artistName) { ArtistHelper.primaryArtist(spotlight.artistName) }
     val gradientBrush = Brush.linearGradient(
         colors = listOf(
             MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
@@ -1610,14 +1631,14 @@ private fun SpotlightHeroCard(
                         if (!spotlight.artworkUrl.isNullOrBlank()) {
                             AsyncImage(
                                 model = spotlight.artworkUrl,
-                                contentDescription = "Open ${spotlight.artistName}",
+                                contentDescription = "Open $primaryArtistName",
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize(),
                             )
                         } else {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
-                                    spotlight.artistName.take(1).uppercase(),
+                                    primaryArtistName.take(1).uppercase(),
                                     style = MaterialTheme.typography.headlineMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary,
@@ -1628,7 +1649,7 @@ private fun SpotlightHeroCard(
 
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
-                            spotlight.artistName,
+                            primaryArtistName,
                             style = MaterialTheme.typography.titleLarge.copy(fontSize = 21.sp),
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
@@ -1709,6 +1730,7 @@ private fun ArtistAvatarCard(
     isTop: Boolean = false,
 ) {
     val haptics = LocalHapticFeedback.current
+    val primaryArtistName = remember(artist.name) { ArtistHelper.primaryArtist(artist.name) }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -1743,14 +1765,14 @@ private fun ArtistAvatarCard(
                 if (!artist.artworkUrl.isNullOrBlank()) {
                     AsyncImage(
                         model = artist.artworkUrl,
-                        contentDescription = artist.name,
+                        contentDescription = primaryArtistName,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            text = artist.name.take(1).uppercase(),
+                            text = primaryArtistName.take(1).uppercase(),
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.primary,
@@ -1775,7 +1797,7 @@ private fun ArtistAvatarCard(
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            text = artist.name,
+            text = primaryArtistName,
             style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
             fontWeight = FontWeight.Bold,
             maxLines = 2,

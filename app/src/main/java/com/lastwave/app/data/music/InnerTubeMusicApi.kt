@@ -1069,10 +1069,11 @@ class InnerTubeMusicApi @Inject constructor(
             ?: root.obj("header")?.obj("musicImmersiveHeaderRenderer")
             ?: root.obj("header")?.obj("musicHeaderRenderer")
 
-        val title = header?.obj("title")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+        val rawTitle = header?.obj("title")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
             ?.ifBlank { null }
             ?: header?.string("title")
             ?: artistNameFallback.ifBlank { "Artist" }
+        val title = com.lastwave.app.util.ArtistHelper.primaryArtist(rawTitle).trim().ifBlank { rawTitle }
 
         val subscriberText = header?.obj("subscriptionButton")?.obj("subscribeButtonRenderer")?.obj("subscriberCountText")?.array("runs")
             ?.joinToString("") { it.asObject()?.string("text").orEmpty() }
@@ -1307,10 +1308,10 @@ class InnerTubeMusicApi @Inject constructor(
     private fun parseArtistTwoRowItems(container: JsonObject): List<com.lastwave.app.data.model.ArtistSummaryItem> {
         val items = mutableListOf<JsonObject>()
         collectObjects(container, "musicTwoRowItemRenderer", items)
-        return items.mapNotNull { item ->
+        return items.flatMap { item ->
             val title = item.obj("title")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
                 ?: item.obj("title")?.string("simpleText")
-                ?: return@mapNotNull null
+                ?: return@flatMap emptyList()
             val nav = item.obj("navigationEndpoint")?.obj("browseEndpoint")
                 ?: item.obj("title")?.array("runs")?.firstOrNull()?.asObject()?.obj("navigationEndpoint")?.obj("browseEndpoint")
             val browseId = nav?.string("browseId") ?: ""
@@ -1319,13 +1320,16 @@ class InnerTubeMusicApi @Inject constructor(
                 ?: item.obj("thumbnail")?.array("thumbnails")
             val artworkUrl = thumbs?.lastOrNull()?.asObject()?.string("url")?.highResolutionArtwork()
 
-            com.lastwave.app.data.model.ArtistSummaryItem(
-                name = title.trim(),
-                browseId = browseId,
-                artworkUrl = artworkUrl,
-                subtitle = subtitle?.takeIf { it.isNotBlank() },
-            )
-        }
+            val split = com.lastwave.app.util.ArtistHelper.splitArtists(title)
+            split.mapIndexed { index, singleName ->
+                com.lastwave.app.data.model.ArtistSummaryItem(
+                    name = singleName,
+                    browseId = if (split.size == 1 || index == 0) browseId else "",
+                    artworkUrl = artworkUrl,
+                    subtitle = subtitle?.takeIf { it.isNotBlank() },
+                )
+            }
+        }.distinctBy { it.name.lowercase().trim() }
     }
 
     /** Loads playable songs for an artist or album without opening YouTube. */

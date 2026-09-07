@@ -486,7 +486,7 @@ fun PlayerHost(
             }
         }
     }
-    val miniPlayerBackdrop = if (isLiquidGlassBackdropSupported()) rememberLayerBackdrop() else null
+    val miniPlayerVisible = state.current != null && !expanded
 
     CompositionLocalProvider(
         LocalMusicPlayer provides viewModel.player,
@@ -494,14 +494,8 @@ fun PlayerHost(
         LocalMiniPlayerScrollClearance provides if (state.current != null) 88.dp else 0.dp,
     ) {
         Box(Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .liquidGlassSource(miniPlayerBackdrop),
-            ) {
-                content()
-            }
-            if (state.current != null && !expanded) {
+            content()
+            if (miniPlayerVisible) {
                 MiniPlayer(
                     state = state,
                     progressState = viewModel.progressState,
@@ -512,7 +506,7 @@ fun PlayerHost(
                     onClose = viewModel.player::stopAndClear,
                     bottomPadding = if (hasBottomNavigation) 92.dp else 12.dp,
                     edgeToEdge = !hasBottomNavigation,
-                    backdrop = miniPlayerBackdrop,
+                    backdrop = null,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
             }

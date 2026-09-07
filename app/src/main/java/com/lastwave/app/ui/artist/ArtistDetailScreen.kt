@@ -297,7 +297,7 @@ fun ArtistDetailScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Text(
-                                            text = data.name,
+                                            text = com.lastwave.app.util.ArtistHelper.primaryArtist(data.name),
                                             style = MaterialTheme.typography.headlineLarge,
                                             fontWeight = FontWeight.ExtraBold,
                                             color = Color.White,
@@ -535,7 +535,7 @@ fun ArtistDetailScreen(
                                     ) {
                                         ArtworkImage(
                                             name = track.title,
-                                            artist = track.artist,
+                                            artist = com.lastwave.app.util.ArtistHelper.primaryArtist(track.artist),
                                             embeddedUrl = track.artworkUrl,
                                             fallbackIcon = Icons.Filled.MusicNote,
                                             modifier = Modifier.fillMaxSize(),
@@ -563,7 +563,7 @@ fun ArtistDetailScreen(
                                         )
                                         Spacer(Modifier.height(2.dp))
                                         Text(
-                                            text = track.album ?: data.name,
+                                            text = track.album ?: com.lastwave.app.util.ArtistHelper.primaryArtist(track.artist).ifBlank { com.lastwave.app.util.ArtistHelper.primaryArtist(data.name) },
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             maxLines = 1,
@@ -649,7 +649,7 @@ fun ArtistDetailScreen(
                                     ArtistAlbumCard(
                                         item = album,
                                         onClick = {
-                                            onOpenAlbum(album.title, data.name, album.browseId)
+                                            onOpenAlbum(album.title, com.lastwave.app.util.ArtistHelper.primaryArtist(data.name), album.browseId)
                                         },
                                     )
                                 }
@@ -677,7 +677,7 @@ fun ArtistDetailScreen(
                                     ArtistAlbumCard(
                                         item = single,
                                         onClick = {
-                                            onOpenAlbum(single.title, data.name, single.browseId)
+                                            onOpenAlbum(single.title, com.lastwave.app.util.ArtistHelper.primaryArtist(data.name), single.browseId)
                                         },
                                     )
                                 }
@@ -697,15 +697,24 @@ fun ArtistDetailScreen(
                         }
 
                         item(key = "similar_artists_row") {
+                            val individualArtists = remember(data.similarArtists) {
+                                data.similarArtists.flatMap { item ->
+                                    val split = com.lastwave.app.util.ArtistHelper.splitArtists(item.name)
+                                    if (split.size <= 1) listOf(item)
+                                    else split.map { singleName ->
+                                        item.copy(name = singleName, browseId = "")
+                                    }
+                                }.distinctBy { it.name.lowercase().trim() }
+                            }
                             LazyRow(
                                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                                 contentPadding = PaddingValues(horizontal = 4.dp),
                             ) {
-                                items(data.similarArtists, key = { it.browseId.ifBlank { it.name } }) { artist ->
+                                items(individualArtists, key = { it.browseId.ifBlank { it.name } }) { artist ->
                                     SimilarArtistCard(
                                         artist = artist,
                                         onClick = {
-                                            onOpenArtist(artist.name, artist.browseId)
+                                            onOpenArtist(com.lastwave.app.util.ArtistHelper.primaryArtist(artist.name), artist.browseId)
                                         },
                                     )
                                 }
@@ -759,7 +768,7 @@ fun ArtistDetailScreen(
                         exit = fadeOut() + scaleOut(targetScale = 0.9f),
                     ) {
                         Text(
-                            text = (uiState as? ArtistUiState.Success)?.data?.name ?: artistName,
+                            text = com.lastwave.app.util.ArtistHelper.primaryArtist((uiState as? ArtistUiState.Success)?.data?.name ?: artistName),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
@@ -885,7 +894,7 @@ private fun SimilarArtistCard(
                 if (!artist.artworkUrl.isNullOrBlank()) {
                     AsyncImage(
                         model = artist.artworkUrl,
-                        contentDescription = artist.name,
+                        contentDescription = com.lastwave.app.util.ArtistHelper.primaryArtist(artist.name),
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -905,7 +914,7 @@ private fun SimilarArtistCard(
             Spacer(Modifier.height(8.dp))
 
             Text(
-                text = artist.name,
+                text = com.lastwave.app.util.ArtistHelper.primaryArtist(artist.name),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,

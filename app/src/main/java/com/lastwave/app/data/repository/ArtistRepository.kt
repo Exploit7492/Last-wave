@@ -34,7 +34,7 @@ class ArtistRepository @Inject constructor(
         artistName: String,
         browseId: String? = null,
     ): ArtistPageData = withContext(Dispatchers.IO) {
-        val cleanName = artistName.trim()
+        val cleanName = com.lastwave.app.util.ArtistHelper.primaryArtist(artistName).trim()
         var targetBrowseId = browseId?.takeIf(String::isNotBlank)
         var searchArtwork: String? = null
 
@@ -64,7 +64,8 @@ class ArtistRepository @Inject constructor(
             val lfmData = lastFmDeferred.await()
 
             // Merge InnerTube rich playable songs & discography with Last.fm bio & tags
-            val finalName = ytData?.name?.takeIf(String::isNotBlank) ?: cleanName.ifBlank { "Artist" }
+            val finalName = ytData?.name?.takeIf(String::isNotBlank)?.let { com.lastwave.app.util.ArtistHelper.primaryArtist(it).trim() }
+                ?: cleanName.ifBlank { "Artist" }
             if (!ArtworkNormalizer.isRealImage(ytData?.artworkUrl) && searchArtwork == null) {
                 searchArtwork = runCatching {
                     innerTube.searchArtists(cleanName, limit = 5)
@@ -179,11 +180,13 @@ class ArtistRepository @Inject constructor(
             it["#text"]?.jsonPrimitive?.contentOrNull?.isNotBlank() == true
         }?.get("#text")?.jsonPrimitive?.contentOrNull
 
-        val similar = artistObj["similar"]?.jsonObject?.get("artist")?.jsonArray?.mapNotNull {
-            val name = it.jsonObject["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-            val img = it.jsonObject["image"]?.jsonArray?.lastOrNull()?.jsonObject?.get("#text")?.jsonPrimitive?.contentOrNull
-            ArtistSummaryItem(name = name, artworkUrl = img)
-        }.orEmpty()
+        val similar = artistObj["similar"]?.jsonObject?.get("artist")?.jsonArray?.flatMap { elem ->
+            val name = elem.jsonObject["name"]?.jsonPrimitive?.contentOrNull ?: return@flatMap emptyList()
+            val img = elem.jsonObject["image"]?.jsonArray?.lastOrNull()?.jsonObject?.get("#text")?.jsonPrimitive?.contentOrNull
+            com.lastwave.app.util.ArtistHelper.splitArtists(name).map { singleName ->
+                ArtistSummaryItem(name = singleName, artworkUrl = img)
+            }
+        }.orEmpty().distinctBy { it.name.lowercase().trim() }
 
         return LastFmArtistMeta(
             bio = bio,
