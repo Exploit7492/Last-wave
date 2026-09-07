@@ -1,5 +1,6 @@
 package com.lastwave.app.data.ytmusic
 
+import android.os.SystemClock
 import android.util.Log
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.music.YouTubeMusicTrack
@@ -13,10 +14,12 @@ import javax.inject.Singleton
 import kotlin.math.abs
 import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,8 +67,8 @@ import kotlinx.coroutines.withContext
  *
  * Known protocol limitation: YouTube's "pause watch history" account setting
  * has no verified InnerTube read endpoint (ytmusicapi exposes none either),
- * so paused-history status cannot be checked reliably. In that case YouTube
- * itself discards the entry server-side; we do not claim to detect it.
+ * so paused-history status cannot be checked reliably. A successful ping
+ * does not prove that an entry is visible in the account's history.
  */
 @Singleton
 class YtMusicHistorySyncManager @Inject constructor(
@@ -84,108 +87,93 @@ class YtMusicHistorySyncManager @Inject constructor(
     private var listenedMs = 0L
     private var submittedSessionId: String? = null
 
-    @Volatile private var historyEnabled = true
+    private var historyEnabled = true
+    private var activeAccount = YtConnection.DISCONNECTED
+    private var lastSampleMs = 0L
+    private var wasPlaying = false
 
     /** In-flight submissions, cancelled on disable / disconnect / switch. */
     private val activeSubmissions = ConcurrentHashMap.newKeySet<Job>()
 
+    @Synchronized
     fun start() {
         if (started) return
         started = true
-        applicationScope.launch { musicPlayer.state.collect { onPlayerState(it) } }
-        applicationScope.launch {
-            ytAuth.connection.collect {
-                // Any account change (connect, disconnect, switch) invalidates
-                // pending work and restarts accounting so the ongoing listen
-                // can only ever qualify fresh for the current account.
-                cancelActive("account change")
-                resetSession(keepPosition = true)
-            }
-        }
-        applicationScope.launch {
-            preferences.historySyncEnabled.collect { enabled ->
-                historyEnabled = enabled
-                if (!enabled) {
-                    cancelActive("disabled")
-                    resetSession(keepPosition = true)
+        applicationScope.launch(Dispatchers.Main.immediate) {
+            combine(musicPlayer.state, ytAuth.connection, preferences.historySyncEnabled) { state, account, enabled ->
+                Triple(state, account, enabled)
+            }.collect { (state, account, enabled) ->
+                if (account != activeAccount || enabled != historyEnabled) {
+                    cancelActive("account or preference change")
+                    activeAccount = account
+                    historyEnabled = enabled
+                    sessionKey = null
                 }
+                onPlayerState(state)
             }
         }
-    }
-
-    private fun resetSession(keepPosition: Boolean) {
-        if (!keepPosition) lastPositionMs = 0L
-        listenedMs = 0L
-        submittedSessionId = null
-        sessionEpoch++
     }
 
     private fun onPlayerState(s: MusicPlayerState) {
+        val now = SystemClock.elapsedRealtime()
+        val elapsed = (now - lastSampleMs).coerceAtLeast(0L)
+        lastSampleMs = now
+        val advancing = s.isPlaying && !s.isBuffering
+        val previouslyPlaying = wasPlaying
+        wasPlaying = advancing
         val track = s.current
         val key = track?.let { "${s.currentIndex}|${it.title}|${it.artist}|${it.album}" }
-        if (key == null || key != sessionKey) {
-            // New track (or nothing playing): unqualified sessions are simply
-            // dropped — history is never backfilled.
+        val restarted = s.positionMs < RESTART_POSITION_MS && lastPositionMs > RESTART_FLOOR_MS
+        val delta = s.positionMs - lastPositionMs
+        lastPositionMs = s.positionMs
+
+        // Check restarts before the submitted-session guard so repeat-one can qualify again.
+        if (key == null || key != sessionKey || restarted) {
             sessionKey = key
-            lastPositionMs = s.positionMs
+            sessionEpoch++
             listenedMs = 0L
             submittedSessionId = null
             return
         }
+        if (!historyEnabled || !activeAccount.isConnected) return
         val sessionId = "$sessionEpoch|$key"
-        if (submittedSessionId == sessionId || !historyEnabled) {
-            lastPositionMs = s.positionMs
-            return
+        if (submittedSessionId == sessionId) return
+
+        // Credit real elapsed listening, not a seek's position jump or time spent paused.
+        if (advancing && previouslyPlaying && delta in 1..MAX_POSITION_DELTA_MS &&
+            delta <= elapsed + POSITION_JITTER_MS
+        ) {
+            listenedMs += minOf(delta, elapsed)
         }
-        if (s.isPlaying && !s.isBuffering) {
-            val delta = s.positionMs - lastPositionMs
-            when {
-                // Genuine advancement only; the cap discards seeks and jumps.
-                delta in 1..MAX_POSITION_DELTA_MS -> listenedMs += delta
-                // Full restart / repeat-one loop → a new session that may
-                // qualify again as a genuine repeat listen.
-                s.positionMs < RESTART_POSITION_MS && lastPositionMs > RESTART_FLOOR_MS -> {
-                    listenedMs = 0L
-                    submittedSessionId = null
-                    sessionEpoch++
-                    lastPositionMs = s.positionMs
-                    return
-                }
-            }
-            // (submittedSessionId != sessionId is guaranteed by the early
-            // return above; the restart branch returns before reaching here.)
-            if (track != null && listenedMs >= requiredListenMs(s.durationMs)) {
-                // Claim the session BEFORE launching so retries, reconnects,
-                // or source fallbacks within this listen can't double-submit.
-                val claimedId = "$sessionEpoch|$key"
-                submittedSessionId = claimedId
-                val pending = PendingListen(
-                    title = track.title,
-                    artist = track.artist,
-                    album = track.album,
-                    videoId = track.videoId,
-                    durationMs = s.durationMs,
-                    account = ytAuth.connection.value,
-                    sessionId = claimedId,
-                )
-                launchSubmit(pending)
-            }
-        }
-        lastPositionMs = s.positionMs
+        if (track == null || !advancing || listenedMs < requiredListenMs(s.durationMs)) return
+        submittedSessionId = sessionId
+        Log.d(TAG, "Listen qualified after ${listenedMs / 1000}s; preparing history submission")
+        launchSubmit(
+            PendingListen(
+                title = track.title,
+                artist = track.artist,
+                album = track.album,
+                videoId = track.videoId,
+                durationMs = s.durationMs,
+                account = activeAccount,
+                sessionId = sessionId,
+            ),
+        )
     }
 
     private fun launchSubmit(pending: PendingListen) {
-        val job = applicationScope.launch(Dispatchers.IO) {
+        val job = applicationScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
             try {
                 submitWithRetry(pending)
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (e: Exception) {
-                Log.w(TAG, "History sync failed for session ${pending.sessionId}: ${e.message}")
+                Log.w(TAG, "History sync failed for session ${pending.sessionId}: ${e.javaClass.simpleName}")
             }
         }
         activeSubmissions.add(job)
         job.invokeOnCompletion { activeSubmissions.remove(job) }
+        job.start()
     }
 
     private fun cancelActive(reason: String) {
@@ -207,7 +195,7 @@ class YtMusicHistorySyncManager @Inject constructor(
             Log.d(TAG, "Blank title; skipping ${pending.sessionId}")
             return
         }
-        val videoId = pending.videoId?.takeIf { it.isNotBlank() }
+        val videoId = pending.videoId?.takeIf { VIDEO_ID.matches(it) }
             ?: resolveStrictVideoId(pending)?.also {
                 Log.d(TAG, "Strict match for '${pending.title}' -> $it")
             }
@@ -216,6 +204,7 @@ class YtMusicHistorySyncManager @Inject constructor(
             return
         }
 
+        val cpn = newCpn()
         var trackingUrl: String? = null
         var attempt = 0
         while (attempt < MAX_SUBMIT_ATTEMPTS) {
@@ -233,15 +222,14 @@ class YtMusicHistorySyncManager @Inject constructor(
                 // One player lookup per session; the tracking URL is reused
                 // across retries instead of re-fetching every attempt.
                 val baseUrl = trackingUrl
-                    ?: withContext(Dispatchers.IO) { innerTube.fetchHistoryTrackingUrl(videoId) }
+                    ?: withContext(Dispatchers.IO) { innerTube.fetchHistoryTrackingUrl(videoId, pending.account) }
                     ?: throw IOException("No history tracking URL for $videoId")
                 trackingUrl = baseUrl
-                val code = withContext(Dispatchers.IO) {
-                    innerTube.submitHistoryPlayback(baseUrl, newCpn())
-                }
+                if (!preferences.historySyncEnabled.first() || ytAuth.connection.value != pending.account) return
+                val code = innerTube.submitHistoryPlayback(baseUrl, cpn, pending.account)
                 when {
                     code in 200..299 -> {
-                        Log.d(TAG, "History accepted for $videoId (HTTP $code)")
+                        Log.d(TAG, "History ping accepted for $videoId (HTTP $code); remote visibility not verified")
                         return
                     }
                     code == 401 || code == 403 -> {
@@ -272,8 +260,14 @@ class YtMusicHistorySyncManager @Inject constructor(
                     return
                 }
                 Log.w(TAG, "History player HTTP ${e.responseCode} for $videoId (attempt $attempt)")
+            } catch (e: IOException) {
+                if (trackingUrl != null) {
+                    Log.w(TAG, "History transport outcome uncertain for $videoId; not retrying")
+                    return
+                }
+                Log.w(TAG, "History lookup failed for $videoId (attempt $attempt): ${e.javaClass.simpleName}")
             } catch (e: Exception) {
-                Log.w(TAG, "History attempt $attempt failed for $videoId: ${e.message}")
+                Log.w(TAG, "History attempt $attempt failed for $videoId: ${e.javaClass.simpleName}")
             }
             if (attempt < MAX_SUBMIT_ATTEMPTS) delay(RETRY_BASE_DELAY_MS * attempt)
         }
@@ -345,6 +339,8 @@ class YtMusicHistorySyncManager @Inject constructor(
 
         /** Position jumps larger than this are seeks, never listening time. */
         const val MAX_POSITION_DELTA_MS = 2_500L
+        const val POSITION_JITTER_MS = 250L
+        val VIDEO_ID = Regex("[A-Za-z0-9_-]{11}")
 
         /** Position reset below this (from far in) = restart/repeat → new session. */
         const val RESTART_POSITION_MS = 3_000L

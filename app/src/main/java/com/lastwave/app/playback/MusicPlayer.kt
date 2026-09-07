@@ -1083,8 +1083,9 @@ class MusicPlayer @Inject constructor(
         }
         ensureForegroundService()
         if (retryInterruptedPlayback()) return@onMain
-        if (player.mediaItemCount == 0 && _state.value.current != null) {
-            val q = _state.value.queue.ifEmpty { listOf(_state.value.current!!) }
+        val pendingCurrent = _state.value.current
+        if (player.mediaItemCount == 0 && pendingCurrent != null) {
+            val q = _state.value.queue.ifEmpty { listOf(pendingCurrent) }
             val idx = _state.value.currentIndex.coerceIn(q.indices)
             startResolvedQueuePlayback(
                 tracks = q,
@@ -1136,8 +1137,9 @@ class MusicPlayer @Inject constructor(
         } else {
             ensureForegroundService()
             if (retryInterruptedPlayback()) return@onMain
-            if (player.mediaItemCount == 0 && _state.value.current != null) {
-                val q = _state.value.queue.ifEmpty { listOf(_state.value.current!!) }
+            val pendingCurrent = _state.value.current
+            if (player.mediaItemCount == 0 && pendingCurrent != null) {
+                val q = _state.value.queue.ifEmpty { listOf(pendingCurrent) }
                 val idx = _state.value.currentIndex.coerceIn(q.indices)
                 startResolvedQueuePlayback(
                     tracks = q,
@@ -1662,7 +1664,7 @@ class MusicPlayer @Inject constructor(
                 val original = withContext(Dispatchers.Main.immediate) {
                     if (index >= player.mediaItemCount) null else player.getMediaItemAt(index).toPlayableTrack()
                 } ?: return@mapNotNull null
-                if (!original.videoId.isNullOrBlank() && !original.artworkUrl.isNullOrBlank()) return@mapNotNull null
+                if (original.playbackUrl != null || (!original.videoId.isNullOrBlank() && !original.artworkUrl.isNullOrBlank())) return@mapNotNull null
                 PendingEnrich(
                     index = index,
                     original = original,
@@ -1719,6 +1721,7 @@ class MusicPlayer @Inject constructor(
 
     private fun preloadNextTrack(nextIndex: Int, nextTrack: PlayableTrack?) {
         if (nextTrack == null) return
+        if (nextTrack.playbackUrl != null) return
         warmArtwork(nextTrack)
         val expectedQueueKey = nextTrack.queueKey()
         preloadJob?.cancel()
@@ -2689,7 +2692,12 @@ class MusicPlayer @Inject constructor(
         }
         val restoredQueue = session.queue
             .filter { it.title.isNotBlank() && it.artist.isNotBlank() }
-            .map { it.copy(playbackUrl = null, playbackMimeType = null) }
+            .map {
+                val isLocal = it.playbackUrl?.let { url ->
+                    url.startsWith("/") || url.startsWith("content://") || url.startsWith("file://")
+                } == true
+                if (isLocal) it else it.copy(playbackUrl = null, playbackMimeType = null)
+            }
         if (restoredQueue.isEmpty()) {
             clearPersistedPlaybackSession()
             return false
@@ -2739,7 +2747,10 @@ class MusicPlayer @Inject constructor(
         val startIndex = (sourceIndex - RESTORED_PREVIOUS_TRACKS).coerceAtLeast(0)
         val endIndex = minOf(sourceQueue.size, startIndex + MAX_PERSISTED_QUEUE_SIZE)
         val persistedQueue = sourceQueue.subList(startIndex, endIndex).map {
-            it.copy(playbackUrl = null, playbackMimeType = null)
+            val isLocal = it.playbackUrl?.let { url ->
+                url.startsWith("/") || url.startsWith("content://") || url.startsWith("file://")
+            } == true
+            if (isLocal) it else it.copy(playbackUrl = null, playbackMimeType = null)
         }
         val persistedIndex = sourceIndex - startIndex
         val signature = buildString {
@@ -2923,14 +2934,18 @@ private fun PlayableTrack.mediaIdKey(): String = when {
 
 private fun MediaItem.toPlayableTrack(): PlayableTrack {
     val uriStr = localConfiguration?.uri?.toString()
-    val isLocal = uriStr?.startsWith("content://") == true || uriStr?.startsWith("file://") == true || mediaId.startsWith("local:")
+    val localUri = when {
+        uriStr?.startsWith("content://") == true || uriStr?.startsWith("file://") == true || uriStr?.startsWith("/") == true -> uriStr
+        mediaId.startsWith("local:") -> mediaId.removePrefix("local:")
+        else -> null
+    }
     return PlayableTrack(
         title = mediaMetadata.title?.toString().orEmpty().ifBlank { "Unknown track" },
         artist = mediaMetadata.artist?.toString().orEmpty().ifBlank { "Unknown artist" },
         album = mediaMetadata.albumTitle?.toString(),
         artworkUrl = mediaMetadata.artworkUri?.toString(),
         videoId = mediaId.takeUnless { it.startsWith("query:") || it.startsWith("local:") },
-        playbackUrl = if (isLocal) uriStr else null,
+        playbackUrl = localUri,
         playbackMimeType = localConfiguration?.mimeType,
     )
 }

@@ -275,16 +275,14 @@ fun AlbumDetailScreen(
                                 }
                             }
 
-                            Spacer(Modifier.height(8.dp))
-
-                            // Metadata Pill (Year, Track Count, Duration)
+                            // Metadata Pill (Year, Duration) — track count is in the Tracks header
                             val metaText = listOfNotNull(
                                 data.releaseYear,
-                                data.trackCountText,
                                 data.durationText,
                             ).joinToString(" \u2022 ")
 
                             if (metaText.isNotBlank()) {
+                                Spacer(Modifier.height(8.dp))
                                 Surface(
                                     shape = RoundedCornerShape(50),
                                     color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.75f),

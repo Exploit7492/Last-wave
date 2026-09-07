@@ -157,6 +157,8 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -655,7 +657,7 @@ private fun MiniPlayer(
     // Liquid Glass dressing for the floating mini player (no-op when the
     // experimental setting is off — see ui/theme/LiquidGlass.kt).
     val liquidGlass = LocalLiquidGlass.current
-    val backdrop = LocalLiquidGlassOverlayBackdrop.current
+    val backdrop = LocalLiquidGlassBackdrop.current
     var dragX by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     var dragY by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     val shownX by animateFloatAsState(dragX, ExpressiveMotion.spatialSpring(), label = "miniPlayerX")
@@ -711,8 +713,8 @@ private fun MiniPlayer(
         Surface(
             shape = shape,
             color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh, backdrop = backdrop),
-            tonalElevation = if (edgeToEdge) 0.dp else 6.dp,
-            shadowElevation = if (edgeToEdge) 0.dp else 12.dp,
+            tonalElevation = if (edgeToEdge || liquidGlass) 0.dp else 6.dp,
+            shadowElevation = if (edgeToEdge || liquidGlass) 0.dp else 12.dp,
             modifier = Modifier.fillMaxWidth().liquidGlassChrome(shape, liquidGlass, LiquidGlassPreset.MiniPlayer, backdrop),
         ) {
             Column(
@@ -757,15 +759,17 @@ private fun MiniPlayer(
                     Surface(
                         onClick = onToggle,
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        color = if (liquidGlass) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                            else MaterialTheme.colorScheme.primary,
+                        contentColor = if (liquidGlass) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(48.dp),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             if (state.isBuffering) {
                                 ExpressiveInlineLoadingIndicator(
                                     size = 24.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    color = androidx.compose.material3.LocalContentColor.current,
                                     strokeWidth = 2.5.dp,
                                 )
                             } else {
@@ -1588,8 +1592,9 @@ private fun FullPlayer(
                             .align(Alignment.CenterStart)
                             .size(44.dp)
                             .clip(CircleShape)
+                            .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls)
                             .background(
-                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
+                                liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)),
                             ),
                     ) {
                         Icon(
@@ -1632,8 +1637,9 @@ private fun FullPlayer(
                             .align(Alignment.CenterEnd)
                             .size(44.dp)
                             .clip(CircleShape)
+                            .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls)
                             .background(
-                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
+                                liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)),
                             ),
                     ) {
                         Icon(
@@ -2035,11 +2041,11 @@ private fun FullPlayer(
                                                 onClick = onToggleLiked,
                                                 interactionSource = likeInteraction,
                                                 shape = CircleShape,
-                                                color = if (isLiked) {
+                                                color = liquidGlassContainerColor(if (isLiked) {
                                                     MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
                                                 } else {
                                                     MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)
-                                                },
+                                                }),
                                                 contentColor = if (isLiked) {
                                                     MaterialTheme.colorScheme.onPrimaryContainer
                                                 } else {
@@ -2052,7 +2058,8 @@ private fun FullPlayer(
                                                     .graphicsLayer {
                                                         scaleX = likeScale
                                                         scaleY = likeScale
-                                                    },
+                                                    }
+                                                    .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
                                             ) {
                                                 Box(contentAlignment = Alignment.Center) {
                                                     Icon(
@@ -2073,7 +2080,7 @@ private fun FullPlayer(
                                                 onClick = { onTabChange(FullPlayerTab.LYRICS) },
                                                 interactionSource = lyricsInteraction,
                                                 shape = CircleShape,
-                                                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
+                                                color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)),
                                                 contentColor = MaterialTheme.colorScheme.primary,
                                                 tonalElevation = 0.dp,
                                                 shadowElevation = 0.dp,
@@ -2082,7 +2089,8 @@ private fun FullPlayer(
                                                     .graphicsLayer {
                                                         scaleX = lyricsScale
                                                         scaleY = lyricsScale
-                                                    },
+                                                    }
+                                                    .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
                                             ) {
                                                 Box(contentAlignment = Alignment.Center) {
                                                     Icon(
@@ -2436,11 +2444,11 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
             shadowElevation = 0.dp,
             modifier = Modifier
                 .size(if (isTranslucent) 54.dp else 58.dp)
-                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls)
                 .graphicsLayer {
                     scaleX = prevScale
                     scaleY = prevScale
-                },
+                }
+                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
@@ -2450,8 +2458,10 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
             onClick = player::togglePlayPause,
             interactionSource = playInteraction,
             shape = CircleShape,
-            color = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
-            contentColor = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
+            color = liquidGlassContainerColor(if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
+            contentColor = if (LocalLiquidGlass.current) {
+                if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary
+            } else if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             modifier = Modifier
@@ -2459,13 +2469,14 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
                 .graphicsLayer {
                     scaleX = playScale
                     scaleY = playScale
-                },
+                }
+                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 if (state.isBuffering) {
                     ExpressiveInlineLoadingIndicator(
                         size = if (isTranslucent) 28.dp else 30.dp,
-                        color = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
+                        color = androidx.compose.material3.LocalContentColor.current,
                         strokeWidth = 3.dp,
                     )
                 } else {
@@ -2483,11 +2494,11 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
             shadowElevation = 0.dp,
             modifier = Modifier
                 .size(if (isTranslucent) 54.dp else 58.dp)
-                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls)
                 .graphicsLayer {
                     scaleX = nextScale
                     scaleY = nextScale
-                },
+                }
+                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.SkipNext, "Next", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
@@ -2527,15 +2538,17 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         Surface(
             onClick = player::toggleShuffle,
             shape = CircleShape,
-            color = liquidGlassContainerColor(if (state.shuffleEnabled) qualityButtonBackground else edgeButtonBackground),
-            contentColor = if (state.shuffleEnabled) qualityButtonContent else edgeButtonContent,
+            color = if (state.shuffleEnabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                else liquidGlassContainerColor(edgeButtonBackground),
+            contentColor = if (state.shuffleEnabled) MaterialTheme.colorScheme.primary else edgeButtonContent,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp)
+                .semantics { selected = state.shuffleEnabled }
                 .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.Shuffle, "Shuffle", modifier = Modifier.size(if (isTranslucent) 19.dp else 20.dp))
+                Icon(Icons.Filled.Shuffle, if (state.shuffleEnabled) "Shuffle on" else "Shuffle off", modifier = Modifier.size(if (isTranslucent) 19.dp else 20.dp))
             }
         }
         Surface(
@@ -2571,17 +2584,23 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         Surface(
             onClick = player::cycleRepeatMode,
             shape = CircleShape,
-            color = liquidGlassContainerColor(if (state.repeatMode != Player.REPEAT_MODE_OFF) qualityButtonBackground else edgeButtonBackground),
-            contentColor = if (state.repeatMode != Player.REPEAT_MODE_OFF) qualityButtonContent else edgeButtonContent,
+            color = if (state.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                else liquidGlassContainerColor(edgeButtonBackground),
+            contentColor = if (state.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary else edgeButtonContent,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp)
+                .semantics { selected = state.repeatMode != Player.REPEAT_MODE_OFF }
                 .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
-                    "Repeat mode",
+                    when (state.repeatMode) {
+                        Player.REPEAT_MODE_ONE -> "Repeat one"
+                        Player.REPEAT_MODE_ALL -> "Repeat all"
+                        else -> "Repeat off"
+                    },
                     modifier = Modifier.size(if (isTranslucent) 19.dp else 20.dp),
                 )
             }

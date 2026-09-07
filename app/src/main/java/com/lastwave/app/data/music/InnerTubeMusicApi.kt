@@ -3,6 +3,7 @@ package com.lastwave.app.data.music
 import android.net.Uri
 import com.lastwave.app.data.music.potoken.BotGuardTokenGenerator
 import com.lastwave.app.data.ytmusic.YtMusicAuthManager
+import com.lastwave.app.data.ytmusic.YtConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
@@ -18,6 +19,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -546,14 +550,20 @@ class InnerTubeMusicApi @Inject constructor(
      * anonymous player response yields a tracking URL whose ping returns 204
      * yet never lands in history.
      */
-    suspend fun fetchHistoryTrackingUrl(videoId: String): String? = withContext(Dispatchers.IO) {
-        if (!ytAuth.connection.value.isConnected) return@withContext null
+    suspend fun fetchHistoryTrackingUrl(videoId: String, account: YtConnection): String? = withContext(Dispatchers.IO) {
+        if (!account.isConnected || ytAuth.connection.value != account) return@withContext null
         val config = getWebConfig()
         val root = post(
             url = "$MUSIC_API/player?key=${config.apiKey}&prettyPrint=false",
             body = buildJsonObject {
                 put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
                 put("videoId", videoId)
+                put("playbackContext", buildJsonObject {
+                    put("contentPlaybackContext", buildJsonObject {
+                        // Same default signature timestamp used by ytmusicapi's get_song.
+                        put("signatureTimestamp", System.currentTimeMillis() / 86_400_000L - 1L)
+                    })
+                })
                 put("contentCheckOk", true)
                 put("racyCheckOk", true)
             },
@@ -561,6 +571,8 @@ class InnerTubeMusicApi @Inject constructor(
             clientVersion = config.clientVersion,
             userAgent = WEB_USER_AGENT,
             authenticated = true,
+            authenticatedAccount = account,
+            visitorData = config.visitorData,
         )
         root.obj("playbackTracking")?.obj("videostatsPlaybackUrl")?.string("baseUrl")
     }
@@ -578,26 +590,50 @@ class InnerTubeMusicApi @Inject constructor(
      * Privacy: the tracking URL and account cookies are authenticating
      * material — this function never logs them, only the resulting code.
      */
-    suspend fun submitHistoryPlayback(trackingBaseUrl: String, cpn: String): Int =
+    suspend fun submitHistoryPlayback(trackingBaseUrl: String, cpn: String, account: YtConnection): Int =
         withContext(Dispatchers.IO) {
+            currentCoroutineContext().ensureActive()
+            if (!account.isConnected || ytAuth.connection.value != account) {
+                throw kotlinx.coroutines.CancellationException("YouTube account changed")
+            }
             val base = trackingBaseUrl.toHttpUrlOrNull()
                 ?: throw IOException("Invalid history tracking URL")
+            require(base.isHttps && (base.host == "youtube.com" || base.host.endsWith(".youtube.com"))) {
+                "Unexpected history tracking host"
+            }
             val url = base.newBuilder()
-                .addQueryParameter("ver", "2")
-                .addQueryParameter("c", "WEB_REMIX")
-                .addQueryParameter("cpn", cpn)
+                .setQueryParameter("ver", "2")
+                .setQueryParameter("c", "WEB_REMIX")
+                .setQueryParameter("cpn", cpn)
                 .build()
             val builder = Request.Builder()
                 .url(url)
                 .get()
                 .header("User-Agent", WEB_USER_AGENT)
+                .header("Origin", YOUTUBE_MUSIC_ORIGIN)
+                .header("X-Origin", YOUTUBE_MUSIC_ORIGIN)
+                .header("Referer", "$YOUTUBE_MUSIC_ORIGIN/")
             // Same account surface as every other authenticated call: the
             // ping is attributed to whoever owns these cookies.
-            ytAuth.cookieHeaderValue()?.let { builder.header("Cookie", it) }
-            ytAuth.authorizationHeaderValue()?.let { builder.header("Authorization", it) }
+            ytAuth.cookieHeaderValue(account)?.let { builder.header("Cookie", it) }
+            ytAuth.authorizationHeaderValue(account = account)?.let { builder.header("Authorization", it) }
+            webConfig?.visitorData?.let { builder.header("X-Goog-Visitor-Id", it) }
             val call = http.newCall(builder.build())
             call.timeout().timeout(HISTORY_PING_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            call.execute().use { response -> response.code }
+            suspendCancellableCoroutine { continuation ->
+                continuation.invokeOnCancellation { call.cancel() }
+                call.enqueue(object : okhttp3.Callback {
+                    override fun onFailure(call: okhttp3.Call, e: IOException) {
+                        if (continuation.isActive) continuation.resumeWithException(e)
+                    }
+
+                    override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                        response.use {
+                            if (continuation.isActive) continuation.resume(it.code)
+                        }
+                    }
+                })
+            }
         }
 
     /** Identity of the signed-in account (account_menu endpoint). */
@@ -2118,6 +2154,7 @@ class InnerTubeMusicApi @Inject constructor(
         visitorData: String? = null,
         maxAttempts: Int = 2,
         callTimeoutMs: Long? = null,
+        authenticatedAccount: YtConnection? = null,
     ): JsonObject {
         val builder = Request.Builder()
             .url(url)
@@ -2139,8 +2176,12 @@ class InnerTubeMusicApi @Inject constructor(
         // anonymous endpoints must stay cookie-free so playback never
         // depends on login state.
         if (authenticated) {
-            ytAuth.cookieHeaderValue()?.let { builder.header("Cookie", it) }
-            ytAuth.authorizationHeaderValue()?.let { builder.header("Authorization", it) }
+            val account = authenticatedAccount ?: ytAuth.connection.value
+            if (authenticatedAccount != null && ytAuth.connection.value != account) {
+                throw kotlinx.coroutines.CancellationException("YouTube account changed")
+            }
+            ytAuth.cookieHeaderValue(account)?.let { builder.header("Cookie", it) }
+            ytAuth.authorizationHeaderValue(account = account)?.let { builder.header("Authorization", it) }
         }
 
         val request = builder

@@ -587,8 +587,8 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         }
 
         // If previous track reached threshold before transition but wasn't submitted yet, submit now
-        if (pendingPreviousTrack != null && !submissionAttempted && accumulatedMs >= 30_000L) {
-            val prev = pendingPreviousTrack!!
+        val prev = pendingPreviousTrack
+        if (prev != null && !submissionAttempted && accumulatedMs >= 30_000L) {
             val (prevTitle, prevArtist) = cleanTrackMetadata(prev.title, prev.artist)
             val prevStartedAt = pendingPreviousStartedAt
             scope.launch(Dispatchers.IO) {

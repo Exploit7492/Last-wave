@@ -184,6 +184,9 @@ fun LastWaveNavHost(
                 onSignOut = authViewModel::signOut,
                 onRestoreBackupAndSignIn = authViewModel::beginRestoreAndSignIn,
                 onDismissError = authViewModel::dismissError,
+                onOpenDownloads = {
+                    navController.navigate(Screen.Downloads.route)
+                },
             )
         }
 

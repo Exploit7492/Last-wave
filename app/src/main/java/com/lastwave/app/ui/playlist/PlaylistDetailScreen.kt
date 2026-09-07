@@ -161,16 +161,13 @@ fun PlaylistDetailScreen(
         }
     }
 
-    var cachedPlaylist by remember(playlistId) {
-        mutableStateOf(
-            state.detailPlaylist?.takeIf { it.id == playlistId }
-                ?: state.playlists.firstOrNull { it.id == playlistId }
-        )
-    }
     val currentFound = state.detailPlaylist?.takeIf { it.id == playlistId }
         ?: state.playlists.firstOrNull { it.id == playlistId }
-    if (currentFound != null) {
-        cachedPlaylist = currentFound
+    var cachedPlaylist by remember(playlistId) {
+        mutableStateOf(currentFound)
+    }
+    LaunchedEffect(currentFound) {
+        if (currentFound != null) cachedPlaylist = currentFound
     }
     val playlist = currentFound ?: cachedPlaylist
 
@@ -1048,7 +1045,6 @@ private fun NativeTrackRow(
     }
 
     Surface(
-        onClick = onClick,
         shape = RoundedCornerShape(14.dp),
         color = Color.Transparent,
         modifier = rowModifier,

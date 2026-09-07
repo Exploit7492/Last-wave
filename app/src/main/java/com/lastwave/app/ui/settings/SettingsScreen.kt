@@ -1040,7 +1040,7 @@ fun SettingsScreen(
                         subtitle = when {
                             updateInfo.isChecking -> "Checking GitHub releases..."
                             updateInfo.isUpdateAvailable -> "Tap to download new version"
-                            updateInfo.message != null -> updateInfo.message!!
+                            !updateInfo.message.isNullOrBlank() -> updateInfo.message.orEmpty()
                             else -> "Current version: ${appVersionName(context)}"
                         },
                         onClick = {

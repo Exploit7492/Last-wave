@@ -59,11 +59,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -263,12 +263,14 @@ fun TrackContextMenuSheet(
     var showTimerDialog by remember { mutableStateOf(false) }
     var resolvedGenre by remember(target) { mutableStateOf<String?>(null) }
     var resolvingGenre by remember(target) { mutableStateOf(false) }
-    val activeDownloads by downloadViewModel.activeDownloads.collectAsState()
+    val activeDownloads by downloadViewModel.activeDownloads.collectAsStateWithLifecycle()
     var isDownloaded by remember(target) { mutableStateOf(false) }
 
     LaunchedEffect(target, activeDownloads) {
         if (target is TrackMenuTarget.Track) {
-            isDownloaded = downloadViewModel.checkStatus(target.name, target.artist) == TrackDownloadStatus.DOWNLOADED
+            isDownloaded = runCatching {
+                downloadViewModel.checkStatus(target.name, target.artist)
+            }.getOrDefault(TrackDownloadStatus.NOT_DOWNLOADED) == TrackDownloadStatus.DOWNLOADED
         }
     }
 
@@ -395,25 +397,28 @@ fun TrackContextMenuSheet(
                 }
 
                 val playable = playableTrack ?: PlayableTrack(title = target.name, artist = target.artist)
+                QuickActionsRow(
+                    onPlay = {
+                        onPlayInLastWave?.invoke() ?: musicPlayer.play(playable, sourceLabel = playbackSourceLabel)
+                        onDismiss()
+                    },
+                    onPlayNext = { musicPlayer.playNext(playable); onDismiss() },
+                    onTimer = { showTimerDialog = true },
+                )
                 val rows = buildList<@Composable (GroupPosition) -> Unit> {
                     val t = target
                     if (resolvingGenre || !resolvedGenre.isNullOrBlank()) {
                         add { pos ->
+                            val genre = resolvedGenre
                             MenuInfoRow(
                                 icon = Icons.Filled.Sell,
-                                text = if (resolvingGenre) "Resolving genre\u2026" else "Genre: ${resolvedGenre?.takeIf { it.isNotBlank() } ?: "Unknown"}",
+                                text = if (resolvingGenre) "Resolving genre\u2026" else "Genre: ${genre?.takeIf { it.isNotBlank() } ?: "Unknown"}",
                                 loading = resolvingGenre,
                                 position = pos,
-                                onClick = if (!resolvingGenre && !resolvedGenre.isNullOrBlank()) {
-                                    { exploreGenre(resolvedGenre!!); onDismiss() }
+                                onClick = if (!resolvingGenre && !genre.isNullOrBlank()) {
+                                    { exploreGenre(genre); onDismiss() }
                                 } else null,
                             )
-                        }
-                    }
-                    add { pos ->
-                        MenuActionRow(Icons.Filled.PlayCircle, "Play in LastWave", position = pos) {
-                            onPlayInLastWave?.invoke() ?: musicPlayer.play(playable, sourceLabel = playbackSourceLabel)
-                            onDismiss()
                         }
                     }
                     add { pos -> MenuActionRow(Icons.Filled.PlaylistAdd, "Add to playlist", position = pos) { addToPlaylist(playable); onDismiss() } }
@@ -429,8 +434,10 @@ fun TrackContextMenuSheet(
                     if (!playable.album.isNullOrBlank()) {
                         add { pos ->
                             val primaryArt = splitArtists.firstOrNull() ?: t.artist
-                            MenuActionRow(Icons.Filled.Album, "Go to Album (${playable.album})", position = pos) {
-                                artistAlbumViewModel.openAlbum(playable.album!!, primaryArt)
+                            val album = playable.album
+                            if (album.isNullOrBlank()) return@add
+                            MenuActionRow(Icons.Filled.Album, "Go to Album ($album)", position = pos) {
+                                artistAlbumViewModel.openAlbum(album, primaryArt)
                                 onDismiss()
                             }
                         }
@@ -467,13 +474,7 @@ fun TrackContextMenuSheet(
                             }
                         }
                     }
-                    add { pos -> MenuActionRow(Icons.Filled.QueuePlayNext, "Play next", position = pos) { musicPlayer.playNext(playable); onDismiss() } }
                     add { pos -> MenuActionRow(Icons.Filled.QueueMusic, "Add to queue", position = pos) { musicPlayer.addToQueue(playable); onDismiss() } }
-                    add { pos ->
-                        MenuActionRow(Icons.Filled.Timer, "Sleep timer", position = pos) {
-                            showTimerDialog = true
-                        }
-                    }
                     add { pos ->
                         Card(
                             shape = groupShape(pos),
@@ -615,6 +616,53 @@ private fun StartMixCard(onClick: () -> Unit) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+}
+
+/** Three quick actions directly below Start Mix — no outline, no dividers.
+ *  Each action is its own card in a spaced Row, so separation matches the
+ *  sheet's current grouped language instead of the old outlined container. */
+@Composable
+private fun QuickActionsRow(
+    onPlay: () -> Unit,
+    onPlayNext: () -> Unit,
+    onTimer: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        QuickActionCard(Icons.Filled.PlayCircle, "Play", Modifier.weight(1f), onPlay)
+        QuickActionCard(Icons.Filled.QueuePlayNext, "Play next", Modifier.weight(1f), onPlayNext)
+        QuickActionCard(Icons.Filled.Timer, "Timer", Modifier.weight(1f), onTimer)
+    }
+}
+
+@Composable
+private fun QuickActionCard(
+    icon: ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val scale = rememberGroupPressScale(interactionSource)
+    Card(
+        onClick = onClick,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = RoundedCornerShape(22.dp),
+        interactionSource = interactionSource,
+        modifier = modifier.scale(scale),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
