@@ -951,7 +951,7 @@ class InnerTubeMusicApi @Inject constructor(
         }
         return container.array("continuations")?.firstNotNullOfOrNull {
             it.obj("nextContinuationData")?.string("continuation")?.takeIf(String::isNotBlank)
-        } ?: genericContinuationToken(container)
+        }
     }
 
     /** First continuation token anywhere in the tree (grid/list fallbacks). */
@@ -1133,7 +1133,7 @@ class InnerTubeMusicApi @Inject constructor(
 
                         val fullTracks = if (!moreBrowseId.isNullOrBlank()) {
                             runCatching {
-                                browseSongs(moreBrowseId, params = moreParams, limit = null).map { track ->
+                                browseSongs(moreBrowseId, params = moreParams, limit = 100).map { track ->
                                     com.lastwave.app.playback.PlayableTrack(
                                         title = track.title,
                                         artist = track.artist.takeUnless { it == "Unknown artist" } ?: title,
@@ -1198,13 +1198,14 @@ class InnerTubeMusicApi @Inject constructor(
     /** Loads and parses complete album details including ordered tracklist and metadata. */
     suspend fun fetchAlbumPage(browseId: String, albumTitleFallback: String = "", artistFallback: String = ""): com.lastwave.app.data.model.AlbumPageData? = withContext(Dispatchers.IO) {
         if (browseId.isBlank()) return@withContext null
+        val normalizedBrowseId = if (browseId.startsWith("PL") || browseId.startsWith("OLAK")) "VL$browseId" else browseId
         val config = getWebConfig()
         val root = runCatching {
             post(
                 url = "$MUSIC_API/browse?key=${config.apiKey}&prettyPrint=false",
                 body = buildJsonObject {
                     put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
-                    put("browseId", browseId)
+                    put("browseId", normalizedBrowseId)
                 },
                 clientName = "WEB_REMIX",
                 clientVersion = config.clientVersion,
@@ -1238,7 +1239,7 @@ class InnerTubeMusicApi @Inject constructor(
             ?: header?.obj("thumbnail")?.array("thumbnails")
         val artworkUrl = thumbs?.lastOrNull()?.asObject()?.string("url")?.highResolutionArtwork()
 
-        val songPages = collectBrowseSongPages(root, limit = null)
+        val songPages = collectBrowseSongPages(root, limit = 100)
         val tracks = songPages.tracks.map { track ->
             com.lastwave.app.playback.PlayableTrack(
                 title = track.title,
@@ -1374,7 +1375,8 @@ class InnerTubeMusicApi @Inject constructor(
         val seenTokens = mutableSetOf<String>()
         val knownVideoIds = songs.mapTo(mutableSetOf()) { it.videoId }
         var page = 0
-        while (!token.isNullOrBlank() && page < MAX_CONTINUATION_PAGES && (limit == null || songs.size < limit)) {
+        val maxPages = if (limit != null) minOf(8, (limit / 20) + 1) else 6
+        while (!token.isNullOrBlank() && page < maxPages && (limit == null || songs.size < limit)) {
             val currentToken = token ?: break
             if (!seenTokens.add(currentToken)) break
             val nextPage = runCatching {

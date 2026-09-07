@@ -124,6 +124,8 @@ fun ArtistDetailScreen(
     val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     val haptic = LocalHapticFeedback.current
 
+    androidx.activity.compose.BackHandler(onBack = onBack)
+
     LaunchedEffect(artistName, browseId) {
         viewModel.loadArtist(artistName, browseId)
     }
@@ -734,6 +736,7 @@ fun ArtistDetailScreen(
             shadowElevation = if (showScrolledHeader) 6.dp else 0.dp,
             modifier = Modifier
                 .fillMaxWidth()
+                .zIndex(10f)
                 .align(Alignment.TopCenter)
                 .liquidGlassChrome(RectangleShape, LocalLiquidGlass.current && showScrolledHeader, LiquidGlassPreset.Overlay, headerBackdrop),
         ) {

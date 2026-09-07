@@ -42,11 +42,13 @@ class ArtistRepository @Inject constructor(
         if (targetBrowseId == null && cleanName.isNotBlank()) {
             val searchResults = runCatching { innerTube.searchArtists(cleanName, limit = 5) }.getOrNull().orEmpty()
             val match = searchResults.firstOrNull { it.name.equals(cleanName, ignoreCase = true) }
+                ?: searchResults.firstOrNull()
             targetBrowseId = match?.browseId
             searchArtwork = match?.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage)
         }
 
-        coroutineScope {
+        kotlinx.coroutines.withTimeoutOrNull(20_000L) {
+            coroutineScope {
             // Load InnerTube artist data in parallel with Last.fm metadata
             val innerTubeDeferred = async {
                 targetBrowseId?.let { id ->
@@ -121,7 +123,11 @@ class ArtistRepository @Inject constructor(
                 singles = ytData?.singles.orEmpty(),
                 similarArtists = if (ytData?.similarArtists?.isNotEmpty() == true) ytData.similarArtists else lfmData?.similarArtists.orEmpty(),
             )
-        }
+        } } ?: ArtistPageData(
+            name = cleanName.ifBlank { "Artist" },
+            browseId = targetBrowseId.orEmpty(),
+            artworkUrl = searchArtwork,
+        )
     }
 
     private data class LastFmArtistMeta(

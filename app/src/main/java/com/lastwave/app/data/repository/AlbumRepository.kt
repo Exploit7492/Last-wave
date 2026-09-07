@@ -46,66 +46,72 @@ class AlbumRepository @Inject constructor(
             targetBrowseId = match?.browseId
         }
 
-        coroutineScope {
-            // Load InnerTube album data in parallel with Last.fm metadata
-            val innerTubeDeferred = async {
-                targetBrowseId?.let { id ->
-                    runCatching {
-                        innerTube.fetchAlbumPage(id, albumTitleFallback = cleanTitle, artistFallback = cleanArtist)
-                    }.getOrNull()
+        kotlinx.coroutines.withTimeoutOrNull(20_000L) {
+            coroutineScope {
+                // Load InnerTube album data in parallel with Last.fm metadata
+                val innerTubeDeferred = async {
+                    targetBrowseId?.let { id ->
+                        runCatching {
+                            innerTube.fetchAlbumPage(id, albumTitleFallback = cleanTitle, artistFallback = cleanArtist)
+                        }.getOrNull()
+                    }
                 }
-            }
 
-            val lastFmDeferred = async {
-                if (cleanTitle.isNotBlank() && cleanArtist.isNotBlank()) {
-                    runCatching { fetchLastFmAlbumInfo(cleanTitle, cleanArtist) }.getOrNull()
-                } else null
-            }
-
-            val ytData = innerTubeDeferred.await()
-            val lfmData = lastFmDeferred.await()
-
-            val finalTitle = ytData?.title?.takeIf(String::isNotBlank) ?: cleanTitle.ifBlank { "Album" }
-            val finalArtist = ytData?.artist?.takeIf(String::isNotBlank) ?: cleanArtist.ifBlank { "Various Artists" }
-            val artwork = ytData?.artworkUrl ?: lfmData?.artworkUrl
-            val description = ytData?.description?.takeIf(String::isNotBlank) ?: lfmData?.description
-            val genres = lfmData?.tags.orEmpty()
-            val releaseYear = ytData?.releaseYear ?: lfmData?.releaseYear
-
-            var tracks = ytData?.tracks.orEmpty()
-
-            // Fallback: If InnerTube returned no tracks, search tracks by album and artist
-            if (tracks.isEmpty() && finalTitle.isNotBlank()) {
-                val songs = runCatching {
-                    innerTube.searchSongs("$finalTitle $finalArtist", limit = 20)
-                }.getOrDefault(emptyList())
-
-                tracks = songs.map { track ->
-                    PlayableTrack(
-                        title = track.title,
-                        artist = track.artist.takeUnless { it == "Unknown artist" } ?: finalArtist,
-                        album = finalTitle,
-                        artworkUrl = track.artworkUrl ?: artwork,
-                        videoId = track.videoId,
-                    )
+                val lastFmDeferred = async {
+                    if (cleanTitle.isNotBlank() && cleanArtist.isNotBlank()) {
+                        runCatching { fetchLastFmAlbumInfo(cleanTitle, cleanArtist) }.getOrNull()
+                    } else null
                 }
-            }
 
-            AlbumPageData(
-                title = finalTitle,
-                artist = finalArtist,
-                artistBrowseId = ytData?.artistBrowseId,
-                browseId = targetBrowseId.orEmpty(),
-                artworkUrl = artwork,
-                releaseYear = releaseYear,
-                trackCountText = if (tracks == ytData?.tracks) ytData?.trackCountText else null,
-                durationText = ytData?.durationText,
-                description = description,
-                genres = genres,
-                tracks = tracks,
-                otherAlbums = ytData?.otherAlbums.orEmpty(),
-            )
-        }
+                val ytData = innerTubeDeferred.await()
+                val lfmData = lastFmDeferred.await()
+
+                val finalTitle = ytData?.title?.takeIf(String::isNotBlank) ?: cleanTitle.ifBlank { "Album" }
+                val finalArtist = ytData?.artist?.takeIf(String::isNotBlank) ?: cleanArtist.ifBlank { "Various Artists" }
+                val artwork = ytData?.artworkUrl ?: lfmData?.artworkUrl
+                val description = ytData?.description?.takeIf(String::isNotBlank) ?: lfmData?.description
+                val genres = lfmData?.tags.orEmpty()
+                val releaseYear = ytData?.releaseYear ?: lfmData?.releaseYear
+
+                var tracks = ytData?.tracks.orEmpty()
+
+                // Fallback: If InnerTube returned no tracks, search tracks by album and artist
+                if (tracks.isEmpty() && finalTitle.isNotBlank()) {
+                    val songs = runCatching {
+                        innerTube.searchSongs("$finalTitle $finalArtist", limit = 20)
+                    }.getOrDefault(emptyList())
+
+                    tracks = songs.map { track ->
+                        PlayableTrack(
+                            title = track.title,
+                            artist = track.artist.takeUnless { it == "Unknown artist" } ?: finalArtist,
+                            album = finalTitle,
+                            artworkUrl = track.artworkUrl ?: artwork,
+                            videoId = track.videoId,
+                        )
+                    }
+                }
+
+                AlbumPageData(
+                    title = finalTitle,
+                    artist = finalArtist,
+                    artistBrowseId = ytData?.artistBrowseId,
+                    browseId = targetBrowseId.orEmpty(),
+                    artworkUrl = artwork,
+                    releaseYear = releaseYear,
+                    trackCountText = if (tracks == ytData?.tracks) ytData?.trackCountText else null,
+                    durationText = ytData?.durationText,
+                    description = description,
+                    genres = genres,
+                    tracks = tracks,
+                    otherAlbums = ytData?.otherAlbums.orEmpty(),
+                )
+            }
+        } ?: AlbumPageData(
+            title = cleanTitle.ifBlank { "Album" },
+            artist = cleanArtist.ifBlank { "Various Artists" },
+            browseId = targetBrowseId.orEmpty(),
+        )
     }
 
     private data class LastFmAlbumMeta(

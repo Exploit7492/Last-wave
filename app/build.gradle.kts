@@ -48,8 +48,8 @@ android {
         applicationId = "com.lastwave.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 15
-        versionName = "3.4.1"
+        versionCode = 16
+        versionName = "4.0.0"
 
         val secretMask = listOf(0x5A, 0x3F, 0x7E, 0x1B, 0x92, 0x4C, 0xA1, 0x6D)
         fun obfuscateSecret(plainText: String): String {

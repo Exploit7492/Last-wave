@@ -39,6 +39,7 @@ class AlbumViewModel @Inject constructor(
     private var currentAlbumTitle: String = ""
     private var currentArtistName: String = ""
     private var currentBrowseId: String? = null
+    private var loadJob: kotlinx.coroutines.Job? = null
 
     fun loadAlbum(albumTitle: String, artistName: String = "", browseId: String? = null) {
         if (albumTitle == currentAlbumTitle && artistName == currentArtistName && browseId == currentBrowseId && _uiState.value is AlbumUiState.Success) {
@@ -48,11 +49,15 @@ class AlbumViewModel @Inject constructor(
         currentArtistName = artistName
         currentBrowseId = browseId
 
-        viewModelScope.launch {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             _uiState.value = AlbumUiState.Loading
             try {
                 val data = repository.getAlbumDetails(albumTitle, artistName, browseId)
+                kotlinx.coroutines.ensureActive()
                 _uiState.value = AlbumUiState.Success(data)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.value = AlbumUiState.Error(e.message ?: "Failed to load album details")
             }

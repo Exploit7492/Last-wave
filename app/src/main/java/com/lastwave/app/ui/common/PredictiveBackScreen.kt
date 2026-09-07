@@ -73,54 +73,11 @@ fun PredictiveBackScreen(
     var touchYFraction by remember { mutableFloatStateOf(0.5f) }
     var containerHeightPx by remember { mutableFloatStateOf(1f) }
 
-    PredictiveBackHandler(enabled = enabled) { events ->
-        try {
-            events.collect { backEvent: BackEventCompat ->
-                edge = backEvent.swipeEdge
-                if (containerHeightPx > 0f) {
-                    touchYFraction = (backEvent.touchY / containerHeightPx).coerceIn(0f, 1f)
-                }
-                progress.snapTo(backEvent.progress)
-            }
-            // The flow above completes on EVERY back invocation the system
-            // hands this handler — not just a held/dragged predictive-back
-            // gesture. A quick tap of the on-screen back button, the
-            // hardware back key, or a fast gesture-nav swipe all complete
-            // it too. Checking progress.value > 0f alone wasn't enough:
-            // even a fast, un-held swipe still emits a few real progress
-            // events before completing (system sends them per-frame while
-            // the finger moves, regardless of whether it paused), so
-            // progress.value often lands above 0 for a fast flick too —
-            // and this extra forced tween up to 1f then played a visible
-            // "flourish" on release even for that fast swipe, which is
-            // exactly what shouldn't happen. Real predictive back should
-            // only visibly shrink while a gesture is actually being held
-            // and dragged (the live snapTo calls above already do that
-            // correctly); once released — committed or not — there's
-            // nothing left to animate here, so just finish immediately
-            // with whatever progress was last observed, instead of
-            // forcing one final animated step first.
-            onBack()
-            // Reset immediately once we've actually left this screen —
-            // without this, `progress` was left sitting at 1f forever
-            // (nothing else ever set it back to 0), so this same
-            // composable instance (kept alive by MainShell's pager /
-            // NavHost's saved state) would render permanently shrunk the
-            // NEXT time it's shown again, with no gesture in progress and
-            // no way to un-shrink it. snapTo instead of animateTo since
-            // the screen is already gone by this point — nothing visible
-            // to animate.
-            progress.snapTo(0f)
-        } catch (e: CancellationException) {
-            // Released early / gesture cancelled — spring back to rest.
-            progress.animateTo(
-                0f,
-                spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-            )
-        }
+    androidx.activity.compose.BackHandler(enabled = enabled) {
+        onBack()
     }
 
-    val p = progress.value
+    val p = 0f
     val pivotX = if (edge == BackEventCompat.EDGE_RIGHT) 1f else 0f
     // A small extra push toward the edge/corner being dragged from, on top
     // of the scale — this is what sells "shrinking away from a corner"

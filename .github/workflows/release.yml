@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Git Tag (e.g., 3.4.1)'
+        description: 'Git Tag (e.g., 4.0.0)'
         required: true
-        default: '3.4.1'
+        default: '4.0.0'
       release_name:
-        description: 'Release Title (e.g., LastWave 3.4.1)'
+        description: 'Release Title (e.g., LastWave 4.0.0)'
         required: true
-        default: 'LastWave 3.4.1'
+        default: 'LastWave 4.0.0'
       release_notes:
         description: 'Changelog / Release Notes'
         required: false

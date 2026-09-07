@@ -68,6 +68,7 @@ import com.lastwave.app.ui.theme.LiquidGlassPreset
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
@@ -111,6 +112,8 @@ fun AlbumDetailScreen(
     val musicPlayer = LocalMusicPlayer.current
     val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     val haptic = LocalHapticFeedback.current
+
+    androidx.activity.compose.BackHandler(onBack = onBack)
 
     LaunchedEffect(albumTitle, artistName, browseId) {
         viewModel.loadAlbum(albumTitle, artistName, browseId)
@@ -548,6 +551,7 @@ fun AlbumDetailScreen(
             shadowElevation = if (showScrolledHeader) 6.dp else 0.dp,
             modifier = Modifier
                 .fillMaxWidth()
+                .zIndex(10f)
                 .align(Alignment.TopCenter)
                 .liquidGlassChrome(RectangleShape, LocalLiquidGlass.current && showScrolledHeader, LiquidGlassPreset.Overlay, headerBackdrop),
         ) {

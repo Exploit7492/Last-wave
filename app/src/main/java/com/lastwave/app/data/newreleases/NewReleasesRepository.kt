@@ -58,7 +58,8 @@ class NewReleasesRepository @Inject constructor(
 
         val results = mutableListOf<YouTubeMusicTrack>()
 
-        coroutineScope {
+        kotlinx.coroutines.withTimeoutOrNull(25_000L) {
+            coroutineScope {
             val exploreDeferred = async(Dispatchers.IO) {
                 runCatching { innerTube.fetchNewReleasesPage(null) }.getOrNull()
             }
@@ -127,9 +128,10 @@ class NewReleasesRepository @Inject constructor(
             val fallbackTracks = runCatching {
                 innerTube.searchSongs(searchQueries[searchFallbackIndex++ % searchQueries.size], limit = 30)
             }.getOrDefault(emptyList())
-            for (track in fallbackTracks) {
-                if (track.videoId.isNotBlank() && seenVideoIds.add(track.videoId)) {
-                    results.add(track)
+                for (track in fallbackTracks) {
+                    if (track.videoId.isNotBlank() && seenVideoIds.add(track.videoId)) {
+                        results.add(track)
+                    }
                 }
             }
         }
@@ -138,84 +140,89 @@ class NewReleasesRepository @Inject constructor(
     }
 
     suspend fun fetchNextBatch(targetCount: Int = 15): List<YouTubeMusicTrack> = mutex.withLock {
-        val newTracks = mutableListOf<YouTubeMusicTrack>()
+        kotlinx.coroutines.withTimeoutOrNull(20_000L) {
+            val newTracks = mutableListOf<YouTubeMusicTrack>()
 
-        // Replenish album queue if low
-        if (albumQueue.size < 8) {
-            if (!albumsContinuationToken.isNullOrBlank()) {
-                val gridBatch = runCatching {
-                    innerTube.fetchNewReleasesAlbumsGrid(albumsContinuationToken)
-                }.getOrNull()
-                if (gridBatch != null) {
-                    albumsContinuationToken = gridBatch.second
-                    for (album in gridBatch.first) {
-                        if (album.id.isNotBlank() && albumQueue.none { it.id == album.id }) {
-                            albumQueue.add(album)
+            // Replenish album queue if low
+            if (albumQueue.size < 8) {
+                if (!albumsContinuationToken.isNullOrBlank()) {
+                    val gridBatch = runCatching {
+                        innerTube.fetchNewReleasesAlbumsGrid(albumsContinuationToken)
+                    }.getOrNull()
+                    if (gridBatch != null) {
+                        albumsContinuationToken = gridBatch.second
+                        for (album in gridBatch.first) {
+                            if (album.id.isNotBlank() && albumQueue.none { it.id == album.id }) {
+                                albumQueue.add(album)
+                            }
                         }
                     }
-                }
-            } else if (!exploreContinuationToken.isNullOrBlank()) {
-                val exploreBatch = runCatching {
-                    innerTube.fetchNewReleasesPage(exploreContinuationToken)
-                }.getOrNull()
-                if (exploreBatch != null) {
-                    exploreContinuationToken = exploreBatch.continuationToken
-                    for (track in exploreBatch.directTracks) {
-                        if (track.videoId.isNotBlank() && seenVideoIds.add(track.videoId)) {
-                            newTracks.add(track)
+                } else if (!exploreContinuationToken.isNullOrBlank()) {
+                    val exploreBatch = runCatching {
+                        innerTube.fetchNewReleasesPage(exploreContinuationToken)
+                    }.getOrNull()
+                    if (exploreBatch != null) {
+                        exploreContinuationToken = exploreBatch.continuationToken
+                        for (track in exploreBatch.directTracks) {
+                            if (track.videoId.isNotBlank() && seenVideoIds.add(track.videoId)) {
+                                newTracks.add(track)
+                            }
                         }
-                    }
-                    for (album in exploreBatch.albums) {
-                        if (album.id.isNotBlank() && albumQueue.none { it.id == album.id }) {
-                            albumQueue.add(album)
+                        for (album in exploreBatch.albums) {
+                            if (album.id.isNotBlank() && albumQueue.none { it.id == album.id }) {
+                                albumQueue.add(album)
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // Expand next set of albums
-        val albumsToExpand = mutableListOf<YouTubePlaylistSummary>()
-        while (albumQueue.isNotEmpty() && albumsToExpand.size < 4 && newTracks.size < targetCount) {
-            albumsToExpand.add(albumQueue.removeFirst())
-        }
+            // Expand next set of albums
+            val albumsToExpand = mutableListOf<YouTubePlaylistSummary>()
+            while (albumQueue.isNotEmpty() && albumsToExpand.size < 4 && newTracks.size < targetCount) {
+                albumsToExpand.add(albumQueue.removeFirst())
+            }
 
-        if (albumsToExpand.isNotEmpty()) {
-            val expanded = expandAlbums(albumsToExpand)
-            for (track in expanded) {
-                if (track.videoId.isNotBlank() && seenVideoIds.add(track.videoId)) {
-                    newTracks.add(track)
+            if (albumsToExpand.isNotEmpty()) {
+                val expanded = expandAlbums(albumsToExpand)
+                for (track in expanded) {
+                    if (track.videoId.isNotBlank() && seenVideoIds.add(track.videoId)) {
+                        newTracks.add(track)
+                    }
                 }
             }
-        }
 
-        // If still under target count or queue exhausted, query search fallback for fresh drops
-        if (newTracks.size < targetCount) {
-            val query = searchQueries[searchFallbackIndex++ % searchQueries.size]
-            val searchResults = runCatching {
-                innerTube.searchSongs(query, limit = 30)
-            }.getOrDefault(emptyList())
-            for (track in searchResults) {
-                if (track.videoId.isNotBlank() && seenVideoIds.add(track.videoId)) {
-                    newTracks.add(track)
+            // If still under target count or queue exhausted, query search fallback for fresh drops
+            if (newTracks.size < targetCount) {
+                val query = searchQueries[searchFallbackIndex++ % searchQueries.size]
+                val searchResults = runCatching {
+                    innerTube.searchSongs(query, limit = 30)
+                }.getOrDefault(emptyList())
+                for (track in searchResults) {
+                    if (track.videoId.isNotBlank() && seenVideoIds.add(track.videoId)) {
+                        newTracks.add(track)
+                    }
                 }
             }
-        }
 
-        newTracks
+            newTracks
+        } ?: emptyList()
     }
 
     private suspend fun expandAlbums(albums: List<YouTubePlaylistSummary>): List<YouTubeMusicTrack> = withContext(Dispatchers.IO) {
         coroutineScope {
             albums.map { album ->
                 async {
-                    runCatching {
-                        innerTube.fetchAlbumPage(
-                            browseId = album.id,
-                            albumTitleFallback = album.title,
-                            artistFallback = album.author.orEmpty(),
-                        )
-                    }.getOrNull()?.tracks.orEmpty().mapNotNull { it.toYouTubeMusicTrack() }
+                    kotlinx.coroutines.withTimeoutOrNull(8_000L) {
+                        runCatching {
+                            val albumId = if (album.id.startsWith("PL") || album.id.startsWith("OLAK")) "VL${album.id}" else album.id
+                            innerTube.fetchAlbumPage(
+                                browseId = albumId,
+                                albumTitleFallback = album.title,
+                                artistFallback = album.author.orEmpty(),
+                            )
+                        }.getOrNull()?.tracks.orEmpty().mapNotNull { it.toYouTubeMusicTrack() }
+                    }.orEmpty()
                 }
             }.awaitAll().flatten()
         }

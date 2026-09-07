@@ -91,11 +91,14 @@ fun NewReleasesScreen(
     val listState = rememberLazyListState()
     var menuTrack by remember { mutableStateOf<YouTubeMusicTrack?>(null) }
 
+    androidx.activity.compose.BackHandler(onBack = onBack)
+
     // Infinite scroll trigger: when nearing bottom, load next batch
     val shouldLoadMore by remember(listState, state.tracks.size) {
         derivedStateOf {
             val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            state.tracks.isNotEmpty() && last >= state.tracks.size - 4
+            val count = state.tracks.size
+            count >= 5 && last >= count - 4
         }
     }
     LaunchedEffect(shouldLoadMore, state.tracks.size) {
