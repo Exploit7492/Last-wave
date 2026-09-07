@@ -220,6 +220,23 @@ fun FeedScreen(
                     onOpenSearch = onOpenSearch,
                 )
             } else {
+                val individualTopArtists = remember(state.feedData.topArtists) {
+                    state.feedData.topArtists.flatMap { artist ->
+                        val split = ArtistHelper.splitArtists(artist.name)
+                        if (split.size <= 1) {
+                            listOf(artist.copy(name = ArtistHelper.primaryArtist(artist.name)))
+                        } else {
+                            split.map { singleName ->
+                                FeedArtist(
+                                    name = singleName,
+                                    browseId = if (singleName.equals(artist.name, ignoreCase = true)) artist.browseId else null,
+                                    artworkUrl = artist.artworkUrl,
+                                )
+                            }
+                        }
+                    }.distinctBy { it.name.trim().lowercase() }
+                }
+
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().safeHorizontalContentPadding(),
                     contentPadding = PaddingValues(
@@ -447,26 +464,9 @@ fun FeedScreen(
                         }
                     }
 
-                    if (state.feedData.topArtists.isNotEmpty()) {
-                        val individualTopArtists = remember(state.feedData.topArtists) {
-                            state.feedData.topArtists.flatMap { artist ->
-                                val split = ArtistHelper.splitArtists(artist.name)
-                                if (split.size <= 1) {
-                                    listOf(artist.copy(name = ArtistHelper.primaryArtist(artist.name)))
-                                } else {
-                                    split.map { singleName ->
-                                        FeedArtist(
-                                            name = singleName,
-                                            browseId = if (singleName.equals(artist.name, ignoreCase = true)) artist.browseId else null,
-                                            artworkUrl = artist.artworkUrl,
-                                        )
-                                    }
-                                }
-                            }.distinctBy { it.name.trim().lowercase() }
-                        }
-                        if (individualTopArtists.isNotEmpty()) {
-                            item(key = "top_artists") {
-                                FeedSectionHeader(
+                    if (individualTopArtists.isNotEmpty()) {
+                        item(key = "top_artists") {
+                            FeedSectionHeader(
                                     title = "Artists for you",
                                     subtitle = "Worth another listen",
                                 )
