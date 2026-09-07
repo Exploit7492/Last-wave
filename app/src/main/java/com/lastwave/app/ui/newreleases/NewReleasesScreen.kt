@@ -282,7 +282,7 @@ fun NewReleasesScreen(
                                                         contentAlignment = Alignment.Center,
                                                     ) {
                                                         PlayingWaveBars(
-                                                            color = Color.White,
+                                                            waveColor = Color.White,
                                                             modifier = Modifier.size(20.dp, 16.dp),
                                                         )
                                                     }
@@ -348,7 +348,6 @@ fun NewReleasesScreen(
                 album = track.album,
                 artworkUrl = track.artworkUrl,
                 videoId = track.videoId.takeIf(String::isNotBlank),
-                durationSeconds = track.durationSeconds?.toLong(),
             ),
             playbackSourceLabel = "New Releases",
             onPlayInLastWave = {

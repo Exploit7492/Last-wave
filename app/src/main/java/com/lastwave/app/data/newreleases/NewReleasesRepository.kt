@@ -229,7 +229,7 @@ class NewReleasesRepository @Inject constructor(
             artist = artist,
             album = album,
             artworkUrl = artworkUrl,
-            durationSeconds = durationSeconds?.toInt(),
+            durationSeconds = null,
         )
     }
 }
