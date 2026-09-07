@@ -10,6 +10,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import com.lastwave.app.data.local.MiscSettings
 import com.lastwave.app.data.local.SettingsPreferences
@@ -39,7 +42,7 @@ class AlbumViewModel @Inject constructor(
     private var currentAlbumTitle: String = ""
     private var currentArtistName: String = ""
     private var currentBrowseId: String? = null
-    private var loadJob: kotlinx.coroutines.Job? = null
+    private var loadJob: Job? = null
 
     fun loadAlbum(albumTitle: String, artistName: String = "", browseId: String? = null) {
         if (albumTitle == currentAlbumTitle && artistName == currentArtistName && browseId == currentBrowseId && _uiState.value is AlbumUiState.Success) {
@@ -54,9 +57,9 @@ class AlbumViewModel @Inject constructor(
             _uiState.value = AlbumUiState.Loading
             try {
                 val data = repository.getAlbumDetails(albumTitle, artistName, browseId)
-                kotlinx.coroutines.ensureActive()
+                coroutineContext.ensureActive()
                 _uiState.value = AlbumUiState.Success(data)
-            } catch (e: kotlinx.coroutines.CancellationException) {
+            } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _uiState.value = AlbumUiState.Error(e.message ?: "Failed to load album details")
