@@ -138,7 +138,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.input.pointer.pointerInput
 import com.lastwave.app.ui.theme.LocalLiquidGlass
+import com.lastwave.app.ui.theme.LocalLiquidGlassOverlayBackdrop
+import com.lastwave.app.ui.theme.LiquidGlassPreset
 import com.lastwave.app.ui.theme.liquidGlassContainerColor
+import com.lastwave.app.ui.theme.LiquidGlassSurface
 import com.lastwave.app.ui.theme.liquidGlassChrome
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.R
@@ -3252,8 +3255,16 @@ private fun LyricsAnimationSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = if (liquidGlass) MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.94f)
-        else MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.liquidGlassChrome(
+            RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            liquidGlass,
+            LiquidGlassPreset.ModalSheet,
+            LocalLiquidGlassOverlayBackdrop.current,
+        ),
+        containerColor = liquidGlassContainerColor(
+            MaterialTheme.colorScheme.surfaceContainer,
+            backdrop = LocalLiquidGlassOverlayBackdrop.current,
+        ),
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
     ) {
         Column(
@@ -3309,19 +3320,20 @@ private fun LyricsAnimationSheet(
                 versions.forEach { (ver, label) ->
                     val isVerSelected = ver == version
                     val chipShape = RoundedCornerShape(14.dp)
-                    Surface(
+                    LiquidGlassSurface(
+                        glassModifier = Modifier.liquidGlassChrome(chipShape, liquidGlass),
                         onClick = {
                             haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
                             onSelectVersion(ver)
                         },
                         shape = chipShape,
-                        color = if (isVerSelected) {
+                        color = liquidGlassContainerColor(if (isVerSelected) {
                             if (liquidGlass) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
                             else MaterialTheme.colorScheme.primaryContainer
                         } else {
                             if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f)
                             else MaterialTheme.colorScheme.surfaceContainerHigh
-                        },
+                        }),
                         modifier = Modifier
                             .weight(1f)
                             .clip(chipShape),
@@ -3425,9 +3437,9 @@ private fun LyricsAnimationSheet(
             } else {
                 Surface(
                     shape = RoundedCornerShape(18.dp),
-                    color = if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.70f)
-                    else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
-                    modifier = Modifier.fillMaxWidth(),
+                    color = liquidGlassContainerColor(if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.70f)
+                    else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)),
+                    modifier = Modifier.fillMaxWidth().liquidGlassChrome(RoundedCornerShape(18.dp), liquidGlass),
                 ) {
                     Column(
                         modifier = Modifier.padding(20.dp),

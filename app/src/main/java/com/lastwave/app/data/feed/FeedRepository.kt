@@ -530,11 +530,6 @@ class FeedRepository @Inject constructor(
                     ),
                 )
             }
-            val savedMix = homePlaylists.firstOrNull { it.title.equals("Mix", ignoreCase = true) }
-            add(savedMix?.let {
-                FeedQuickTile(title = it.title, subtitle = it.author, artworkUrl = it.artworkUrl, playlistId = it.id)
-            } ?: FeedQuickTile(title = "Mix", subtitle = "Made for you",
-                artworkUrl = quickPicks.firstOrNull()?.artworkUrl, collection = "radio"))
             if (isYtConnected) {
                 add(FeedQuickTile(
                     title = "Liked on YouTube",
@@ -544,14 +539,20 @@ class FeedRepository @Inject constructor(
                     collection = "yt_liked",
                     isLiked = true,
                 ))
-                add(FeedQuickTile(
-                    title = "Recently played",
-                    subtitle = "On YouTube",
-                    artworkUrl = ytRecentSongs.firstOrNull()?.artworkUrl,
-                    playlistId = "yt_recent",
-                    collection = "yt_recent",
-                ))
             }
+            val savedMix = homePlaylists.firstOrNull { it.title.equals("Mix", ignoreCase = true) }
+            add(savedMix?.let {
+                FeedQuickTile(title = it.title, subtitle = it.author, artworkUrl = it.artworkUrl, playlistId = it.id)
+            } ?: FeedQuickTile(title = "Mix", subtitle = "Made for you",
+                artworkUrl = quickPicks.firstOrNull()?.artworkUrl, collection = "radio"))
+            add(
+                FeedQuickTile(
+                    title = "New releases",
+                    subtitle = "Fresh drops",
+                    artworkUrl = newReleases.firstOrNull()?.artworkUrl,
+                    collection = "new_releases",
+                ),
+            )
         }
 
         val tasteTags = tasteProfile?.topTags.orEmpty().take(8)

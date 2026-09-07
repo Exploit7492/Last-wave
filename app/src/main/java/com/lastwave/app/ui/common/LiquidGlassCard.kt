@@ -86,9 +86,9 @@ fun LiquidGlassCard(
 
     Box(
         modifier = modifier
+            .liquidGlassChrome(shape, enabled = true)
             .clip(shape)
             .background(liquidGlassContainerColor(glassTint), shape)
-            .liquidGlassChrome(shape, enabled = true)
             .then(clickModifier)
             .padding(16.dp),
         contentAlignment = Alignment.TopStart,

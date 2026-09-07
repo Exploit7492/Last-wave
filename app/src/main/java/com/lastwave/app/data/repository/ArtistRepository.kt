@@ -193,4 +193,37 @@ class ArtistRepository @Inject constructor(
             similarArtists = similar,
         )
     }
+
+    suspend fun getArtistRadio(
+        artistName: String,
+        seedTrack: PlayableTrack? = null,
+    ): List<PlayableTrack> = withContext(Dispatchers.IO) {
+        val cleanArtist = artistName.trim()
+        val seedVideoId = seedTrack?.videoId?.takeIf(String::isNotBlank)
+            ?: runCatching {
+                innerTube.searchSongs("$cleanArtist songs", limit = 5, prefetchStreams = false)
+                    .firstOrNull { it.artist.contains(cleanArtist, ignoreCase = true) || cleanArtist.contains(it.artist, ignoreCase = true) }
+                    ?.videoId
+            }.getOrNull()
+
+        val related = if (!seedVideoId.isNullOrBlank()) {
+            runCatching {
+                innerTube.fetchRelatedSongs(seedVideoId, limit = 30, prefetchStreams = false)
+            }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+
+        val relatedPlayable = related.map { track ->
+            PlayableTrack(
+                title = track.title,
+                artist = track.artist,
+                album = track.album,
+                artworkUrl = track.artworkUrl,
+                videoId = track.videoId.takeIf(String::isNotBlank),
+            )
+        }
+
+        (listOfNotNull(seedTrack) + relatedPlayable).distinctBy { it.videoId ?: it.title }
+    }
 }

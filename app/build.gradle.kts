@@ -13,7 +13,7 @@ plugins {
 
 android {
     namespace = "com.lastwave.app"
-    compileSdk = 36
+    compileSdk = 37
 
     val localProps = Properties().apply {
         val localPropsFile = rootProject.file("local.properties")
@@ -165,13 +165,6 @@ android {
         // Required by org.jellyfin.media3:media3-ffmpeg-decoder AAR metadata.
         isCoreLibraryDesugaringEnabled = true
     }
-    kotlinOptions {
-        jvmTarget = "17"
-        freeCompilerArgs += listOf(
-            "-Xskip-metadata-version-check",
-            "-Xskip-prerelease-check",
-        )
-    }
 
     buildFeatures {
         compose = true
@@ -299,18 +292,16 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 configurations.all {
     resolutionStrategy.eachDependency {
         if (requested.group == "org.jetbrains.kotlin") {
-            useVersion("2.2.21")
-        }
-        if (requested.group == "org.jetbrains.kotlinx" && requested.name.startsWith("kotlinx-coroutines")) {
-            useVersion("1.8.1")
-        }
-        if (requested.group == "org.jetbrains.kotlinx" && (requested.name.startsWith("kotlinx-serialization-core") || requested.name.startsWith("kotlinx-serialization-json"))) {
-            if (!requested.name.contains("json-io") && !requested.name.contains("json-okio")) {
-                useVersion("1.6.3")
-            }
+            useVersion(libs.versions.kotlin.get())
         }
         if (requested.group == "io.github.dokar3" && requested.name.startsWith("quickjs-kt")) {
             useVersion("1.0.12")
@@ -322,6 +313,3 @@ tasks.withType<Test> {
     maxHeapSize = "2048m"
 }
 
-tasks.matching { it.name.contains("AarMetadata", ignoreCase = true) }.configureEach {
-    enabled = false
-}

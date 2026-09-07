@@ -275,17 +275,12 @@ fun NewReleasesScreen(
                                                     modifier = Modifier.fillMaxSize(),
                                                 )
                                                 if (isPlayingThis) {
-                                                    Box(
+                                                    PlayingWaveBars(
                                                         modifier = Modifier
-                                                            .fillMaxSize()
-                                                            .background(Color.Black.copy(alpha = 0.45f)),
-                                                        contentAlignment = Alignment.Center,
-                                                    ) {
-                                                        PlayingWaveBars(
-                                                            waveColor = Color.White,
-                                                            modifier = Modifier.size(20.dp, 16.dp),
-                                                        )
-                                                    }
+                                                            .align(Alignment.BottomEnd)
+                                                            .padding(2.dp)
+                                                            .size(24.dp, 18.dp),
+                                                    )
                                                 }
                                             }
                                         },

@@ -1,6 +1,8 @@
 package com.lastwave.app.ui.theme
 
 import android.app.Activity
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -11,7 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.lastwave.app.data.repository.ThemeUiState
-import com.kyant.backdrop.backdrops.rememberCanvasBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 
 /**
@@ -65,13 +66,19 @@ fun LastWaveTheme(
             CompositionLocalProvider(LocalLiquidGlass provides themeState.liquidGlass) {
                 if (isLiquidGlassBackdropSupported()) {
                     val backgroundColor = MaterialTheme.colorScheme.background
-                    val backgroundBackdrop = rememberCanvasBackdrop { drawRect(backgroundColor) }
-                    val contentBackdrop = rememberLayerBackdrop()
-                    CompositionLocalProvider(
-                        LocalLiquidGlassBackdrop provides backgroundBackdrop,
-                        LocalLiquidGlassOverlayBackdrop provides contentBackdrop,
-                    ) {
-                        content()
+                    val backgroundBackdrop = rememberLayerBackdrop()
+                    Box(Modifier.fillMaxSize()) {
+                        Box(
+                            Modifier.matchParentSize()
+                                .liquidGlassSource(backgroundBackdrop)
+                                .background(backgroundColor),
+                        )
+                        CompositionLocalProvider(
+                            LocalLiquidGlassBackdrop provides backgroundBackdrop,
+                            LocalLiquidGlassOverlayBackdrop provides backgroundBackdrop,
+                        ) {
+                            content()
+                        }
                     }
                 } else {
                     content()

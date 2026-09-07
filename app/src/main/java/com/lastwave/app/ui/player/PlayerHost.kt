@@ -130,7 +130,6 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
@@ -159,6 +158,9 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -193,6 +195,7 @@ import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
 import com.lastwave.app.ui.theme.LocalLiquidGlass
+import com.lastwave.app.ui.theme.LiquidGlassSurface
 import com.lastwave.app.ui.theme.liquidGlassChrome
 import com.lastwave.app.ui.theme.liquidGlassContainerColor
 import com.lastwave.app.ui.theme.liquidGlassSource
@@ -200,6 +203,7 @@ import com.lastwave.app.ui.theme.isLiquidGlassBackdropSupported
 import com.lastwave.app.ui.theme.LocalLiquidGlassBackdrop
 import com.lastwave.app.ui.theme.LocalLiquidGlassOverlayBackdrop
 import com.lastwave.app.ui.theme.LiquidGlassPreset
+import com.lastwave.app.ui.theme.BackdropBlur
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -1480,19 +1484,20 @@ private fun FullPlayer(
 
             Box(Modifier.matchParentSize().liquidGlassSource(playerBackdrop)) {
             // Apple Music: Full-bleed scaled & deeply blurred artwork
-            PlayerArtwork(
-                track = track,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = 1.35f
-                        scaleY = 1.35f
-                        alpha = 0.72f
-                    }
-                    .blur(36.dp),
-                corner = 0.dp,
-                decodeSizePx = 200,
-            )
+            BackdropBlur(radius = 36.dp, modifier = Modifier.fillMaxSize()) {
+                PlayerArtwork(
+                    track = track,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = 1.35f
+                            scaleY = 1.35f
+                            alpha = 0.72f
+                        },
+                    corner = 0.dp,
+                    decodeSizePx = 200,
+                )
+            }
 
             // Apple Music: Vibrant chromatic ambient mesh blobs
             Box(
@@ -2047,7 +2052,8 @@ private fun FullPlayer(
                                                 ),
                                                 label = "likeScale",
                                             )
-                                            Surface(
+                                            LiquidGlassSurface(
+                                                glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
                                                 onClick = onToggleLiked,
                                                 interactionSource = likeInteraction,
                                                 shape = CircleShape,
@@ -2068,8 +2074,7 @@ private fun FullPlayer(
                                                     .graphicsLayer {
                                                         scaleX = likeScale
                                                         scaleY = likeScale
-                                                    }
-                                                    .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
+                                                    },
                                             ) {
                                                 Box(contentAlignment = Alignment.Center) {
                                                     Icon(
@@ -2086,7 +2091,8 @@ private fun FullPlayer(
                                                 animationSpec = ExpressiveMotion.spatialSpring(),
                                                 label = "lyricsScale",
                                             )
-                                            Surface(
+                                            LiquidGlassSurface(
+                                                glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
                                                 onClick = { onTabChange(FullPlayerTab.LYRICS) },
                                                 interactionSource = lyricsInteraction,
                                                 shape = CircleShape,
@@ -2099,8 +2105,7 @@ private fun FullPlayer(
                                                     .graphicsLayer {
                                                         scaleX = lyricsScale
                                                         scaleY = lyricsScale
-                                                    }
-                                                    .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
+                                                    },
                                             ) {
                                                 Box(contentAlignment = Alignment.Center) {
                                                     Icon(
@@ -2444,7 +2449,8 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         horizontalArrangement = Arrangement.spacedBy(if (isTranslucent) 18.dp else 16.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Surface(
+        LiquidGlassSurface(
+            glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
             onClick = player::previous,
             interactionSource = prevInteraction,
             shape = CircleShape,
@@ -2457,14 +2463,14 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
                 .graphicsLayer {
                     scaleX = prevScale
                     scaleY = prevScale
-                }
-                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
+                },
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
             }
         }
-        Surface(
+        LiquidGlassSurface(
+            glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls),
             onClick = player::togglePlayPause,
             interactionSource = playInteraction,
             shape = CircleShape,
@@ -2479,8 +2485,7 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
                 .graphicsLayer {
                     scaleX = playScale
                     scaleY = playScale
-                }
-                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls),
+                },
         ) {
             Box(contentAlignment = Alignment.Center) {
                 if (state.isBuffering) {
@@ -2494,7 +2499,8 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
                 }
             }
         }
-        Surface(
+        LiquidGlassSurface(
+            glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
             onClick = player::next,
             interactionSource = nextInteraction,
             shape = CircleShape,
@@ -2507,11 +2513,64 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
                 .graphicsLayer {
                     scaleX = nextScale
                     scaleY = nextScale
-                }
-                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
+                },
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.SkipNext, "Next", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayerModeButton(
+    active: Boolean,
+    description: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    background: Color,
+    foreground: Color,
+    iconSize: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        if (pressed) 0.92f else 1f, ExpressiveMotion.spatialSpring(), label = "modePress",
+    )
+    val container by animateColorAsState(
+        if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.86f)
+        else liquidGlassContainerColor(background), label = "modeContainer",
+    )
+    val content by animateColorAsState(
+        if (active) MaterialTheme.colorScheme.onPrimaryContainer else foreground, label = "modeContent",
+    )
+    LiquidGlassSurface(
+        glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
+        onClick = onClick,
+        interactionSource = interaction,
+        shape = CircleShape,
+        color = container,
+        contentColor = content,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .semantics {
+                selected = active
+                stateDescription = description
+            },
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Icon(icon, description, Modifier.size(iconSize))
+            if (active) {
+                Box(
+                    Modifier.align(Alignment.BottomCenter).padding(bottom = 5.dp)
+                        .size(4.dp).background(content, CircleShape),
+                )
             }
         }
     }
@@ -2545,22 +2604,16 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         horizontalArrangement = Arrangement.spacedBy(if (isTranslucent) 10.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Surface(
+        PlayerModeButton(
+            active = state.shuffleEnabled,
+            description = if (state.shuffleEnabled) "Shuffle on" else "Shuffle off",
+            icon = Icons.Filled.Shuffle,
             onClick = player::toggleShuffle,
-            shape = CircleShape,
-            color = if (state.shuffleEnabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
-                else liquidGlassContainerColor(edgeButtonBackground),
-            contentColor = if (state.shuffleEnabled) MaterialTheme.colorScheme.primary else edgeButtonContent,
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
-            modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp)
-                .semantics { selected = state.shuffleEnabled }
-                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.Shuffle, if (state.shuffleEnabled) "Shuffle on" else "Shuffle off", modifier = Modifier.size(if (isTranslucent) 19.dp else 20.dp))
-            }
-        }
+            background = edgeButtonBackground,
+            foreground = edgeButtonContent,
+            iconSize = if (isTranslucent) 19.dp else 20.dp,
+            modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
+        )
         Surface(
             shape = RoundedCornerShape(24.dp),
             color = liquidGlassContainerColor(qualityButtonBackground),
@@ -2591,30 +2644,20 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
                 )
             }
         }
-        Surface(
+        PlayerModeButton(
+            active = state.repeatMode != Player.REPEAT_MODE_OFF,
+            description = when (state.repeatMode) {
+                Player.REPEAT_MODE_ONE -> "Repeat one"
+                Player.REPEAT_MODE_ALL -> "Repeat all"
+                else -> "Repeat off"
+            },
+            icon = if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
             onClick = player::cycleRepeatMode,
-            shape = CircleShape,
-            color = if (state.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
-                else liquidGlassContainerColor(edgeButtonBackground),
-            contentColor = if (state.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary else edgeButtonContent,
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
-            modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp)
-                .semantics { selected = state.repeatMode != Player.REPEAT_MODE_OFF }
-                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
-                    when (state.repeatMode) {
-                        Player.REPEAT_MODE_ONE -> "Repeat one"
-                        Player.REPEAT_MODE_ALL -> "Repeat all"
-                        else -> "Repeat off"
-                    },
-                    modifier = Modifier.size(if (isTranslucent) 19.dp else 20.dp),
-                )
-            }
-        }
+            background = edgeButtonBackground,
+            foreground = edgeButtonContent,
+            iconSize = if (isTranslucent) 19.dp else 20.dp,
+            modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
+        )
     }
 }
 
@@ -2655,7 +2698,8 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
         ) {
             itemsIndexed(state.queue, key = { index, item -> "$index:${item.videoId ?: item.artist + item.title}" }) { index, item ->
                 val isCurrent = index == state.currentIndex
-                Surface(
+                LiquidGlassSurface(
+                    glassModifier = Modifier.liquidGlassChrome(RoundedCornerShape(20.dp), LocalLiquidGlass.current),
                     onClick = { player.seekToQueueItem(index) },
                     shape = RoundedCornerShape(20.dp),
                     color = liquidGlassContainerColor(
@@ -2664,8 +2708,7 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                     ),
                     contentColor = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer
                     else MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.animateItem()
-                        .liquidGlassChrome(RoundedCornerShape(20.dp), LocalLiquidGlass.current),
+                    modifier = Modifier.animateItem(),
                 ) {
                     Row(
                         Modifier.fillMaxWidth().padding(9.dp),

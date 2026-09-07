@@ -117,6 +117,7 @@ import com.lastwave.app.ui.player.LocalMusicPlayer
 import com.lastwave.app.ui.player.PlayingWaveBars
 import com.lastwave.app.ui.shell.FloatingNavDefaults
 import com.lastwave.app.ui.theme.LocalLiquidGlass
+import com.lastwave.app.ui.theme.LiquidGlassSurface
 import com.lastwave.app.ui.theme.liquidGlassChrome
 import com.lastwave.app.ui.theme.LiquidGlassPreset
 import com.lastwave.app.ui.theme.liquidGlassContainerColor
@@ -156,12 +157,18 @@ fun FeedScreen(
             (becauseYouListenTo?.items?.isNotEmpty() == true) || freshFinds.isNotEmpty() ||
             spotlight != null || charts.isNotEmpty() || newReleases.isNotEmpty() || friends.isNotEmpty()
     }
-    val headerSubtitle = remember(state.feedData) {
-        val picks = state.feedData.quickPicks.size
-        val date = try {
-            java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMM d"))
+    val greeting = remember {
+        when (java.time.LocalTime.now().hour) {
+            in 5..11 -> "Good morning"
+            in 12..16 -> "Good afternoon"
+            in 17..21 -> "Good evening"
+            else -> "Good night"
+        }
+    }
+    val formattedDate = remember {
+        try {
+            java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d"))
         } catch (_: Exception) { "" }
-        if (picks > 0) "$date · $picks picks for you" else date
     }
     LaunchedEffect(state.error, hasFeedContent) {
         val error = state.error ?: return@LaunchedEffect
@@ -220,15 +227,32 @@ fun FeedScreen(
                 ) {
                     item(key = "hero") {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            if (headerSubtitle.isNotBlank()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 18.dp)
+                                    .padding(top = 2.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
                                 Text(
-                                    text = headerSubtitle,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(horizontal = 18.dp),
+                                    text = greeting,
+                                    style = MaterialTheme.typography.headlineMedium.copy(
+                                        fontSize = 24.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        letterSpacing = (-0.3).sp,
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
                                 )
+                                if (formattedDate.isNotBlank()) {
+                                    Text(
+                                        text = formattedDate,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium,
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                                    )
+                                }
                             }
                             InfiniteRadioHero(
                                 quickPicks = state.feedData.quickPicks,
@@ -254,6 +278,7 @@ fun FeedScreen(
                                         tile.collection == "radio" -> viewModel.playInfiniteRadio()
                                         tile.collection == "yt_liked" || tile.playlistId == "yt_liked" -> onOpenFeedPlaylist("yt_liked")
                                         tile.collection == "yt_recent" || tile.playlistId == "yt_recent" -> onOpenFeedPlaylist("yt_recent")
+                                        tile.collection == "new_releases" -> onOpenNewReleases()
                                         tile.localPlaylistId != null -> onOpenPlaylist(tile.localPlaylistId)
                                         tile.playlistId != null -> onOpenFeedPlaylist(tile.playlistId)
                                         else -> viewModel.handleQuickTileClick(tile)
@@ -778,10 +803,12 @@ private fun TasteStrip(
         ) {
             items(tags, key = { it }) { tag ->
                 val isLoading = launching?.equals(tag.displayName(), ignoreCase = true) == true
-                Surface(
+                LiquidGlassSurface(
+                    glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current),
                     onClick = { onTagClick(tag) },
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f),
+                    color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f)),
+                    modifier = Modifier,
                     border = androidx.compose.foundation.BorderStroke(
                         1.dp,
                         MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
@@ -984,7 +1011,8 @@ private fun QuickTilesGrid(
 private fun QuickTileCard(tile: FeedQuickTile, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val liquidGlass = LocalLiquidGlass.current
     val tileShape = RoundedCornerShape(18.dp)
-    Surface(
+    LiquidGlassSurface(
+        glassModifier = Modifier.liquidGlassChrome(tileShape, liquidGlass),
         onClick = onClick,
         shape = tileShape,
         color = liquidGlassContainerColor(
@@ -996,8 +1024,7 @@ private fun QuickTileCard(tile: FeedQuickTile, modifier: Modifier = Modifier, on
             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
         ),
         modifier = modifier
-            .height(64.dp)
-            .liquidGlassChrome(tileShape, liquidGlass),
+            .height(64.dp),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -1005,7 +1032,8 @@ private fun QuickTileCard(tile: FeedQuickTile, modifier: Modifier = Modifier, on
         ) {
             Box(
                 modifier = Modifier
-                    .size(64.dp)
+                    .fillMaxHeight()
+                    .aspectRatio(1f)
                     .clip(RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp))
                     .background(
                         if (tile.isLiked) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
@@ -1027,6 +1055,13 @@ private fun QuickTileCard(tile: FeedQuickTile, modifier: Modifier = Modifier, on
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                     )
+                } else if (tile.collection == "new_releases") {
+                    Icon(
+                        Icons.Filled.NewReleases,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp),
+                    )
                 } else {
                     Icon(
                         Icons.Filled.MusicNote,
@@ -1039,12 +1074,12 @@ private fun QuickTileCard(tile: FeedQuickTile, modifier: Modifier = Modifier, on
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(start = 12.dp, end = 8.dp),
+                    .padding(start = 10.dp, end = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 Text(
                     text = tile.title,
-                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 17.sp),
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.5.sp, lineHeight = 17.sp),
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1052,7 +1087,7 @@ private fun QuickTileCard(tile: FeedQuickTile, modifier: Modifier = Modifier, on
                 )
                 Text(
                     text = tile.subtitle ?: if (tile.actionVideoId != null) "Track" else "Playlist",
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
@@ -1089,27 +1124,27 @@ private fun QuickPicksRows(
 ) {
     val sizeClass = rememberWindowSizeClass()
     val widthFraction = when (sizeClass) {
-        WindowSizeClass.COMPACT -> 0.86f
+        WindowSizeClass.COMPACT -> 0.88f
         WindowSizeClass.MEDIUM -> 0.48f
         WindowSizeClass.EXPANDED -> 0.32f
     }
     val columns = remember(tracks) { tracks.chunked(3) }
     LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
         modifier = Modifier.padding(top = 12.dp),
     ) {
         itemsIndexed(columns) { columnIndex, column ->
             Column(
                 modifier = Modifier.fillParentMaxWidth(widthFraction),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 column.forEachIndexed { rowIndex, track ->
                     val overallIndex = columnIndex * 3 + rowIndex
                     val isCurrent = track.videoId.isNotBlank() && track.videoId == currentPlayingVideoId
                     Surface(
                         onClick = { onTrackClick(overallIndex) },
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(18.dp),
                         color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
                         else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.65f),
                         border = if (isCurrent) androidx.compose.foundation.BorderStroke(
@@ -1121,17 +1156,17 @@ private fun QuickPicksRows(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
-                            Box(modifier = Modifier.size(48.dp)) {
+                            Box(modifier = Modifier.size(56.dp)) {
                                 ArtworkImage(
                                     name = track.title,
                                     artist = track.artist,
                                     embeddedUrl = track.artworkUrl,
                                     fallbackIcon = Icons.Filled.MusicNote,
-                                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
+                                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
                                 )
                                 if (isCurrent && isPlaying) {
                                     PlayingWaveBars(
@@ -1142,10 +1177,10 @@ private fun QuickPicksRows(
                                     )
                                 }
                             }
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                 Text(
                                     track.title,
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.5.sp),
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -1154,7 +1189,7 @@ private fun QuickPicksRows(
                                 )
                                 Text(
                                     track.artist,
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -1163,13 +1198,13 @@ private fun QuickPicksRows(
                             }
                             IconButton(
                                 onClick = { onMenuClick(track) },
-                                modifier = Modifier.size(32.dp),
+                                modifier = Modifier.size(36.dp),
                             ) {
                                 Icon(
                                     Icons.Filled.MoreVert,
                                     contentDescription = "More options for ${track.title}",
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                    modifier = Modifier.size(18.dp),
+                                    modifier = Modifier.size(20.dp),
                                 )
                             }
                         }
@@ -1642,10 +1677,11 @@ private fun SpotlightHeroCard(
                         Spacer(Modifier.width(6.dp))
                         Text("Artist radio", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                     }
-                    Surface(
+                    LiquidGlassSurface(
+                        glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current),
                         onClick = onOpenArtist,
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.8f),
+                        color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.8f)),
                         modifier = Modifier.weight(1f).height(42.dp),
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1857,16 +1893,19 @@ private fun FeedSectionHeader(
             }
         }
         if (onShuffleClick != null) {
-            Surface(
+            LiquidGlassSurface(
+                glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls),
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onShuffleClick()
                 },
                 shape = CircleShape,
                 color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f)),
-                modifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls),
             ) {
-                Box(modifier = Modifier.padding(8.dp), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier.padding(8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Icon(
                         Icons.Filled.Shuffle,
                         contentDescription = "Shuffle $title",
@@ -1878,16 +1917,14 @@ private fun FeedSectionHeader(
         }
         if (actionText != null && onActionClick != null) {
             val liquidGlass = LocalLiquidGlass.current
-            Surface(
+            LiquidGlassSurface(
+                glassModifier = Modifier.liquidGlassChrome(CircleShape, liquidGlass, LiquidGlassPreset.FloatingControls),
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onActionClick()
                 },
                 shape = CircleShape,
-                color = liquidGlassContainerColor(
-                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                ),
-                modifier = Modifier.liquidGlassChrome(CircleShape, liquidGlass, LiquidGlassPreset.FloatingControls),
+                color = liquidGlassContainerColor(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)),
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp),
@@ -1974,10 +2011,12 @@ private fun FeedEmptyState(
                 Spacer(Modifier.width(6.dp))
                 Text("Search music", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
             }
-            Surface(
+            LiquidGlassSurface(
+                glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current),
                 onClick = onRetry,
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
+                color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f)),
+                modifier = Modifier,
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),

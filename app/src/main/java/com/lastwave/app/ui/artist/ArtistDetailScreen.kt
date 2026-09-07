@@ -69,6 +69,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import com.lastwave.app.ui.theme.LocalLiquidGlass
+import com.lastwave.app.ui.theme.isLiquidGlassBackdropSupported
+import com.lastwave.app.ui.theme.liquidGlassSource
+import com.lastwave.app.ui.theme.liquidGlassChrome
+import com.lastwave.app.ui.theme.liquidGlassContainerColor
+import com.lastwave.app.ui.theme.LiquidGlassPreset
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -130,11 +138,13 @@ fun ArtistDetailScreen(
         }
     }
 
+    val headerBackdrop = if (isLiquidGlassBackdropSupported()) rememberLayerBackdrop() else null
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
+        Box(Modifier.fillMaxSize().liquidGlassSource(headerBackdrop)) {
         when (val state = uiState) {
             is ArtistUiState.Loading -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -263,9 +273,11 @@ fun ArtistDetailScreen(
                                 if (isArtistPlaying) {
                                     Surface(
                                         shape = RoundedCornerShape(topStart = 14.dp, bottomEnd = 28.dp),
-                                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.92f),
+                                        color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.92f)),
                                         tonalElevation = 4.dp,
-                                        modifier = Modifier.align(Alignment.BottomEnd),
+                                        modifier = Modifier.align(Alignment.BottomEnd).liquidGlassChrome(
+                                            RoundedCornerShape(topStart = 14.dp, bottomEnd = 28.dp), LocalLiquidGlass.current,
+                                        ),
                                     ) {
                                         PlayingWaveBars(
                                             modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
@@ -704,14 +716,17 @@ fun ArtistDetailScreen(
             }
         }
 
+        }
+
         // Native Top Bar with Back Navigation & Fade Header
         Surface(
-            color = if (showScrolledHeader) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.98f) else Color.Transparent,
+            color = liquidGlassContainerColor(if (showScrolledHeader) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.98f) else Color.Transparent, backdrop = headerBackdrop),
             tonalElevation = if (showScrolledHeader) 4.dp else 0.dp,
             shadowElevation = if (showScrolledHeader) 6.dp else 0.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .align(Alignment.TopCenter),
+                .align(Alignment.TopCenter)
+                .liquidGlassChrome(RectangleShape, LocalLiquidGlass.current && showScrolledHeader, LiquidGlassPreset.Overlay, headerBackdrop),
         ) {
             Row(
                 modifier = Modifier

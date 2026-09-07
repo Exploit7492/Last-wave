@@ -89,6 +89,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import com.lastwave.app.ui.theme.LocalLiquidGlass
+import com.lastwave.app.ui.theme.isLiquidGlassBackdropSupported
+import com.lastwave.app.ui.theme.liquidGlassSource
+import com.lastwave.app.ui.theme.LiquidGlassSurface
+import com.lastwave.app.ui.theme.liquidGlassChrome
+import com.lastwave.app.ui.theme.liquidGlassContainerColor
+import com.lastwave.app.ui.theme.LiquidGlassPreset
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -235,11 +244,13 @@ fun PlaylistDetailScreen(
         }
     }
 
+    val headerBackdrop = if (isLiquidGlassBackdropSupported()) rememberLayerBackdrop() else null
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
+        Box(Modifier.fillMaxSize().liquidGlassSource(headerBackdrop)) {
         // 1. Full-Bleed Cover Art Background at Top with smooth parallax physics
         Box(
             modifier = Modifier
@@ -582,6 +593,8 @@ fun PlaylistDetailScreen(
             }
         }
 
+        }
+
         // 2. Floating Top Bar with Frosted Glass styling & Smooth Scrolled Header
         val topBarBg by animateColorAsState(
             targetValue = if (showScrolledHeader) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.98f) else Color.Transparent,
@@ -595,12 +608,13 @@ fun PlaylistDetailScreen(
         )
 
         Surface(
-            color = topBarBg,
+            color = liquidGlassContainerColor(topBarBg, backdrop = headerBackdrop),
             tonalElevation = topBarElevation,
             shadowElevation = topBarElevation,
             modifier = Modifier
                 .fillMaxWidth()
-                .align(Alignment.TopCenter),
+                .align(Alignment.TopCenter)
+                .liquidGlassChrome(RectangleShape, LocalLiquidGlass.current && showScrolledHeader, LiquidGlassPreset.Overlay, headerBackdrop),
         ) {
             Row(
                 modifier = Modifier
@@ -612,10 +626,14 @@ fun PlaylistDetailScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Frosted glass circular back button
-                Surface(
+                LiquidGlassSurface(
+                    glassModifier = Modifier.liquidGlassChrome(
+                        CircleShape, LocalLiquidGlass.current && !showScrolledHeader,
+                        LiquidGlassPreset.FloatingControls, headerBackdrop,
+                    ),
                     onClick = onBack,
                     shape = CircleShape,
-                    color = if (showScrolledHeader) Color.Transparent else Color.Black.copy(alpha = 0.38f),
+                    color = liquidGlassContainerColor(if (showScrolledHeader) Color.Transparent else Color.Black.copy(alpha = 0.38f), backdrop = headerBackdrop),
                     modifier = Modifier.size(42.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -689,7 +707,11 @@ fun PlaylistDetailScreen(
                 // Translucent Actions Pill (Search / More Menu)
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = if (showScrolledHeader) Color.Transparent else Color.Black.copy(alpha = 0.38f),
+                    color = liquidGlassContainerColor(if (showScrolledHeader) Color.Transparent else Color.Black.copy(alpha = 0.38f), backdrop = headerBackdrop),
+                    modifier = Modifier.liquidGlassChrome(
+                        RoundedCornerShape(50), LocalLiquidGlass.current && !showScrolledHeader,
+                        LiquidGlassPreset.FloatingControls, headerBackdrop,
+                    ),
                 ) {
                     Box {
                         IconButton(
