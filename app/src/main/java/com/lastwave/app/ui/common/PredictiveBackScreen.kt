@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -21,6 +22,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 
 /**
@@ -66,6 +69,7 @@ fun PredictiveBackScreen(
 ) {
     val progress = remember { Animatable(0f) }
     val gestureScope = rememberCoroutineScope()
+    var resetJob by remember { mutableStateOf<Job?>(null) }
 
     // Which edge the gesture started from (BackEventCompat.EDGE_LEFT/RIGHT)
     // and how far down the screen, as a 0..1 fraction of height — together
@@ -82,6 +86,8 @@ fun PredictiveBackScreen(
     // nothing) — see the detail screens, whose toolbar buttons still pop
     // directly while the gesture path lives here.
     PredictiveBackHandler(enabled = enabled) { backEvents ->
+        resetJob?.cancelAndJoin()
+        resetJob = null
         try {
             backEvents.collect { event ->
                 edge = event.swipeEdge
@@ -98,7 +104,7 @@ fun PredictiveBackScreen(
             // here, so the spring-back runs in the screen's own scope instead
             // of suspending inside a cancelled one.
             if (progress.value > 0f) {
-                gestureScope.launch {
+                resetJob = gestureScope.launch {
                     progress.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
                 }
             }

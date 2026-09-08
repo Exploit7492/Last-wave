@@ -33,6 +33,7 @@ class ArtistRepository @Inject constructor(
     suspend fun getArtistDetails(
         artistName: String,
         browseId: String? = null,
+        onLoaded: (ArtistPageData) -> Unit = {},
     ): ArtistPageData = withContext(Dispatchers.IO) {
         val cleanName = com.lastwave.app.util.ArtistHelper.primaryArtist(artistName).trim()
         if (cleanName.isBlank()) throw java.io.IOException("Artist name is empty.")
@@ -41,7 +42,7 @@ class ArtistRepository @Inject constructor(
         // lookup can never leave the screen on its spinner forever — a
         // timeout surfaces as an error with Retry instead.
         val loaded = kotlinx.coroutines.withTimeoutOrNull(25_000L) {
-            var targetBrowseId = browseId?.takeIf(String::isNotBlank)
+            var targetBrowseId = browseId?.takeIf { it.startsWith("UC") }
             var searchArtwork: String? = null
 
             // 1. Resolve browseId if missing
@@ -53,12 +54,11 @@ class ArtistRepository @Inject constructor(
                 searchArtwork = match?.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage)
             }
             val resolvedId = targetBrowseId
-                ?: throw java.io.IOException("Couldn't find \"$cleanName\" on YouTube Music.")
 
             coroutineScope {
             // Load InnerTube artist data in parallel with Last.fm metadata
             val innerTubeDeferred = async {
-                runCatching { innerTube.fetchArtistPage(resolvedId, artistNameFallback = cleanName) }.getOrNull()
+                runCatching { resolvedId?.let { innerTube.fetchArtistPage(it, artistNameFallback = cleanName, onLoaded = onLoaded) } }.getOrNull()
             }
 
             val lastFmDeferred = async {
@@ -66,7 +66,7 @@ class ArtistRepository @Inject constructor(
             }
 
             val ytData = innerTubeDeferred.await()
-            val lfmData = lastFmDeferred.await()
+            ytData?.takeIf { it.topSongs.isNotEmpty() }?.let(onLoaded)
 
             // Merge InnerTube rich playable songs & discography with Last.fm bio & tags
             val finalName = ytData?.name?.takeIf(String::isNotBlank)?.let { com.lastwave.app.util.ArtistHelper.primaryArtist(it).trim() }
@@ -79,16 +79,15 @@ class ArtistRepository @Inject constructor(
                 }.getOrNull()
             }
             val artwork = ytData?.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage)
-                ?: searchArtwork ?: lfmData?.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage)
+                ?: searchArtwork
             val banner = ytData?.bannerUrl?.takeIf(ArtworkNormalizer::isRealImage) ?: artwork
-            val bio = ytData?.bio?.takeIf(String::isNotBlank) ?: lfmData?.bio
-            val tags = lfmData?.tags.orEmpty()
-            val listeners = ytData?.subscribers ?: lfmData?.listeners
+            val bio = ytData?.bio?.takeIf(String::isNotBlank)
+            val listeners = ytData?.subscribers
 
             var topSongs = ytData?.topSongs.orEmpty()
 
-            // Fallback & Enrichment: If InnerTube returned <= 5 preview songs or was empty, supplement with search
-            if (topSongs.size <= 5 && finalName.isNotBlank()) {
+            // Search only when the artist page has no playable songs.
+            if (topSongs.isEmpty() && finalName.isNotBlank()) {
                 val songs = runCatching { innerTube.searchSongs(finalName, limit = 30) }.getOrDefault(emptyList())
                 val existingIds = topSongs.mapNotNull { it.videoId }.toSet()
                 val existingTitles = topSongs.map { it.title.lowercase().trim() }.toSet()
@@ -111,20 +110,30 @@ class ArtistRepository @Inject constructor(
                 topSongs = (topSongs + additionalTracks).distinctBy { it.videoId ?: it.title }
             }
 
-            ArtistPageData(
+            val pageData = ArtistPageData(
                 name = finalName,
-                browseId = resolvedId,
+                browseId = resolvedId.orEmpty(),
                 artworkUrl = artwork,
                 fallbackArtworkUrl = searchArtwork,
                 bannerUrl = banner,
                 monthlyListeners = ytData?.monthlyListeners ?: listeners,
                 subscribers = ytData?.subscribers ?: listeners,
                 bio = bio,
-                tags = tags,
                 topSongs = topSongs,
                 albums = ytData?.albums.orEmpty(),
                 singles = ytData?.singles.orEmpty(),
-                similarArtists = if (ytData?.similarArtists?.isNotEmpty() == true) ytData.similarArtists else lfmData?.similarArtists.orEmpty(),
+                similarArtists = ytData?.similarArtists.orEmpty(),
+            )
+            if (topSongs.isNotEmpty()) onLoaded(pageData)
+            val lfmData = lastFmDeferred.await()
+            pageData.copy(
+                artworkUrl = pageData.artworkUrl ?: lfmData?.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage),
+                bannerUrl = pageData.bannerUrl ?: lfmData?.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage),
+                bio = pageData.bio ?: lfmData?.bio,
+                tags = lfmData?.tags.orEmpty(),
+                monthlyListeners = pageData.monthlyListeners ?: lfmData?.listeners,
+                subscribers = pageData.subscribers ?: lfmData?.listeners,
+                similarArtists = pageData.similarArtists.ifEmpty { lfmData?.similarArtists.orEmpty() },
             )
             }
         } ?: throw java.io.IOException("Couldn't load \"$cleanName\". Check your connection and try again.")

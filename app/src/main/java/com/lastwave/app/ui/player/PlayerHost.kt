@@ -152,6 +152,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
@@ -271,6 +273,7 @@ class PlayerViewModel @Inject constructor(
     val lyricsState = _lyricsState.asStateFlow()
 
     private var currentTrackLyricsKey: String? = null
+    private var lyricsJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -279,13 +282,8 @@ class PlayerViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            ytMusicLibraryManager.playlists.collect { remote ->
-                if (customPlaylistsLoaded) {
-                    _customPlaylists.value = (playlistRepository.getAll()
-                        .filter { it.mode == "custom" || it.mode == LIKED_SONGS_MODE }
-                        .sortedByDescending { it.mode == LIKED_SONGS_MODE } + remote)
-                        .distinctBy { it.id }
-                }
+            ytMusicLibraryManager.playlists.collect {
+                if (customPlaylistsLoaded) refreshCustomPlaylists()
             }
         }
         viewModelScope.launch {
@@ -297,6 +295,7 @@ class PlayerViewModel @Inject constructor(
                     if (track != null) {
                         loadLyrics(track, forceRefresh = false)
                     } else {
+                        lyricsJob?.cancel()
                         _lyricsState.value = LyricsUiState.Idle
                     }
                 }
@@ -305,10 +304,17 @@ class PlayerViewModel @Inject constructor(
     }
 
     private suspend fun refreshCustomPlaylists() {
-        _customPlaylists.value = (playlistRepository.getAll()
-            .filter { it.mode == "custom" || it.mode == LIKED_SONGS_MODE }
-            .sortedByDescending { it.mode == LIKED_SONGS_MODE } + ytMusicLibraryManager.playlists.value)
-            .distinctBy { it.id }
+        try {
+            _customPlaylists.value = (playlistRepository.getAll()
+                .filter { it.mode == "custom" || it.mode == LIKED_SONGS_MODE }
+                .sortedByDescending { it.mode == LIKED_SONGS_MODE } + ytMusicLibraryManager.playlists.value)
+                .distinctBy { it.id }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            customPlaylistsLoaded = false
+            android.util.Log.e("PlayerViewModel", "Couldn't refresh playlists", error)
+        }
     }
 
     fun prepareCustomPlaylists() {
@@ -318,13 +324,22 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun loadLyrics(track: PlayableTrack, forceRefresh: Boolean = false) {
-        viewModelScope.launch {
+        lyricsJob?.cancel()
+        lyricsJob = viewModelScope.launch {
             _lyricsState.value = LyricsUiState.Loading
             val durationSeconds = if (player.state.value.durationMs > 0) {
                 (player.state.value.durationMs / 1000).toInt()
             } else null
 
-            when (val result = lyricsRepository.getLyrics(track.title, track.artist, track.album, durationSeconds, forceRefresh)) {
+            val result = try {
+                lyricsRepository.getLyrics(track.title, track.artist, track.album, durationSeconds, forceRefresh)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                LyricsResult.Error(error.message ?: "Couldn't load lyrics")
+            }
+            coroutineContext.ensureActive()
+            when (result) {
                 is LyricsResult.Success -> {
                     _lyricsState.value = LyricsUiState.Success(
                         lines = result.lines,
@@ -882,6 +897,7 @@ fun PlayingWaveBars(
             androidx.compose.foundation.Canvas(
                 Modifier.fillMaxSize(),
             ) {
+            if (size.width <= 0f || size.height <= 0f) return@Canvas
             val barCount = 3
             val barWidth = (size.width / 5.2f).coerceAtLeast(1.5f)
             val barGap = barWidth * 0.9f
@@ -894,7 +910,7 @@ fun PlayingWaveBars(
                     1 -> second.value
                     else -> third.value
                 }
-                val barHeight = (size.height * fraction).coerceIn(barWidth, size.height)
+                val barHeight = (size.height * fraction).coerceIn(minOf(barWidth, size.height), size.height)
                 drawRoundRect(
                     color = waveColor,
                     topLeft = androidx.compose.ui.geometry.Offset(
@@ -1474,7 +1490,7 @@ private fun FullPlayer(
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val bgWidth = constraints.maxWidth.toFloat()
             val bgHeight = constraints.maxHeight.toFloat()
-            val bgMaxDimension = maxOf(bgWidth, bgHeight)
+            val bgMaxDimension = maxOf(bgWidth, bgHeight, 1f)
 
             Box(Modifier.matchParentSize().liquidGlassSource(playerBackdrop)) {
             // Apple Music: Full-bleed scaled & deeply blurred artwork

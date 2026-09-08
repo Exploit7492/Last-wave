@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -34,78 +36,50 @@ class NewReleasesViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(NewReleasesUiState())
     val uiState: StateFlow<NewReleasesUiState> = _uiState.asStateFlow()
 
+    private var loadJob: Job? = null
+
     init {
         loadInitial()
     }
 
-    fun loadInitial() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null, endReached = false) }
+    fun loadInitial() = reload(refreshing = false)
+
+    fun refresh() = reload(refreshing = true)
+
+    private fun reload(refreshing: Boolean) {
+        loadJob?.cancel()
+        _uiState.update { it.copy(isLoading = it.tracks.isEmpty(), isRefreshing = refreshing,
+            isLoadingMore = false, error = null, endReached = false) }
+        loadJob = viewModelScope.launch {
             try {
-                val initialTracks = repository.fetchInitialBatch()
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        tracks = initialTracks,
-                        error = if (initialTracks.isEmpty()) "No new releases available right now." else null,
-                    )
-                }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        error = e.message ?: "Couldn't load new releases. Check connection and tap to retry.",
-                    )
-                }
+                val tracks = repository.fetchInitialBatch()
+                _uiState.update { it.copy(isLoading = false, isRefreshing = false,
+                    tracks = tracks, endReached = !repository.hasMore,
+                    error = if (tracks.isEmpty()) "No new releases available right now." else null) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _uiState.update { it.copy(isLoading = false, isRefreshing = false,
+                    error = error.message ?: "Couldn't load new releases. Tap Retry.") }
             }
         }
     }
 
     fun loadMore() {
         val current = _uiState.value
-        if (current.isLoading || current.isLoadingMore || current.tracks.isEmpty() || current.endReached) return
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoadingMore = true) }
+        if (loadJob?.isActive == true || current.tracks.isEmpty() || current.endReached) return
+        _uiState.update { it.copy(isLoadingMore = true, error = null) }
+        loadJob = viewModelScope.launch {
             try {
                 val more = repository.fetchNextBatch()
-                _uiState.update {
-                    it.copy(
-                        isLoadingMore = false,
-                        // An empty batch means every source (continuations,
-                        // album queue, search fallbacks) is exhausted — stop
-                        // auto-paging, otherwise sitting at the bottom of the
-                        // list re-triggers loadMore on every size change in a
-                        // never-ending network storm that also starves the
-                        // repository mutex for fresh loads.
-                        endReached = more.isEmpty(),
-                        tracks = if (more.isNotEmpty()) it.tracks + more else it.tracks,
-                    )
-                }
-            } catch (_: Exception) {
-                _uiState.update { it.copy(isLoadingMore = false) }
-            }
-        }
-    }
-
-    fun refresh() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isRefreshing = true, endReached = false) }
-            try {
-                val refreshed = repository.fetchInitialBatch()
-                _uiState.update {
-                    it.copy(
-                        isRefreshing = false,
-                        tracks = refreshed,
-                        error = null,
-                    )
-                }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isRefreshing = false,
-                        error = e.message ?: "Failed to refresh new releases.",
-                    )
-                }
+                _uiState.update { it.copy(isLoadingMore = false,
+                    endReached = !repository.hasMore,
+                    tracks = (it.tracks + more).distinctBy { track -> track.videoId }) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _uiState.update { it.copy(isLoadingMore = false,
+                    error = error.message ?: "Couldn't load more releases. Tap Retry.") }
             }
         }
     }

@@ -102,6 +102,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -2779,6 +2780,9 @@ private fun EqNativeSlider(
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val normalized = ((gainDb + EQ_MAX_DB) / (EQ_MAX_DB * 2f)).coerceIn(0f, 1f)
     var isDragging by remember { mutableStateOf(false) }
+    val currentGain by rememberUpdatedState(gainDb)
+    val currentOnGainChange by rememberUpdatedState(onGainChange)
+    val currentOnChangeFinished by rememberUpdatedState(onChangeFinished)
 
     Column(
         modifier = modifier,
@@ -2828,25 +2832,25 @@ private fun EqNativeSlider(
                         onDragStart = { isDragging = true },
                         onDragEnd = {
                             isDragging = false
-                            onChangeFinished()
+                            currentOnChangeFinished()
                         },
                         onDragCancel = {
                             isDragging = false
-                            onChangeFinished()
+                            currentOnChangeFinished()
                         },
                     ) { change, dragAmount ->
                         change.consume()
                         val deltaFraction = -dragAmount / size.height.toFloat()
-                        val currentFraction = ((gainDb + EQ_MAX_DB) / (EQ_MAX_DB * 2f))
+                        val currentFraction = ((currentGain + EQ_MAX_DB) / (EQ_MAX_DB * 2f))
                         val newFraction = (currentFraction + deltaFraction).coerceIn(0f, 1f)
                         val newGain = (newFraction * EQ_MAX_DB * 2f - EQ_MAX_DB).let {
                             if (it in -0.3f..0.3f) 0f else (Math.round(it * 2f) / 2f)
                         }
-                        if (newGain != gainDb) {
-                            if (newGain == 0f && gainDb != 0f) {
+                        if (newGain != currentGain) {
+                            if (newGain == 0f && currentGain != 0f) {
                                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
                             }
-                            onGainChange(newGain)
+                            currentOnGainChange(newGain)
                         }
                     }
                 },

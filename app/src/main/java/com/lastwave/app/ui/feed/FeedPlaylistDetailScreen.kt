@@ -125,6 +125,14 @@ fun FeedPlaylistDetailScreen(
             }
 
             is FeedPlaylistDetailUiState.Success -> {
+                if (current.isLoadingMore) {
+                    Text("Loading remaining tracks…", modifier = Modifier.padding(horizontal = 16.dp))
+                }
+                if (current.loadError != null) {
+                    FilledTonalButton(onClick = { viewModel.load(playlistId, force = true) }) {
+                        Text("Playlist incomplete · Retry")
+                    }
+                }
                 PlaylistContent(
                     playlist = current.playlist,
                     onPlay = viewModel::playFrom,

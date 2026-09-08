@@ -29,12 +29,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Outline
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.painter.Painter
@@ -153,12 +151,7 @@ fun liquidGlassContainerColor(
 @Composable
 fun isLiquidGlassEnabled(): Boolean = LocalLiquidGlass.current
 
-/**
- * Universal zero-allocation canvas liquid glass chrome:
- * Renders dark glass substrate, specular vertical reflection, subtle refractive chromatic dispersion,
- * and a specular hairline edge border directly on the canvas without allocating offscreen FBO layers.
- * 100% crash-proof across all Android versions (including Android 16) and GPU architectures.
- */
+/** Canvas glass decoration; foreground content is drawn once without a render effect. */
 @Composable
 fun Modifier.liquidGlassChrome(
     shape: Shape,
@@ -170,21 +163,11 @@ fun Modifier.liquidGlassChrome(
     return canvasLiquidGlassChrome(shape)
 }
 
-/**
- * Zero-allocation canvas liquid glass renderer:
- * Renders dark glass substrate, specular vertical reflection, subtle refractive chromatic dispersion,
- * and a specular hairline edge border directly on the canvas without allocating offscreen FBO layers.
- */
 fun Modifier.canvasLiquidGlassChrome(shape: Shape): Modifier = drawWithCache {
-    if (size.width <= 0f || size.height <= 0f) {
+    if (!size.width.isFinite() || !size.height.isFinite() || size.width <= 0f || size.height <= 0f) {
         return@drawWithCache onDrawWithContent { drawContent() }
     }
     val outline = shape.createOutline(size, layoutDirection, this)
-    val path = when (outline) {
-        is Outline.Rounded -> Path().apply { addRoundRect(outline.roundRect) }
-        is Outline.Generic -> outline.path
-        is Outline.Rectangle -> Path().apply { addRect(outline.rect) }
-    }
     val substrate = Color(0xFF0C0E14).copy(alpha = 0.42f)
     val reflection = Brush.verticalGradient(
         0f to Color.White.copy(alpha = 0.20f),
@@ -211,21 +194,11 @@ fun Modifier.canvasLiquidGlassChrome(shape: Shape): Modifier = drawWithCache {
     )
 
     onDrawWithContent {
-        runCatching {
-            clipPath(path) {
-                drawRect(substrate)
-                drawRect(reflection)
-                drawRect(refraction)
-            }
-        }
+        drawOutline(outline, substrate)
+        drawOutline(outline, reflection)
+        drawOutline(outline, refraction)
         drawContent()
-        runCatching {
-            drawPath(
-                path = path,
-                brush = borderBrush,
-                style = Stroke(width = strokeWidth),
-            )
-        }
+        drawOutline(outline, borderBrush, style = Stroke(width = strokeWidth))
     }
 }
 

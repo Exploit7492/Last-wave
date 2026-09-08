@@ -56,13 +56,18 @@ class AlbumViewModel @Inject constructor(
         loadJob = viewModelScope.launch {
             _uiState.value = AlbumUiState.Loading
             try {
-                val data = repository.getAlbumDetails(albumTitle, artistName, browseId)
+                val data = repository.getAlbumDetails(albumTitle, artistName, browseId) { initialData ->
+                    coroutineContext.ensureActive()
+                    _uiState.value = AlbumUiState.Success(initialData)
+                }
                 coroutineContext.ensureActive()
                 _uiState.value = AlbumUiState.Success(data)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.value = AlbumUiState.Error(e.message ?: "Failed to load album details")
+                if (_uiState.value !is AlbumUiState.Success) {
+                    _uiState.value = AlbumUiState.Error(e.message ?: "Failed to load album details")
+                }
             }
         }
     }

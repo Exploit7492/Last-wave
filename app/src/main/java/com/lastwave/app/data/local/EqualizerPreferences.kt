@@ -140,6 +140,6 @@ class EqualizerPreferences @Inject constructor(
 
     private fun encodeGains(gains: List<Float>): String =
         gains.joinToString(",") { gain ->
-            "%.1f".format(if (gain.isFinite()) gain.coerceIn(-EQ_MAX_GAIN_DB, EQ_MAX_GAIN_DB) else 0f)
+            "%.1f".format(java.util.Locale.ROOT, if (gain.isFinite()) gain.coerceIn(-EQ_MAX_GAIN_DB, EQ_MAX_GAIN_DB) else 0f)
         }
 }

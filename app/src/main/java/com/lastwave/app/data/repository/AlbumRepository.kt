@@ -32,6 +32,7 @@ class AlbumRepository @Inject constructor(
         albumTitle: String,
         artistName: String = "",
         browseId: String? = null,
+        onLoaded: (AlbumPageData) -> Unit = {},
     ): AlbumPageData = withContext(Dispatchers.IO) {
         val cleanTitle = albumTitle.trim()
         val cleanArtist = artistName.trim()
@@ -41,7 +42,9 @@ class AlbumRepository @Inject constructor(
         // lookup can never leave the screen on its spinner forever — a
         // timeout surfaces as an error with Retry instead.
         val loaded = kotlinx.coroutines.withTimeoutOrNull(25_000L) {
-            var targetBrowseId = browseId?.takeIf(String::isNotBlank)
+            var targetBrowseId = browseId?.takeIf {
+                it.startsWith("MPRE") || it.startsWith("VL") || it.startsWith("OLAK") || it.startsWith("PL")
+            }
 
             // 1. Resolve browseId if missing
             if (targetBrowseId == null) {
@@ -52,13 +55,12 @@ class AlbumRepository @Inject constructor(
                 targetBrowseId = match?.browseId
             }
             val resolvedId = targetBrowseId
-                ?: throw java.io.IOException("Couldn't find the album \"$cleanTitle\".")
 
             coroutineScope {
                 // Load InnerTube album data in parallel with Last.fm metadata
                 val innerTubeDeferred = async {
                     runCatching {
-                        innerTube.fetchAlbumPage(resolvedId, albumTitleFallback = cleanTitle, artistFallback = cleanArtist)
+                        resolvedId?.let { innerTube.fetchAlbumPage(it, albumTitleFallback = cleanTitle, artistFallback = cleanArtist) }
                     }.getOrNull()
                 }
 
@@ -69,14 +71,13 @@ class AlbumRepository @Inject constructor(
                 }
 
                 val ytData = innerTubeDeferred.await()
-                val lfmData = lastFmDeferred.await()
+                ytData?.takeIf { it.tracks.isNotEmpty() }?.let(onLoaded)
 
                 val finalTitle = ytData?.title?.takeIf(String::isNotBlank) ?: cleanTitle.ifBlank { "Album" }
                 val finalArtist = ytData?.artist?.takeIf(String::isNotBlank) ?: cleanArtist.ifBlank { "Various Artists" }
-                val artwork = ytData?.artworkUrl ?: lfmData?.artworkUrl
-                val description = ytData?.description?.takeIf(String::isNotBlank) ?: lfmData?.description
-                val genres = lfmData?.tags.orEmpty()
-                val releaseYear = ytData?.releaseYear ?: lfmData?.releaseYear
+                val artwork = ytData?.artworkUrl
+                val description = ytData?.description?.takeIf(String::isNotBlank)
+                val releaseYear = ytData?.releaseYear
 
                 var tracks = ytData?.tracks.orEmpty()
 
@@ -96,8 +97,8 @@ class AlbumRepository @Inject constructor(
                                 .any { it.equals(finalArtist, ignoreCase = true) } ||
                             finalArtist.contains(track.artist, ignoreCase = true) ||
                             track.artist.equals("Unknown artist", ignoreCase = true)
-                        val albumOk = track.album.isNullOrBlank() ||
-                            track.album.equals(finalTitle, ignoreCase = true)
+                        val albumOk = track.album.equals(finalTitle, ignoreCase = true) ||
+                            (track.album.isNullOrBlank() && track.title.equals(finalTitle, ignoreCase = true))
                         artistOk && albumOk
                     }.map { track ->
                         PlayableTrack(
@@ -117,19 +118,26 @@ class AlbumRepository @Inject constructor(
                     throw java.io.IOException("Couldn't load \"$finalTitle\". Check your connection and try again.")
                 }
 
-                AlbumPageData(
+                val pageData = AlbumPageData(
                     title = finalTitle,
                     artist = finalArtist,
                     artistBrowseId = ytData?.artistBrowseId,
-                    browseId = resolvedId,
+                    browseId = resolvedId.orEmpty(),
                     artworkUrl = artwork,
                     releaseYear = releaseYear,
                     trackCountText = if (tracks == ytData?.tracks) ytData?.trackCountText else null,
                     durationText = ytData?.durationText,
                     description = description,
-                    genres = genres,
                     tracks = tracks,
                     otherAlbums = ytData?.otherAlbums.orEmpty(),
+                )
+                if (tracks.isNotEmpty()) onLoaded(pageData)
+                val lfmData = lastFmDeferred.await()
+                pageData.copy(
+                    artworkUrl = pageData.artworkUrl ?: lfmData?.artworkUrl,
+                    description = pageData.description ?: lfmData?.description,
+                    releaseYear = pageData.releaseYear ?: lfmData?.releaseYear,
+                    genres = lfmData?.tags.orEmpty(),
                 )
             }
         } ?: throw java.io.IOException("Couldn't load \"$cleanTitle\". Check your connection and try again.")

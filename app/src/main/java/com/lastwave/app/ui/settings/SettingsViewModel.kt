@@ -33,6 +33,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -191,7 +194,27 @@ class SettingsViewModel @Inject constructor(
             }
         }
 
+    private val eqPreviews = Channel<Pair<Boolean, FloatArray>>(Channel.CONFLATED)
+
+    private suspend fun applyNativeAudio(block: (NativeAudioEngine) -> Unit) =
+        withContext(Dispatchers.Default) { block(audioEngine.get()) }
+
     init {
+        viewModelScope.launch {
+            for ((enabled, gains) in eqPreviews) {
+                try {
+                    applyNativeAudio { it.setEqualizer(enabled, gains) }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    android.util.Log.e(SETTINGS_TAG, "Equalizer preview failed", error)
+                    _uiState.update { it.copy(toastMessage = "Couldn't apply equalizer settings.") }
+                } catch (error: LinkageError) {
+                    android.util.Log.e(SETTINGS_TAG, "Equalizer unavailable", error)
+                    _uiState.update { it.copy(toastMessage = "Equalizer isn't available on this device.") }
+                }
+            }
+        }
         viewModelScope.launch {
             equalizer.collect {
                 immediateEqEnabled = it.enabled
@@ -252,24 +275,24 @@ class SettingsViewModel @Inject constructor(
     fun setDownloadQuality(quality: Int) = launchSettingsAction("update download quality") { settingsPreferences.setDownloadQuality(quality) }
     fun setStudioMasterClarity(enabled: Boolean) {
         // Apply immediately; DataStore persists the same state for future engine instances.
-        runCatching { audioEngine.get().setStudioMasterClarity(enabled) }
         launchSettingsAction("update Studio Master Clarity") {
+            applyNativeAudio { it.setStudioMasterClarity(enabled) }
             settingsPreferences.setStudioMasterClarity(enabled)
             if (enabled) {
                 // Enabling DSP clarity disables Bit-Perfect mode
                 settingsPreferences.setBitPerfectEnabled(false)
-                runCatching { audioEngine.get().setBitPerfect(false) }
+                applyNativeAudio { it.setBitPerfect(false) }
             }
         }
     }
     fun setBitPerfectEnabled(enabled: Boolean) {
-        runCatching { audioEngine.get().setBitPerfect(enabled) }
         launchSettingsAction("update Bit-Perfect mode") {
+            applyNativeAudio { it.setBitPerfect(enabled) }
             settingsPreferences.setBitPerfectEnabled(enabled)
             if (enabled) {
                 // When Bit-Perfect is turned on, automatically turn off Studio Master Clarity
                 settingsPreferences.setStudioMasterClarity(false)
-                runCatching { audioEngine.get().setStudioMasterClarity(false) }
+                applyNativeAudio { it.setStudioMasterClarity(false) }
             }
         }
     }
@@ -290,7 +313,7 @@ class SettingsViewModel @Inject constructor(
 
     fun setEqualizerEnabled(enabled: Boolean) {
         immediateEqEnabled = enabled
-        runCatching { audioEngine.get().setEqualizer(enabled, immediateEqGains) }
+        eqPreviews.trySend(enabled to immediateEqGains.copyOf())
         launchSettingsAction("update the equalizer") { equalizerPreferences.setEnabled(enabled) }
     }
 
@@ -300,7 +323,7 @@ class SettingsViewModel @Inject constructor(
         com.lastwave.app.data.local.EqualizerPresets.byName(name)?.let { preset ->
             immediateEqEnabled = true
             immediateEqGains = preset.gainsDb.toFloatArray()
-            runCatching { audioEngine.get().setEqualizer(true, immediateEqGains) }
+            eqPreviews.trySend(true to immediateEqGains.copyOf())
             launchSettingsAction("apply the equalizer preset") { equalizerPreferences.applyPreset(preset) }
         }
     }
@@ -314,7 +337,7 @@ class SettingsViewModel @Inject constructor(
                 com.lastwave.app.data.local.EQ_MAX_GAIN_DB,
             )
         }
-        runCatching { audioEngine.get().setEqualizer(immediateEqEnabled, immediateEqGains) }
+        eqPreviews.trySend(immediateEqEnabled to immediateEqGains.copyOf())
     }
 
     /** Manual band drag → curve becomes Custom. */

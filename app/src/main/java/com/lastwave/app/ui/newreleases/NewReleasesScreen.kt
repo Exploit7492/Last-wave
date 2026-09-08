@@ -100,11 +100,11 @@ fun NewReleasesScreen(
         derivedStateOf {
             val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
             val count = state.tracks.size
-            count >= 5 && last >= count - 4
+            count > 0 && last >= count - 4
         }
     }
     LaunchedEffect(shouldLoadMore, state.tracks.size) {
-        if (shouldLoadMore && !state.isLoading && !state.isLoadingMore && !state.endReached && state.tracks.isNotEmpty()) {
+        if (shouldLoadMore && !state.isLoading && !state.isLoadingMore && !state.endReached && state.error == null && !state.isRefreshing && state.tracks.isNotEmpty()) {
             viewModel.loadMore()
         }
     }
@@ -315,6 +315,14 @@ fun NewReleasesScreen(
                                             }
                                         },
                                     )
+                                }
+
+                                if (state.error != null) {
+                                    item(key = "load_more_error") {
+                                        TextButton(onClick = viewModel::loadMore, modifier = Modifier.fillMaxWidth()) {
+                                            Text("Couldn't load more releases. Retry")
+                                        }
+                                    }
                                 }
 
                                 if (state.isLoadingMore) {

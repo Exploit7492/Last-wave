@@ -13,6 +13,8 @@ import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.PlayableTrack
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +30,8 @@ sealed interface FeedPlaylistDetailUiState {
         val isSaving: Boolean = false,
         val savedToLibrary: Boolean = false,
         val saveError: String? = null,
+        val isLoadingMore: Boolean = false,
+        val loadError: String? = null,
     ) : FeedPlaylistDetailUiState
 
     data class Error(val message: String) : FeedPlaylistDetailUiState
@@ -46,112 +50,59 @@ class FeedPlaylistDetailViewModel @Inject constructor(
 
     private var currentPlaylistId: String? = null
 
-    fun load(playlistId: String) {
+    private var loadJob: Job? = null
+
+    fun load(playlistId: String, force: Boolean = false) {
         if (playlistId.isBlank()) {
             _uiState.value = FeedPlaylistDetailUiState.Error("This playlist is unavailable.")
             return
         }
-        if (playlistId == currentPlaylistId && _uiState.value !is FeedPlaylistDetailUiState.Error) return
-
+        if (!force && playlistId == currentPlaylistId && _uiState.value !is FeedPlaylistDetailUiState.Error) return
+        loadJob?.cancel()
+        val previous = if (playlistId == currentPlaylistId) _uiState.value as? FeedPlaylistDetailUiState.Success else null
         currentPlaylistId = playlistId
-        viewModelScope.launch {
-            _uiState.value = FeedPlaylistDetailUiState.Loading
-
-            // Instant warm render from cached feed if present
-            if (playlistId == "yt_liked") {
-                val cached = feedRepository.getCachedFeed()?.ytLikedSongs.orEmpty()
-                if (cached.isNotEmpty()) {
-                    _uiState.value = FeedPlaylistDetailUiState.Success(
-                        YouTubePlaylistResult(
-                            id = "yt_liked",
-                            title = "Liked on YouTube",
-                            author = "Your favorites",
-                            artworkUrl = cached.firstOrNull()?.artworkUrl,
-                            trackCount = cached.size,
-                            tracks = cached,
-                        )
-                    )
-                }
-            } else if (playlistId == "yt_recent") {
-                val cached = feedRepository.getCachedFeed()?.ytRecentSongs.orEmpty()
-                if (cached.isNotEmpty()) {
-                    _uiState.value = FeedPlaylistDetailUiState.Success(
-                        YouTubePlaylistResult(
-                            id = "yt_recent",
-                            title = "Recently played",
-                            author = "On YouTube",
-                            artworkUrl = cached.firstOrNull()?.artworkUrl,
-                            trackCount = cached.size,
-                            tracks = cached,
-                        )
-                    )
-                }
+        _uiState.value = previous?.copy(isLoadingMore = true, loadError = null) ?: FeedPlaylistDetailUiState.Loading
+        loadJob = viewModelScope.launch {
+            val liked = playlistId == "yt_liked"
+            val recent = playlistId == "yt_recent"
+            val title = if (liked) "Liked on YouTube" else if (recent) "Recently played" else "Playlist"
+            val author = if (liked) "Your favorites" else "YouTube Music"
+            fun showTracks(tracks: List<YouTubeMusicTrack>) {
+                coroutineContext.ensureActive()
+                if (tracks.isEmpty()) return
+                val state = _uiState.value as? FeedPlaylistDetailUiState.Success
+                // Keep the larger warm snapshot until the full fetch catches up.
+                if (state != null && state.playlist.tracks.size > tracks.size) return
+                _uiState.value = FeedPlaylistDetailUiState.Success(
+                    YouTubePlaylistResult(id = playlistId, title = title, author = author,
+                        artworkUrl = tracks.firstOrNull()?.artworkUrl, trackCount = tracks.size, tracks = tracks),
+                    isLoadingMore = true,
+                )
             }
-
-            val result = when (playlistId) {
-                "yt_liked" -> {
-                    val pl = runCatching { innerTube.fetchPlaylist("LM") }.getOrNull()
-                    if (pl != null && pl.tracks.isNotEmpty()) {
-                        pl.copy(
-                            id = "yt_liked",
-                            title = pl.title.ifBlank { "Liked on YouTube" },
-                            author = pl.author?.takeIf(String::isNotBlank) ?: "Your favorites",
-                        )
-                    } else {
-                        val taste = runCatching {
-                            innerTube.fetchTasteSignals(recentLimit = 0, likedLimit = 50, feedLimit = 0)
-                        }.getOrNull()
-                        val tracks = taste?.likedTracks.orEmpty().ifEmpty {
-                            feedRepository.getCachedFeed()?.ytLikedSongs.orEmpty()
-                        }
-                        if (tracks.isNotEmpty()) {
-                            YouTubePlaylistResult(
-                                id = "yt_liked",
-                                title = "Liked on YouTube",
-                                author = "Your favorites",
-                                artworkUrl = tracks.firstOrNull()?.artworkUrl,
-                                trackCount = tracks.size,
-                                tracks = tracks,
-                            )
-                        } else null
+            if (liked) showTracks(feedRepository.getCachedFeed()?.ytLikedSongs.orEmpty())
+            if (recent) showTracks(feedRepository.getCachedFeed()?.ytRecentSongs.orEmpty())
+            try {
+                val result = if (recent) {
+                    val taste = innerTube.fetchTasteSignals(recentLimit = 50, likedLimit = 0, feedLimit = 0)
+                    taste.recentTracks.takeIf { it.isNotEmpty() }?.let { tracks ->
+                        YouTubePlaylistResult(id = playlistId, title = title, author = author,
+                            artworkUrl = tracks.firstOrNull()?.artworkUrl, trackCount = tracks.size, tracks = tracks)
                     }
-                }
-                "yt_recent" -> {
-                    val taste = runCatching {
-                        innerTube.fetchTasteSignals(recentLimit = 50, likedLimit = 0, feedLimit = 0)
-                    }.getOrNull()
-                    val tracks = taste?.recentTracks.orEmpty().ifEmpty {
-                        feedRepository.getCachedFeed()?.ytRecentSongs.orEmpty()
-                    }
-                    if (tracks.isNotEmpty()) {
-                        YouTubePlaylistResult(
-                            id = "yt_recent",
-                            title = "Recently played",
-                            author = "On YouTube",
-                            artworkUrl = tracks.firstOrNull()?.artworkUrl,
-                            trackCount = tracks.size,
-                            tracks = tracks,
-                        )
-                    } else {
-                        val pl = runCatching { innerTube.fetchPlaylist("FEmusic_history") }.getOrNull()
-                        pl?.copy(
-                            id = "yt_recent",
-                            title = pl.title.ifBlank { "Recently played" },
-                            author = pl.author?.takeIf(String::isNotBlank) ?: "On YouTube",
-                        )
-                    }
-                }
-                else -> runCatching { innerTube.fetchPlaylist(playlistId) }.getOrNull()
-            }
-
-            if (currentPlaylistId != playlistId) return@launch
-            if (result != null && result.tracks.isNotEmpty()) {
-                _uiState.value = FeedPlaylistDetailUiState.Success(result)
-            } else if (_uiState.value !is FeedPlaylistDetailUiState.Success) {
-                _uiState.value = when {
-                    result == null -> FeedPlaylistDetailUiState.Error("Couldn't open this playlist. Check your connection and try again.")
-                    else -> FeedPlaylistDetailUiState.Error("This playlist doesn't have any playable tracks right now.")
-                }
+                } else {
+                    innerTube.fetchPlaylist(if (liked) "LM" else playlistId, progressive = true, onPageLoaded = ::showTracks)
+                } ?: throw java.io.IOException("Couldn't finish loading this playlist. Tap Retry.")
+                coroutineContext.ensureActive()
+                _uiState.value = FeedPlaylistDetailUiState.Success(
+                    result.copy(id = playlistId, title = if (liked || recent) title else result.title.ifBlank { title },
+                        author = result.author?.takeIf(String::isNotBlank) ?: author),
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                val state = _uiState.value as? FeedPlaylistDetailUiState.Success
+                val message = error.message ?: "Couldn't finish loading. Tap Retry."
+                _uiState.value = state?.copy(isLoadingMore = false, loadError = message)
+                    ?: FeedPlaylistDetailUiState.Error(message)
             }
         }
     }
@@ -159,6 +110,10 @@ class FeedPlaylistDetailViewModel @Inject constructor(
     fun saveToLibrary() {
         val current = _uiState.value as? FeedPlaylistDetailUiState.Success ?: return
         if (current.isSaving || current.savedToLibrary) return
+        if (current.isLoadingMore || current.loadError != null) {
+            _uiState.value = current.copy(saveError = "Finish loading the playlist before saving it.")
+            return
+        }
         val playlistId = currentPlaylistId
         _uiState.value = current.copy(isSaving = true, saveError = null)
         viewModelScope.launch {
