@@ -46,7 +46,7 @@ android {
 
     defaultConfig {
         applicationId = "com.lastwave.app"
-        minSdk = 24
+        minSdk = (project.findProperty("minSdk") as? String)?.toIntOrNull() ?: 29
         targetSdk = 35
         versionCode = 16
         versionName = "4.0.0"

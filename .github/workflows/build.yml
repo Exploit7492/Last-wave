@@ -28,7 +28,7 @@ jobs:
       - name: Grant Gradle execute permission
         run: chmod +x gradlew
 
-      - name: Build Release APKs (compressed + raw)
+      - name: Build Android 10 Release APKs (compressed + raw)
         env:
           LOSSLESS_BACKEND_URL: ${{ secrets.LOSSLESS_BACKEND_URL }}
           LOSSLESS_API_KEY: ${{ secrets.LOSSLESS_API_KEY }}
@@ -65,7 +65,7 @@ jobs:
         env:
           BUILD_TOOLS_VERSION: "34.0.0"
 
-      - name: Prepare Final APKs
+      - name: Stage Android 10 Final APKs
         id: prep_apk
         run: |
           mkdir -p final_apk
@@ -76,23 +76,53 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
           echo "Building APKs for LastWave v$VERSION"
-          # Compressed release (R8 + ProGuard + shrinkResources)
+          # Compressed release (Android 10+, R8 + ProGuard + shrinkResources)
           if [ -f "app/build/outputs/apk/release/app-release-signed.apk" ]; then
             cp app/build/outputs/apk/release/app-release-signed.apk final_apk/LastWave-v${VERSION}-release.apk
           else
             cp app/build/outputs/apk/release/app-release.apk final_apk/LastWave-v${VERSION}-release.apk
           fi
-          # Raw release (no minify, no shrink, no ProGuard)
+          # Raw release (Android 10+, no minify, no shrink, no ProGuard)
           if [ -f "app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk" ]; then
             cp app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk final_apk/LastWave-v${VERSION}-raw.apk
           else
             cp app/build/outputs/apk/rawRelease/app-rawRelease.apk final_apk/LastWave-v${VERSION}-raw.apk
           fi
+          rm -rf app/build/outputs/apk/release/*
+
+      - name: Build Android 7.0 Legacy APK (compressed)
+        env:
+          LOSSLESS_BACKEND_URL: ${{ secrets.LOSSLESS_BACKEND_URL }}
+          LOSSLESS_API_KEY: ${{ secrets.LOSSLESS_API_KEY }}
+          LYRICS_API_KEY: ${{ secrets.LYRICS_API_KEY }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD || secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.ALIAS || secrets.RELEASE_KEY_ALIAS || 'release_key' }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.RELEASE_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease -PminSdk=24 --stacktrace
+
+      - name: Sign Android 7 Legacy APK with Custom Key (Optional)
+        if: env.SIGNING_KEY != ''
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app_legacy
+        with:
+          releaseDirectory: app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.ALIAS || secrets.RELEASE_KEY_ALIAS || 'release_key' }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD || secrets.RELEASE_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD || secrets.RELEASE_KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: "34.0.0"
+
+      - name: Stage Android 7 Final APK
+        run: |
+          VERSION="${{ steps.prep_apk.outputs.version }}"
+          if [ -f "app/build/outputs/apk/release/app-release-signed.apk" ]; then
+            cp app/build/outputs/apk/release/app-release-signed.apk final_apk/LastWave-v${VERSION}-android7.apk
+          else
+            cp app/build/outputs/apk/release/app-release.apk final_apk/LastWave-v${VERSION}-android7.apk
+          fi
           ls -lh final_apk/
-          echo "--- release (compressed) ---"
-          ls -lh final_apk/LastWave-v${VERSION}-release.apk
-          echo "--- raw (uncompressed) ---"
-          ls -lh final_apk/LastWave-v${VERSION}-raw.apk
 
       - name: Upload Release APKs
         uses: actions/upload-artifact@v4
