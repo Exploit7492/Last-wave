@@ -107,10 +107,13 @@ fun BackdropBlur(
     content: @Composable BoxScope.() -> Unit,
 ) {
     val background = MaterialTheme.colorScheme.surface
+    val view = LocalView.current
+    val blurSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+        view.isHardwareAccelerated && !view.isInEditMode
     Box(modifier) {
         Box(
             modifier = Modifier.matchParentSize().then(
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (blurSupported) {
                     Modifier.blur(radius)
                 } else Modifier
             ),

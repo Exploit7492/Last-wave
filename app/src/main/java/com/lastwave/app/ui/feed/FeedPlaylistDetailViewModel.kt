@@ -121,9 +121,10 @@ class FeedPlaylistDetailViewModel @Inject constructor(
                 val saved = importManager.importYouTubePlaylist(
                     current.playlist.copy(title = current.playlist.title.ifBlank { "YouTube playlist" }),
                 )
-                checkNotNull(playlistRepository.getById(saved.id)) { "Playlist could not be saved" }
+                val persisted = runCatching { playlistRepository.getById(saved.id) }.getOrNull()
                 if (currentPlaylistId == playlistId) {
-                    _uiState.value = current.copy(savedToLibrary = true)
+                    _uiState.value = if (persisted != null) current.copy(savedToLibrary = true)
+                    else current.copy(saveError = "Couldn't save playlist. Try again.")
                 }
             } catch (error: CancellationException) {
                 throw error
