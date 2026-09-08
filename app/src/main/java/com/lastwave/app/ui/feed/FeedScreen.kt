@@ -521,7 +521,7 @@ fun FeedScreen(
                         item(key = "albums_in_rotation") {
                             FeedSectionHeader(
                                 title = "Albums for you",
-                                subtitle = "From your listening and recommendations",
+                                subtitle = "Real albums from your taste — Last.fm tops + YT Music picks",
                             )
                             FeedMediaRow(
                                 content = {

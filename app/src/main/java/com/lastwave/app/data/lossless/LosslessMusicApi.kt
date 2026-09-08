@@ -145,6 +145,7 @@ class LosslessMusicApi @Inject constructor(
          * followed by the tiers below it before falling back to YouTube Music.
          */
         fun getQualityAttemptOrder(preferred: Int): List<Int> {
+            if (preferred == QUALITY_YOUTUBE) return emptyList()
             val tiersAscending = listOf(
                 QUALITY_MP3_320,     // 5
                 QUALITY_CD_LOSSLESS, // 6
@@ -205,7 +206,7 @@ class LosslessMusicApi @Inject constructor(
         expectedAlbum: String? = null,
         preferredQuality: Int = QUALITY_MAX_HI_RES,
     ): LosslessAudioStream? = withContext(Dispatchers.IO) {
-        if (title.isBlank() || artist.isBlank()) return@withContext null
+        if (preferredQuality == QUALITY_YOUTUBE || title.isBlank() || artist.isBlank()) return@withContext null
 
         try {
             // 1. Search catalog via backend

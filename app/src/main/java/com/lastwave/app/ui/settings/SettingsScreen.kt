@@ -670,6 +670,7 @@ fun SettingsScreen(
                         7 -> "Hi-Res (24-bit / 96 kHz)"
                         6 -> "CD Lossless (16-bit / 44.1 kHz FLAC)"
                         5 -> "Standard (320 kbps MP3)"
+                        -1 -> "YouTube Music (AAC / Opus)"
                         else -> "Max (Up to 24-bit / 192 kHz)"
                     }
                     val downloadQualitySubtitle = when (misc.downloadQuality) {
@@ -688,8 +689,8 @@ fun SettingsScreen(
                                 icon = Icons.Filled.HighQuality,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Lossless Streaming",
-                                subtitle = "$qualitySubtitle \u2022 YouTube Music fallback",
+                                title = "Streaming Quality",
+                                subtitle = if (misc.losslessQuality == -1) "YouTube Music • Native stream" else "$qualitySubtitle • YouTube Music fallback",
                                 onClick = { showQualityDialog = true },
                                 position = position,
                             )
@@ -1224,6 +1225,7 @@ fun SettingsScreen(
             Triple(7, "Hi-Res Audio", "24-bit / 96 kHz • Lossless Studio FLAC" to "24-BIT / 96k"),
             Triple(6, "CD Lossless", "16-bit / 44.1 kHz • Lossless CD FLAC" to "16-BIT / 44.1k"),
             Triple(5, "Standard Quality", "320 kbps • MP3 (Data Saver)" to "320 kbps"),
+            Triple(-1, "YouTube Music", "128-256 kbps • YouTube Music AAC / Opus stream" to "YOUTUBE"),
         )
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
@@ -1286,7 +1288,7 @@ fun SettingsScreen(
                 }
 
                 Text(
-                    "If a track is unavailable in the chosen quality, the highest available quality will be streamed automatically.",
+                    "Lossless streams provide bit-exact studio quality (FLAC/MP3). If your chosen quality is unavailable, LastWave automatically streams the higher quality tier above it (or falls back to YouTube Music if unavailable in lossless).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.outline,
                 )

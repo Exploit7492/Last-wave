@@ -201,7 +201,7 @@ class SettingsPreferences @Inject constructor(
     }
 
     private companion object {
-        val LOSSLESS_QUALITIES = setOf(5, 6, 7, 27)
+        val LOSSLESS_QUALITIES = setOf(-1, 5, 6, 7, 27)
         val DOWNLOAD_QUALITIES = setOf(-1, 5, 6, 7, 27)
     }
 }

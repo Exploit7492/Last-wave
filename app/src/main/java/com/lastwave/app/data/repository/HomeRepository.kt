@@ -420,6 +420,63 @@ class HomeRepository @Inject constructor(
         Result.failure(e)
     }
 
+    /** user.gettopalbums — REAL albums from taste (name + artist + playcount
+     *  + image). This is the only Last.fm source the Home "Albums for you"
+     *  shelf may use: per-track `album` strings from recent/top tracks are
+     *  usually just the single name and open a whole different record. */
+    suspend fun fetchTopAlbums(period: String = "overall", limit: Int = 20, username: String? = null): Result<List<HomeAlbum>> = try {
+        val session = requireSession()
+        val targetUser = username ?: session.username
+        if (targetUser.isBlank() || targetUser.equals("Guest User", ignoreCase = true)) {
+            Result.success(emptyList())
+        } else {
+            val response = api.get(
+                mapOf(
+                    "method" to "user.gettopalbums",
+                    "user" to targetUser,
+                    "period" to period,
+                    "limit" to limit.coerceIn(1, 50).toString(),
+                    "api_key" to session.apiKey,
+                    "format" to "json",
+                )
+            )
+            val body = response.body()?.string() ?: throw LastFmException("Empty response from Last.fm")
+            val jsonElem = json.parseToJsonElement(body).jsonObject
+            if (jsonElem.containsKey("error")) {
+                val errCode = jsonElem["error"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                val errMsg = jsonElem["message"]?.jsonPrimitive?.contentOrNull
+                throw LastFmException(LastFmErrors.friendlyMessage(errCode ?: 0, errMsg), errCode)
+            }
+            val albumElem = jsonElem["topalbums"]?.jsonObject?.get("album")
+            val albumList = when (albumElem) {
+                is JsonArray -> albumElem
+                is JsonObject -> listOf(albumElem)
+                else -> emptyList()
+            }
+            val albums = albumList.mapNotNull { elem ->
+                val obj = elem as? JsonObject ?: return@mapNotNull null
+                val name = obj["name"]?.jsonPrimitive?.contentOrNull?.trim() ?: return@mapNotNull null
+                if (name.isBlank()) return@mapNotNull null
+                val artistObj = obj["artist"] as? JsonObject
+                val artist = artistObj?.get("name")?.jsonPrimitive?.contentOrNull?.trim()
+                    ?: (obj["artist"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.trim()
+                    .orEmpty()
+                if (artist.isBlank() || artist.equals("Unknown artist", ignoreCase = true)) return@mapNotNull null
+                val playcount = obj["playcount"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
+                val imgArr = obj["image"] as? JsonArray
+                // Last.fm orders images small → extralarge: take the LARGEST
+                // real image so the card never shows a tiny/blurry cover.
+                val bestImg = imgArr?.mapNotNull {
+                    (it as? JsonObject)?.get("#text")?.jsonPrimitive?.contentOrNull?.takeIf(String::isNotBlank)
+                }?.lastOrNull { !it.contains("2a96cbd8b46e442fc41c2b86b821562f") }
+                HomeAlbum(name = name, artist = artist, artworkUrl = bestImg, playCount = playcount)
+            }
+            Result.success(albums)
+        }
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
     /** Fires the full initial data-fetch set for the Home screen: recent
      *  tracks, stats, and all-time top tracks in parallel with caching and deduplication. */
     suspend fun fetchInitialData(username: String? = null, forceRefresh: Boolean = false): Result<HomeInitialData> {

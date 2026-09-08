@@ -155,6 +155,15 @@ class FeedRepository @Inject constructor(
         val likedSongsIdDef = async(Dispatchers.IO) {
             runCatching { playlistRepository.ensureLikedSongs().id }.getOrNull()
         }
+        // Real Last.fm albums for the taste — fetched up-front in parallel.
+        // Never derive albums from per-track `album` strings here: those are
+        // usually just the single name and open a whole different record.
+        val lastFmTopAlbumsDef = async(Dispatchers.IO) {
+            if (!username.isNullOrBlank()) {
+                runCatching { homeRepository.fetchTopAlbums(limit = 20, username = username).getOrNull().orEmpty() }
+                    .getOrDefault(emptyList())
+            } else emptyList()
+        }
 
         val releaseCandidates = newReleasesDef.await()
         val charts = chartsDef.await()
@@ -408,64 +417,123 @@ class FeedRepository @Inject constructor(
             .distinctBy { it.artist.displayName.trim().lowercase() to it.name.trim().lowercase() }
         val jumpBackIn = diversify(jumpCandidates, { it.artist.displayName }, maxPerArtist = 2).take(15)
 
+        // ── Albums for you: REAL albums only. ─────────────────────────────
+        // Never derive albums from per-track `album` strings (YT track.album
+        // / Last.fm recent-track album): those are usually just the single
+        // name, so opening them lands on a whole different record.
+        // Sources, both taste-ranked:
+        //  1. Last.fm user.gettopalbums (real albums, playcount-ranked).
+        //  2. YT Music artist discography Albums for our top taste artists
+        //     (real MPRE entities with browseId — no fuzzy search needed).
+        // An entry is shown only with a verified browseId, so tap always
+        // opens that exact album and never a name-search guess.
         val albumArtworkRequests = Semaphore(4)
-        val ytAlbumCandidates = buildList {
-            (ytRecentSongs + ytLikedSongs).forEach { track ->
-                val album = track.album?.takeIf(String::isNotBlank) ?: return@forEach
-                if (track.artist.isNotBlank()) {
-                    add(FeedAlbum(title = album, artist = ArtistHelper.primaryArtist(track.artist), artworkUrl = track.artworkUrl))
-                }
-            }
+        val artistPageRequests = Semaphore(3)
+        val lastFmTopAlbums = lastFmTopAlbumsDef.await()
+        fun isStrictAlbumMatch(
+            candidateName: String,
+            candidateArtist: String?,
+            wantTitle: String,
+            wantArtist: String,
+        ): Boolean {
+            if (!candidateName.equals(wantTitle, ignoreCase = true)) return false
+            if (candidateArtist.isNullOrBlank()) return true
+            val wantParts = ArtistHelper.splitArtists(wantArtist).map { it.trim().lowercase() }
+            if (wantParts.isEmpty()) return true
+            return ArtistHelper.splitArtists(candidateArtist).any { it.trim().lowercase() in wantParts }
         }
-        val lastFmAlbumCandidates = buildList {
-            recentTracks.forEach { track ->
-                if (track.album.displayName.isNotBlank() && track.artist.displayName.isNotBlank()) {
-                    add(
-                        FeedAlbum(
-                            title = track.album.displayName,
-                            artist = ArtistHelper.primaryArtist(track.artist.displayName),
-                            artworkUrl = track.artworkUrl,
-                        ),
-                    )
-                }
-            }
+        // YT Music real albums: Album shelf only — Singles/EPs are skipped so
+        // a one-track "album" can never appear here.
+        val lastFmArtByKey = lastFmTopAlbums.associate { top ->
+            "${top.artist.trim().lowercase()}_${top.name.trim().lowercase()}" to top.artworkUrl
         }
-        val fallbackAlbums = artistSignalTracks.mapNotNull { track ->
-            val album = track.album?.takeIf(String::isNotBlank) ?: return@mapNotNull null
-            if (track.artist.isBlank()) return@mapNotNull null
-            FeedAlbum(title = album, artist = ArtistHelper.primaryArtist(track.artist), artworkUrl = track.artworkUrl)
-        }
-        val recentAlbums = (blend(ytAlbumCandidates, lastFmAlbumCandidates) + fallbackAlbums)
-            .distinctBy { "${it.artist.trim().lowercase()}_${it.title.trim().lowercase()}" }
-            .take(12)
-            .map { album ->
+        val ytRealAlbums = topArtists
+            .filter { !it.browseId.isNullOrBlank() }
+            .take(6)
+            .map { artist ->
                 async(Dispatchers.IO) {
-                    // Always resolve the browseId (not just when artwork is
-                    // missing): opening an album without one forces the
-                    // detail screen through a slow name search that often
-                    // lands on the wrong release or nothing at all.
-                    if (album.browseId != null && ArtworkNormalizer.isRealImage(album.artworkUrl)) {
-                        album
-                    } else albumArtworkRequests.withPermit {
+                    artistPageRequests.withPermit {
+                        val browseId = artist.browseId?.takeIf(String::isNotBlank)
+                            ?: return@withPermit emptyList<FeedAlbum>()
+                        val page = runCatching { innerTube.fetchArtistPage(browseId, artist.name) }.getOrNull()
+                        page?.albums.orEmpty()
+                            .filter { item ->
+                                item.browseId.isNotBlank() && item.title.isNotBlank() &&
+                                    (item.type == null || item.type.equals("Album", ignoreCase = true))
+                            }
+                            .take(3)
+                            .map { item ->
+                                // YT discography art is the cover; Last.fm top-album
+                                // art is the backup so the card never has no cover.
+                                val lastFmArt = lastFmArtByKey[
+                                    "${artist.name.trim().lowercase()}_${item.title.trim().lowercase()}",
+                                ]?.takeIf(ArtworkNormalizer::isRealImage)
+                                FeedAlbum(
+                                    title = item.title,
+                                    artist = artist.name,
+                                    artworkUrl = item.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage)
+                                        ?: lastFmArt,
+                                    browseId = item.browseId,
+                                )
+                            }
+                    }
+                }
+            }.awaitAll().flatten()
+        // Last.fm top albums → strict YT Music verification. No exact
+        // title+artist MPRE match = dropped, never guessed.
+        val lastFmRealAlbums = lastFmTopAlbums
+            .filter { it.name.isNotBlank() && it.artist.isNotBlank() }
+            .distinctBy { "${it.artist.trim().lowercase()}_${it.name.trim().lowercase()}" }
+            .take(20)
+            .map { topAlbum ->
+                async(Dispatchers.IO) {
+                    albumArtworkRequests.withPermit {
                         val candidates = runCatching {
-                            innerTube.searchAlbums("${album.title} ${album.artist}", limit = 5)
+                            innerTube.searchAlbums("${topAlbum.name} ${topAlbum.artist}", limit = 5)
                         }.getOrNull().orEmpty()
                         val match = candidates.firstOrNull {
-                            it.name.equals(album.title, ignoreCase = true) &&
-                                ArtistHelper.splitArtists(it.artist).any { candidate ->
-                                    ArtistHelper.splitArtists(album.artist).any { candidate.equals(it, ignoreCase = true) }
-                                }
-                        } ?: candidates.firstOrNull {
-                            it.name.equals(album.title, ignoreCase = true)
-                        }
-                        album.copy(
-                            artworkUrl = album.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage)
-                                ?: match?.artworkUrl,
-                            browseId = album.browseId ?: match?.browseId,
+                            isStrictAlbumMatch(
+                                candidateName = it.name,
+                                candidateArtist = it.artist,
+                                wantTitle = topAlbum.name,
+                                wantArtist = topAlbum.artist,
+                            )
+                        } ?: return@withPermit null
+                        FeedAlbum(
+                            title = match.name,
+                            artist = topAlbum.artist,
+                            artworkUrl = match.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage)
+                                ?: topAlbum.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage),
+                            browseId = match.browseId,
                         )
                     }
                 }
+            }.awaitAll().filterNotNull()
+        val recentAlbums = blend(ytRealAlbums, lastFmRealAlbums)
+            .distinctBy { "${it.artist.trim().lowercase()}_${it.title.trim().lowercase()}" }
+            .filter { !it.browseId.isNullOrBlank() }
+            // Cover-art backfill: a card without a real cover is dropped, so
+            // resolve the album page once to grab its artwork before dropping.
+            .take(20)
+            .map { album ->
+                async(Dispatchers.IO) {
+                    if (ArtworkNormalizer.isRealImage(album.artworkUrl)) {
+                        album
+                    } else albumArtworkRequests.withPermit {
+                        val pageArt = album.browseId?.takeIf(String::isNotBlank)?.let { id ->
+                            runCatching { innerTube.fetchAlbumPage(id) }.getOrNull()?.artworkUrl
+                        }?.takeIf(ArtworkNormalizer::isRealImage)
+                        album.copy(artworkUrl = pageArt ?: album.artworkUrl)
+                    }
+                }
             }.awaitAll()
+            .filter { ArtworkNormalizer.isRealImage(it.artworkUrl) }
+            .take(12)
+            .ifEmpty {
+                previous?.recentAlbums.orEmpty()
+                    .filter { !it.browseId.isNullOrBlank() && ArtworkNormalizer.isRealImage(it.artworkUrl) }
+                    .take(12)
+            }
 
         val topSpotlightArtist = topArtists.filterNot { it.name == previous?.spotlight?.artistName }
             .randomOrNull(random) ?: topArtists.firstOrNull()

@@ -28,3 +28,11 @@ data class HomeArtistItem(
     val playCount: Long = 0L,
     val artworkUrl: String? = null,
 )
+
+@Immutable
+data class HomeAlbum(
+    val name: String,
+    val artist: String,
+    val artworkUrl: String? = null,
+    val playCount: Long = 0L,
+)

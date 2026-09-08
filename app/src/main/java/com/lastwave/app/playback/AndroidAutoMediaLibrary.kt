@@ -7,9 +7,15 @@ import android.support.v4.media.MediaDescriptionCompat
 import com.lastwave.app.data.local.db.DownloadedTrackDao
 import com.lastwave.app.data.local.db.DownloadedTrackEntity
 import com.lastwave.app.data.playlist.PlaylistRepository
+import com.lastwave.app.data.playlist.SavedPlaylist
+import com.lastwave.app.data.playlist.isYouTubeOnly
 import com.lastwave.app.data.search.SearchRepository
 import com.lastwave.app.data.search.SearchTab
+import com.lastwave.app.data.ytmusic.YtMusicLibraryManager
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import java.io.File
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
@@ -20,6 +26,7 @@ import javax.inject.Singleton
 class AndroidAutoMediaLibrary @Inject constructor(
     @ApplicationContext private val context: Context,
     private val playlistRepository: PlaylistRepository,
+    private val ytMusicLibraryManager: YtMusicLibraryManager,
     private val downloadedTrackDao: DownloadedTrackDao,
     private val searchRepository: SearchRepository,
 ) {
@@ -28,25 +35,30 @@ class AndroidAutoMediaLibrary @Inject constructor(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<PlayableTrack>>?): Boolean =
             size > MAX_CACHED_SEARCHES
     }
-    val playlistChanges get() = playlistRepository.changes
+    val playlistChanges: Flow<Unit>
+        get() = merge(
+            playlistRepository.changes,
+            ytMusicLibraryManager.playlists.map { },
+        )
     val downloadChanges get() = downloadedTrackDao.getAll()
 
     suspend fun loadChildren(parentId: String, state: MusicPlayerState): List<MediaBrowserCompat.MediaItem> =
         when {
             parentId == ROOT_ID -> rootItems(state)
             parentId == QUEUE_ID -> state.queue.mapIndexed(::queueTrackItem)
-            parentId == PLAYLISTS_ID -> playlistRepository.getAll().map { playlist ->
+            parentId == PLAYLISTS_ID -> getMergedPlaylists().map { playlist ->
+                val trackCount = playlist.remoteTrackCount ?: playlist.tracks.size
                 browsableItem(
                     mediaId = "$PLAYLIST_PREFIX${playlist.id}",
                     title = playlist.title,
-                    subtitle = trackCountLabel(playlist.tracks.size),
-                    playable = playlist.tracks.isNotEmpty(),
+                    subtitle = if (playlist.isYouTubeOnly) "YouTube Music • ${trackCountLabel(trackCount)}" else trackCountLabel(trackCount),
+                    playable = trackCount > 0 || playlist.tracks.isNotEmpty(),
                 )
             }
             parentId.startsWith(PLAYLIST_PREFIX) -> {
                 val playlistId = parentId.removePrefix(PLAYLIST_PREFIX).toLongOrNull()
-                val playlist = playlistId?.let { playlistRepository.getById(it) }
-                if (playlist == null) {
+                val playlist = playlistId?.let { resolvePlaylistWithTracks(it) }
+                if (playlist == null || playlist.tracks.isEmpty()) {
                     emptyList()
                 } else {
                     playlist.tracks.mapIndexed { index, track ->
@@ -62,13 +74,35 @@ class AndroidAutoMediaLibrary @Inject constructor(
         }
 
     suspend fun search(query: String): List<MediaBrowserCompat.MediaItem> {
-        val tracks = searchTracks(query)
-        if (tracks.isEmpty()) return emptyList()
-        val token = nextSearchToken.incrementAndGet().toString(36)
-        synchronized(searchQueues) { searchQueues[token] = tracks }
-        return tracks.mapIndexed { index, track ->
-            playableItem("$SEARCH_PREFIX$token:$index", track)
+        val cleanQuery = query.trim()
+        if (cleanQuery.isEmpty()) return emptyList()
+
+        // 1. Search matching playlists (local and YouTube Music imported)
+        val matchingPlaylists = runCatching {
+            getMergedPlaylists().filter { it.title.contains(cleanQuery, ignoreCase = true) }
+        }.getOrDefault(emptyList()).map { playlist ->
+            val count = playlist.remoteTrackCount ?: playlist.tracks.size
+            browsableItem(
+                mediaId = "$PLAYLIST_PREFIX${playlist.id}",
+                title = playlist.title,
+                subtitle = if (playlist.isYouTubeOnly) "YouTube Music • ${trackCountLabel(count)}" else trackCountLabel(count),
+                playable = true,
+            )
         }
+
+        // 2. Search tracks via InnerTube
+        val tracks = searchTracks(cleanQuery)
+        val trackItems = if (tracks.isNotEmpty()) {
+            val token = nextSearchToken.incrementAndGet().toString(36)
+            synchronized(searchQueues) { searchQueues[token] = tracks }
+            tracks.mapIndexed { index, track ->
+                playableItem("$SEARCH_PREFIX$token:$index", track)
+            }
+        } else {
+            emptyList()
+        }
+
+        return (matchingPlaylists + trackItems).take(MAX_SEARCH_RESULTS)
     }
 
     suspend fun playMediaId(mediaId: String, player: MusicPlayer): Boolean = when {
@@ -100,10 +134,40 @@ class AndroidAutoMediaLibrary @Inject constructor(
     }
 
     suspend fun playSearch(query: String, player: MusicPlayer): Boolean {
-        val tracks = searchTracks(query)
+        val cleanQuery = query.trim()
+        if (cleanQuery.isBlank()) return false
+
+        // Check if query directly matches a local or YouTube playlist name
+        val matchingPlaylist = runCatching {
+            val playlists = getMergedPlaylists()
+            playlists.firstOrNull { it.title.equals(cleanQuery, ignoreCase = true) }
+                ?: playlists.firstOrNull { it.title.contains(cleanQuery, ignoreCase = true) }
+        }.getOrNull()
+
+        if (matchingPlaylist != null) {
+            return playPlaylist(matchingPlaylist.id, 0, player)
+        }
+
+        val tracks = searchTracks(cleanQuery)
         if (tracks.isEmpty()) return false
-        player.playQueue(tracks, sourceLabel = "Android Auto Search")
+        player.playQueue(tracks, sourceLabel = "Android Auto Search: $cleanQuery")
         return true
+    }
+
+    private suspend fun getMergedPlaylists(): List<SavedPlaylist> {
+        val local = runCatching { playlistRepository.getAll() }.getOrDefault(emptyList())
+        val remote = runCatching { ytMusicLibraryManager.playlists.value }.getOrDefault(emptyList())
+        val localRemoteIds = local.mapNotNull { it.remotePlaylistId?.removePrefix("VL") }.toSet()
+        val filteredRemote = remote.filterNot { it.remotePlaylistId?.removePrefix("VL") in localRemoteIds }
+        return (local + filteredRemote).sortedByDescending { it.createdAtMillis }
+    }
+
+    private suspend fun resolvePlaylistWithTracks(playlistId: Long): SavedPlaylist? {
+        val local = runCatching { playlistRepository.getById(playlistId) }.getOrNull()
+        if (local != null && local.tracks.isNotEmpty()) {
+            return local
+        }
+        return runCatching { ytMusicLibraryManager.loadDetail(playlistId) }.getOrNull() ?: local
     }
 
     private fun rootItems(state: MusicPlayerState): List<MediaBrowserCompat.MediaItem> = listOf(
@@ -127,7 +191,7 @@ class AndroidAutoMediaLibrary @Inject constructor(
     )
 
     private suspend fun playPlaylist(id: Long?, index: Int?, player: MusicPlayer): Boolean {
-        val playlist = id?.let { playlistRepository.getById(it) } ?: return false
+        val playlist = id?.let { resolvePlaylistWithTracks(it) } ?: return false
         val tracks = playlist.tracks.map { it.toPlayableTrack() }
         if (tracks.isEmpty()) return false
         player.playQueue(

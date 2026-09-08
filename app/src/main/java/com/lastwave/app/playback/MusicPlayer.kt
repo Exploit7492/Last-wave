@@ -2393,7 +2393,8 @@ class MusicPlayer @Inject constructor(
         allowLossless: Boolean,
         misc: MiscSettings,
     ): ResolvedStream {
-        if (!allowLossless || (!videoId.isNullOrBlank() &&
+        val isYouTubeRequested = misc.losslessQuality == com.lastwave.app.data.lossless.LosslessMusicApi.QUALITY_YOUTUBE || !misc.preferLosslessStreaming
+        if (!allowLossless || isYouTubeRequested || (!videoId.isNullOrBlank() &&
                 (track.artist.isBlank() || track.artist.equals("Unknown artist", ignoreCase = true)))
         ) return resolveYoutubeTrackAudioStream(track, videoId)
 
