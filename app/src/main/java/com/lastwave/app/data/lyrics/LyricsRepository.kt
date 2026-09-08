@@ -80,130 +80,139 @@ class LyricsRepository @Inject constructor(
         album: String? = null,
         durationSeconds: Int? = null,
         forceRefresh: Boolean = false,
+        wordByWord: Boolean = true,
     ): LyricsResult = withContext(Dispatchers.Default) {
-        val cacheKey = "${artist.trim().lowercase()}|${title.trim().lowercase()}"
+        val cacheKey = "${artist.trim().lowercase()}|${title.trim().lowercase()}|$wordByWord"
         if (!forceRefresh) {
             cache[cacheKey]?.let { return@withContext it }
         }
 
-        // 0. LOCAL OFFLINE: Check if this track is downloaded with embedded or saved lyrics
-        val localTrack = runCatching {
-            val dao = downloadedTrackDao.get()
-            dao.findByTitleAndArtist(title, artist)
-                ?: dao.findByTrackKey("${artist.lowercase()}_${title.lowercase()}")
-        }.getOrNull()
-        if (localTrack != null && (localTrack.hasLyrics || !localTrack.syncedLyrics.isNullOrBlank() || !localTrack.lrcFilePath.isNullOrBlank())) {
-            var synced = localTrack.syncedLyrics
-            if (synced.isNullOrBlank() && !localTrack.lrcFilePath.isNullOrBlank()) {
-                val lrcFile = java.io.File(localTrack.lrcFilePath)
-                if (lrcFile.exists() && lrcFile.length() > 0) {
-                    synced = runCatching { lrcFile.readText() }.getOrNull()
+        if (wordByWord) {
+            // 0. LOCAL OFFLINE: Check if this track is downloaded with embedded or saved lyrics
+            val localTrack = runCatching {
+                val dao = downloadedTrackDao.get()
+                dao.findByTitleAndArtist(title, artist)
+                    ?: dao.findByTrackKey("${artist.lowercase()}_${title.lowercase()}")
+            }.getOrNull()
+            if (localTrack != null && (localTrack.hasLyrics || !localTrack.syncedLyrics.isNullOrBlank() || !localTrack.lrcFilePath.isNullOrBlank())) {
+                var synced = localTrack.syncedLyrics
+                if (synced.isNullOrBlank() && !localTrack.lrcFilePath.isNullOrBlank()) {
+                    val lrcFile = java.io.File(localTrack.lrcFilePath)
+                    if (lrcFile.exists() && lrcFile.length() > 0) {
+                        synced = runCatching { lrcFile.readText() }.getOrNull()
+                    }
                 }
-            }
-            if (!synced.isNullOrBlank()) {
-                val lines = parseLrc(synced)
-                if (lines.isNotEmpty()) {
+                if (!synced.isNullOrBlank()) {
+                    val lines = parseLrc(synced)
+                    if (lines.isNotEmpty()) {
+                        val result = LyricsResult.Success(
+                            lines = lines,
+                            isSynced = true,
+                            isWordSynced = false,
+                            plainLyrics = localTrack.plainLyrics,
+                            isInstrumental = false,
+                            source = "Downloaded Lyrics (LRC)",
+                        )
+                        cache[cacheKey] = result
+                        return@withContext result
+                    }
+                }
+                val plain = localTrack.plainLyrics
+                if (!plain.isNullOrBlank()) {
                     val result = LyricsResult.Success(
-                        lines = lines,
-                        isSynced = true,
+                        lines = emptyList(),
+                        isSynced = false,
                         isWordSynced = false,
-                        plainLyrics = localTrack.plainLyrics,
+                        plainLyrics = plain.trim(),
                         isInstrumental = false,
-                        source = "Downloaded Lyrics (LRC)",
+                        source = "Downloaded Lyrics (Plain)",
                     )
                     cache[cacheKey] = result
                     return@withContext result
                 }
             }
-            val plain = localTrack.plainLyrics
-            if (!plain.isNullOrBlank()) {
-                val result = LyricsResult.Success(
-                    lines = emptyList(),
-                    isSynced = false,
-                    isWordSynced = false,
-                    plainLyrics = plain.trim(),
-                    isInstrumental = false,
-                    source = "Downloaded Lyrics (Plain)",
-                )
-                cache[cacheKey] = result
-                return@withContext result
+
+            // 1. PRIMARY: Try word-by-word / syllable sync from LyricsPlus
+            try {
+                val wordResponse = lyricsPlusApi.fetchWordLyrics(title, artist, album, durationSeconds)
+                if (wordResponse != null && !wordResponse.lyrics.isNullOrEmpty()) {
+                    val lines = wordResponse.lyrics.map { line ->
+                        val syllables = line.syllabus?.map { syl ->
+                            LyricSyllable(
+                                timeMs = syl.time,
+                                durationMs = syl.duration,
+                                text = syl.text,
+                                isBackground = syl.isBackground,
+                            )
+                        } ?: emptyList()
+
+                        val transliterationSyllables = line.transliteration?.syllabus?.map { syl ->
+                            LyricSyllable(
+                                timeMs = syl.time,
+                                durationMs = syl.duration,
+                                text = syl.text,
+                                isBackground = syl.isBackground,
+                            )
+                        } ?: emptyList()
+
+                        LyricLine(
+                            timeMs = line.time,
+                            durationMs = line.duration,
+                            text = line.text,
+                            syllables = syllables,
+                            transliteration = line.transliteration?.text,
+                            transliterationSyllables = transliterationSyllables,
+                        )
+                    }.sortedBy { it.timeMs }
+
+                    if (lines.isNotEmpty()) {
+                        val hasWordTiming = lines.any { it.hasSyllables } || wordResponse.type.equals("WORD", ignoreCase = true)
+                        val result = LyricsResult.Success(
+                            lines = lines,
+                            isSynced = true,
+                            isWordSynced = hasWordTiming,
+                            plainLyrics = lines.joinToString("\n") { it.text },
+                            isInstrumental = false,
+                            source = if (hasWordTiming) "LyricsPlus (Word-Sync)" else "LyricsPlus (Line-Sync)",
+                        )
+                        cache[cacheKey] = result
+                        return@withContext result
+                    }
+                }
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // Silently fall back to secondary word-by-word provider
             }
-        }
 
-        // 1. PRIMARY: Try word-by-word / syllable sync from LyricsPlus
-        try {
-            val wordResponse = lyricsPlusApi.fetchWordLyrics(title, artist, album, durationSeconds)
-            if (wordResponse != null && !wordResponse.lyrics.isNullOrEmpty()) {
-                val lines = wordResponse.lyrics.map { line ->
-                    val syllables = line.syllabus?.map { syl ->
-                        LyricSyllable(
-                            timeMs = syl.time,
-                            durationMs = syl.duration,
-                            text = syl.text,
-                            isBackground = syl.isBackground,
-                        )
-                    } ?: emptyList()
-
-                    val transliterationSyllables = line.transliteration?.syllabus?.map { syl ->
-                        LyricSyllable(
-                            timeMs = syl.time,
-                            durationMs = syl.duration,
-                            text = syl.text,
-                            isBackground = syl.isBackground,
-                        )
-                    } ?: emptyList()
-
-                    LyricLine(
-                        timeMs = line.time,
-                        durationMs = line.duration,
-                        text = line.text,
-                        syllables = syllables,
-                        transliteration = line.transliteration?.text,
-                        transliterationSyllables = transliterationSyllables,
-                    )
-                }.sortedBy { it.timeMs }
-
-                if (lines.isNotEmpty()) {
-                    val hasWordTiming = lines.any { it.hasSyllables } || wordResponse.type.equals("WORD", ignoreCase = true)
+            // 2. SECONDARY: Try Kugou KRC word-by-word / syllable sync
+            try {
+                val kugouLines = kugouApi.fetchWordLyrics(title, artist, durationSeconds)
+                if (!kugouLines.isNullOrEmpty()) {
+                    val hasWordTiming = kugouLines.any { it.hasSyllables }
                     val result = LyricsResult.Success(
-                        lines = lines,
+                        lines = kugouLines,
                         isSynced = true,
                         isWordSynced = hasWordTiming,
-                        plainLyrics = lines.joinToString("\n") { it.text },
+                        plainLyrics = kugouLines.joinToString("\n") { it.text },
                         isInstrumental = false,
-                        source = if (hasWordTiming) "LyricsPlus (Word-Sync)" else "LyricsPlus (Line-Sync)",
+                        source = "Kugou KRC (Word-Sync)",
                     )
                     cache[cacheKey] = result
                     return@withContext result
                 }
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // Silently fall back to LRCLIB
             }
-        } catch (_: Exception) {
-            // Silently fall back to secondary word-by-word provider
-        }
-
-        // 2. SECONDARY: Try Kugou KRC word-by-word / syllable sync
-        try {
-            val kugouLines = kugouApi.fetchWordLyrics(title, artist, durationSeconds)
-            if (!kugouLines.isNullOrEmpty()) {
-                val hasWordTiming = kugouLines.any { it.hasSyllables }
-                val result = LyricsResult.Success(
-                    lines = kugouLines,
-                    isSynced = true,
-                    isWordSynced = hasWordTiming,
-                    plainLyrics = kugouLines.joinToString("\n") { it.text },
-                    isInstrumental = false,
-                    source = "Kugou KRC (Word-Sync)",
-                )
-                cache[cacheKey] = result
-                return@withContext result
-            }
-        } catch (_: Exception) {
-            // Silently fall back to LRCLIB
         }
 
         // 3. TERTIARY: Fall back to LRCLIB line-by-line sync
         val lrclibRecord = try {
             lrclibApi.fetchLyrics(title, artist, album, durationSeconds)
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+            throw cancellation
         } catch (e: Exception) {
             null
         }

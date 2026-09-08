@@ -37,6 +37,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MusicOff
@@ -114,7 +115,8 @@ fun LyricsPanel(
     lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
     wavySeekbarEnabled: Boolean = true,
     onRetry: () -> Unit,
-    onOpenPlayer: (() -> Unit)? = null,
+    onToggleFullscreen: (() -> Unit)? = null,
+    isFullscreen: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val track = state.current ?: return
@@ -237,7 +239,8 @@ fun LyricsPanel(
             totalDurationMs = if (progress.durationMs > 0) progress.durationMs else state.durationMs,
             player = player,
             wavySeekbarEnabled = wavySeekbarEnabled,
-            onOpenPlayer = onOpenPlayer,
+            onToggleFullscreen = onToggleFullscreen,
+            isFullscreen = isFullscreen,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
@@ -857,7 +860,8 @@ private fun LyricsPlaybackControls(
     totalDurationMs: Long,
     player: MusicPlayer,
     wavySeekbarEnabled: Boolean = true,
-    onOpenPlayer: (() -> Unit)? = null,
+    onToggleFullscreen: (() -> Unit)? = null,
+    isFullscreen: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     // This Column performs layout only. It intentionally draws no container.
@@ -867,7 +871,7 @@ private fun LyricsPlaybackControls(
             .padding(horizontal = 4.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        if (onOpenPlayer != null) {
+        if (onToggleFullscreen != null) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -884,7 +888,7 @@ private fun LyricsPlaybackControls(
                 )
                 LiquidGlassSurface(
                     glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current),
-                    onClick = onOpenPlayer,
+                    onClick = onToggleFullscreen,
                     interactionSource = playerInteraction,
                     shape = CircleShape,
                     color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)),
@@ -900,14 +904,16 @@ private fun LyricsPlaybackControls(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            Icons.Filled.Fullscreen,
-                            contentDescription = "Now playing",
+                            if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                            contentDescription = if (isFullscreen) "Exit fullscreen lyrics" else "Fullscreen lyrics",
                             modifier = Modifier.size(24.dp),
                         )
                     }
                 }
             }
         }
+
+        if (isFullscreen) return@Column
 
         var dragging by remember { mutableStateOf(false) }
         var dragValue by remember { mutableFloatStateOf(0f) }

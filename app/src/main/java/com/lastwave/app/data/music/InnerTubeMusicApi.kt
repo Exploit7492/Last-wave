@@ -2124,24 +2124,23 @@ class InnerTubeMusicApi @Inject constructor(
         title: String,
         artist: String,
         prefetchStreams: Boolean = true,
+        excludedVideoId: String? = null,
     ): YouTubeMusicTrack {
         val cacheKey = "${normalize(artist)}|${normalize(title)}"
-        matchCache[cacheKey]?.let { return it }
+        matchCache[cacheKey]?.takeIf { it.videoId != excludedVideoId }?.let { return it }
         val results = searchSongs(
             query = listOf(title, artist).filter { it.isNotBlank() }.joinToString(" "),
             limit = 30,
             prefetchStreams = prefetchStreams,
         )
-        val best = results.maxByOrNull { candidate -> matchScore(candidate, title, artist) }
-            ?: throw IOException("No YouTube Music match found for $title")
-        val titleSimilarity = maxOf(
-            similarity(best.title, title),
-            similarity(baseTitle(best.title), baseTitle(title)),
-        )
-        val artistSimilarity = similarity(best.artist, artist)
-        if (titleSimilarity < 72 || (artist.isNotBlank() && artistSimilarity < 50)) {
-            throw IOException("No reliable YouTube Music match found for $title by $artist")
-        }
+        val best = results.asSequence()
+            .filter { it.videoId.isNotBlank() && it.videoId != excludedVideoId }
+            .filter { candidate ->
+                maxOf(similarity(candidate.title, title), similarity(baseTitle(candidate.title), baseTitle(title))) >= 72 &&
+                    (artist.isBlank() || similarity(candidate.artist, artist) >= 50)
+            }
+            .maxByOrNull { candidate -> matchScore(candidate, title, artist) }
+            ?: throw IOException("No reliable YouTube Music match found for $title by $artist")
         return best.also {
             if (matchCache.size > MAX_MATCH_CACHE_ENTRIES) matchCache.clear()
             matchCache[cacheKey] = it

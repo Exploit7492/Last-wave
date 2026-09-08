@@ -312,7 +312,7 @@ private fun FloatingNavBar(
         ) {
             Surface(
                 shape = DockShape,
-                color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh, backdrop = backdrop),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (liquidGlass) 0.80f else 1f),
                 tonalElevation = if (liquidGlass) 0.dp else 6.dp,
                 shadowElevation = if (liquidGlass) 0.dp else 12.dp,
                 modifier = Modifier.liquidGlassChrome(DockShape, liquidGlass, LiquidGlassPreset.BottomNavigation, backdrop),

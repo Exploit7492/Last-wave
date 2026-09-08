@@ -212,6 +212,13 @@ class FeedRepository @Inject constructor(
             return out
         }
 
+        fun <T> blend(first: List<T>, second: List<T>): List<T> = buildList {
+            repeat(maxOf(first.size, second.size)) { index ->
+                first.getOrNull(index)?.let { add(it) }
+                second.getOrNull(index)?.let { add(it) }
+            }
+        }
+
         val regularPicks = tasteProfile?.topTracksRaw.orEmpty().map {
             YouTubeMusicTrack(it.youtubeVideoIdOrNull().orEmpty(), it.name, it.artist, it.album, it.artworkUrl)
         }
@@ -249,14 +256,14 @@ class FeedRepository @Inject constructor(
         }
 
         val artistSignalTracks = ytRecentSongs + ytLikedSongs + ytQuickPicks + homeSongs + charts
-        val ytArtistNames = (ytRecentSongs + ytLikedSongs)
+        val ytArtistNames = (ytRecentSongs + ytLikedSongs + if (isYtConnected) ytQuickPicks else emptyList())
             .flatMap { ArtistHelper.splitArtists(it.artist) }
             .filter { it.isNotBlank() && !it.equals("Unknown artist", ignoreCase = true) }
             .groupBy { it.trim().lowercase() }
             .values.sortedByDescending { it.size }
             .map { it.first().trim() }
         val listeningArtists = tasteProfile?.topArtistsRaw.orEmpty().flatMap(ArtistHelper::splitArtists)
-        val tasteArtists = (ytArtistNames + listeningArtists +
+        val tasteArtists = (blend(ytArtistNames, listeningArtists) +
             recentTracks.flatMap { ArtistHelper.splitArtists(it.artist.displayName) } +
             regularPicks.flatMap { ArtistHelper.splitArtists(it.artist) })
             .filter { it.isNotBlank() && !it.equals("Unknown artist", ignoreCase = true) }
@@ -278,8 +285,8 @@ class FeedRepository @Inject constructor(
             .flatMap(ArtistHelper::splitArtists)
             .filter { it.isNotBlank() && !it.equals("Unknown artist", ignoreCase = true) }
             .distinctBy { it.lowercase() }
-            .shuffled(random)
             .take(8)
+            .shuffled(random)
 
         val discoverySeeds = (ytLikedSongs + ytRecentSongs + quickPicks).filter { it.videoId.isNotBlank() }
             .shuffled(random).distinctBy { it.artist.lowercase() }.take(3)
@@ -364,23 +371,23 @@ class FeedRepository @Inject constructor(
                 val aff = ArtistHelper.splitArtists(t.artist).maxOfOrNull { affinity[it.trim().lowercase()] ?: 0.0 } ?: 0.0
                 add(t to (aff * 40 + 20.0 / (1 + i / 6.0)))
             }
-            ytLikedSongs.forEachIndexed { i, it ->
-                add(
-                    GeneratedTrack(
-                        it.title, it.artist, it.artworkUrl,
-                        url = "https://www.youtube.com/watch?v=${it.videoId}", album = it.album,
-                    ) to (12.0 / (1 + i / 6.0) + (affinity[ArtistHelper.primaryArtist(it.artist).trim().lowercase()] ?: 0.0) * 30),
-                )
-            }
+            blend(ytRecentSongs, ytLikedSongs)
+                .distinctBy { it.artist.trim().lowercase() to it.title.trim().lowercase() }
+                .forEachIndexed { i, it ->
+                    add(
+                        GeneratedTrack(
+                            it.title, it.artist, it.artworkUrl,
+                            url = "https://www.youtube.com/watch?v=${it.videoId}", album = it.album,
+                        ) to (12.0 / (1 + i / 6.0) + (affinity[ArtistHelper.primaryArtist(it.artist).trim().lowercase()] ?: 0.0) * 30),
+                    )
+                }
         }.distinctBy { (t, _) -> t.key }
             .sortedByDescending { it.second }
             .map { it.first }
         val heavyRotation = heavyCandidates.distinctBy(GeneratedTrack::key).take(15)
 
-        // Jump-back-in keeps true recency order (YT history first, then
-        // scrobbles) but dedupes and caps per artist so one binge doesn't
-        // fill the whole shelf.
-        val jumpCandidates = buildList {
+        // Preserve each provider's history order while sharing the existing shelf.
+        val ytJumpCandidates = buildList {
             ytRecentSongs.forEach {
                 val pArtist = ArtistHelper.primaryArtist(it.artist)
                 add(
@@ -393,21 +400,24 @@ class FeedRepository @Inject constructor(
                     ),
                 )
             }
-            recentTracks.forEach {
-                val pArtist = ArtistHelper.primaryArtist(it.artist.displayName)
-                add(it.copy(artist = ArtistRef(name = pArtist)))
-            }
-        }.distinctBy { it.artist.displayName.trim().lowercase() to it.name.trim().lowercase() }
+        }
+        val lastFmJumpCandidates = recentTracks.map {
+            it.copy(artist = ArtistRef(name = ArtistHelper.primaryArtist(it.artist.displayName)))
+        }
+        val jumpCandidates = blend(ytJumpCandidates, lastFmJumpCandidates)
+            .distinctBy { it.artist.displayName.trim().lowercase() to it.name.trim().lowercase() }
         val jumpBackIn = diversify(jumpCandidates, { it.artist.displayName }, maxPerArtist = 2).take(15)
 
         val albumArtworkRequests = Semaphore(4)
-        val recentAlbums = buildList {
+        val ytAlbumCandidates = buildList {
             (ytRecentSongs + ytLikedSongs).forEach { track ->
                 val album = track.album?.takeIf(String::isNotBlank) ?: return@forEach
                 if (track.artist.isNotBlank()) {
                     add(FeedAlbum(title = album, artist = ArtistHelper.primaryArtist(track.artist), artworkUrl = track.artworkUrl))
                 }
             }
+        }
+        val lastFmAlbumCandidates = buildList {
             recentTracks.forEach { track ->
                 if (track.album.displayName.isNotBlank() && track.artist.displayName.isNotBlank()) {
                     add(
@@ -419,13 +429,13 @@ class FeedRepository @Inject constructor(
                     )
                 }
             }
-            artistSignalTracks.forEach { track ->
-                val album = track.album?.takeIf(String::isNotBlank) ?: return@forEach
-                if (track.artist.isNotBlank()) {
-                    add(FeedAlbum(title = album, artist = ArtistHelper.primaryArtist(track.artist), artworkUrl = track.artworkUrl))
-                }
-            }
         }
+        val fallbackAlbums = artistSignalTracks.mapNotNull { track ->
+            val album = track.album?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            if (track.artist.isBlank()) return@mapNotNull null
+            FeedAlbum(title = album, artist = ArtistHelper.primaryArtist(track.artist), artworkUrl = track.artworkUrl)
+        }
+        val recentAlbums = (blend(ytAlbumCandidates, lastFmAlbumCandidates) + fallbackAlbums)
             .distinctBy { "${it.artist.trim().lowercase()}_${it.title.trim().lowercase()}" }
             .take(12)
             .map { album ->

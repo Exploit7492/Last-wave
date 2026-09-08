@@ -1185,6 +1185,8 @@ fun SettingsScreen(
     if (showLyricsAnimationSheet) {
         LyricsAnimationSheet(
             version = misc.lyricsUiVersion,
+            wordByWord = misc.wordByWordLyrics,
+            onWordByWordChange = viewModel::setWordByWordLyrics,
             onSelectVersion = viewModel::setLyricsUiVersion,
             current = misc.lyricsAnimation,
             onSelect = {
@@ -3246,6 +3248,8 @@ private fun SyncPlaylistsSheet(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LyricsAnimationSheet(
+    wordByWord: Boolean,
+    onWordByWordChange: (Boolean) -> Unit,
     version: LyricsUiVersion,
     onSelectVersion: (LyricsUiVersion) -> Unit,
     current: LyricsAnimation,
@@ -3312,6 +3316,16 @@ private fun LyricsAnimationSheet(
                     )
                 }
             }
+
+            SettingsToggleCard(
+                icon = Icons.Filled.Lyrics,
+                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                title = "Word-by-word lyrics",
+                subtitle = "Turn off to use LRCLIB line-by-line lyrics",
+                checked = wordByWord,
+                onCheckedChange = onWordByWordChange,
+            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),

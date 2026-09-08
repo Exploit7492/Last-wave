@@ -18,7 +18,7 @@ enum class LyricsUiVersion(val id: String, val title: String) {
 
     companion object {
         fun fromId(id: String?): LyricsUiVersion =
-            entries.firstOrNull { it.id == id } ?: CLASSIC
+            entries.firstOrNull { it.id == id } ?: MODERN
     }
 }
 
@@ -68,7 +68,8 @@ data class MiscSettings(
     /** When true, completely bypasses DSP, EQ, tone effects, and software volume ducking for bit-exact audio. */
     val isBitPerfectEnabled: Boolean = false,
     /** Lyrics UI layout version (Classic or Modern). */
-    val lyricsUiVersion: LyricsUiVersion = LyricsUiVersion.CLASSIC,
+    val lyricsUiVersion: LyricsUiVersion = LyricsUiVersion.MODERN,
+    val wordByWordLyrics: Boolean = true,
     /** Experimental lyrics animation style (Settings -> Experimental -> Lyrics Animation). */
     val lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
     /** Blend the end of one queued track into the beginning of the next. */
@@ -98,6 +99,7 @@ class SettingsPreferences @Inject constructor(
         val MUSIC_ENHANCER = booleanPreferencesKey("lw_music_enhancer")
         val BIT_PERFECT_ENABLED = booleanPreferencesKey("lw_bit_perfect_enabled")
         val LYRICS_UI_VERSION = stringPreferencesKey("lw_lyrics_ui_version")
+        val WORD_BY_WORD_LYRICS = booleanPreferencesKey("lw_word_by_word_lyrics")
         val LYRICS_ANIMATION = stringPreferencesKey("lw_lyrics_animation")
         val CROSSFADE_ENABLED = booleanPreferencesKey("lw_crossfade_enabled")
         val CROSSFADE_SECONDS = intPreferencesKey("lw_crossfade_seconds")
@@ -118,6 +120,7 @@ class SettingsPreferences @Inject constructor(
                 isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: false,
                 isBitPerfectEnabled = p.readSafely(Keys.BIT_PERFECT_ENABLED) ?: false,
                 lyricsUiVersion = LyricsUiVersion.fromId(p.readSafely(Keys.LYRICS_UI_VERSION)),
+                wordByWordLyrics = p.readSafely(Keys.WORD_BY_WORD_LYRICS) ?: true,
                 lyricsAnimation = LyricsAnimation.fromId(p.readSafely(Keys.LYRICS_ANIMATION)),
                 crossfadeEnabled = p.readSafely(Keys.CROSSFADE_ENABLED) ?: false,
                 crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 12),
@@ -164,6 +167,10 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setBitPerfectEnabled(enabled: Boolean) {
         dataStore.edit { it[Keys.BIT_PERFECT_ENABLED] = enabled }
+    }
+
+    suspend fun setWordByWordLyrics(enabled: Boolean) {
+        dataStore.edit { it[Keys.WORD_BY_WORD_LYRICS] = enabled }
     }
 
     suspend fun setLyricsAnimation(animation: LyricsAnimation) {

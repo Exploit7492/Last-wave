@@ -8,6 +8,11 @@ import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.lastwave.app.ui.common.PredictiveBackScreen
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -144,6 +149,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -287,9 +294,11 @@ class PlayerViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            player.chromeState.collect { playerState ->
-                val track = playerState.current
-                val key = track?.let { "${it.artist}|${it.title}" }
+            combine(
+                player.chromeState.map { it.current }.distinctUntilChanged(),
+                settingsPreferences.settings.map { it.wordByWordLyrics }.distinctUntilChanged(),
+            ) { track, wordByWord -> track to wordByWord }.collect { (track, wordByWord) ->
+                val key = track?.let { "${it.artist}|${it.title}|$wordByWord" }
                 if (key != currentTrackLyricsKey) {
                     currentTrackLyricsKey = key
                     if (track != null) {
@@ -332,7 +341,10 @@ class PlayerViewModel @Inject constructor(
             } else null
 
             val result = try {
-                lyricsRepository.getLyrics(track.title, track.artist, track.album, durationSeconds, forceRefresh)
+                lyricsRepository.getLyrics(
+                    track.title, track.artist, track.album, durationSeconds, forceRefresh,
+                    wordByWord = settingsPreferences.settings.first().wordByWordLyrics,
+                )
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -735,7 +747,7 @@ private fun MiniPlayer(
     ) {
         Surface(
             shape = shape,
-            color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh, backdrop = backdrop),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (liquidGlass) 0.80f else 1f),
             tonalElevation = if (edgeToEdge || liquidGlass) 0.dp else 6.dp,
             shadowElevation = if (edgeToEdge || liquidGlass) 0.dp else 12.dp,
             modifier = Modifier.fillMaxWidth().liquidGlassChrome(shape, liquidGlass, LiquidGlassPreset.MiniPlayer, backdrop),
@@ -1364,7 +1376,7 @@ private fun FullPlayer(
     progressState: StateFlow<PlaybackProgressState>,
     player: MusicPlayer,
     lyricsState: LyricsUiState,
-    lyricsUiVersion: LyricsUiVersion = LyricsUiVersion.CLASSIC,
+    lyricsUiVersion: LyricsUiVersion = LyricsUiVersion.MODERN,
     lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
     wavySeekbarEnabled: Boolean = true,
     currentTab: FullPlayerTab,
@@ -1377,6 +1389,26 @@ private fun FullPlayer(
     onDoubleTapLike: () -> Unit = {},
 ) {
     val track = state.current ?: return
+    var lyricsFullscreen by remember(currentTab) { mutableStateOf(false) }
+    BackHandler(enabled = lyricsFullscreen) { lyricsFullscreen = false }
+    val view = LocalView.current
+    DisposableEffect(view, lyricsFullscreen) {
+        val fullscreenActive = lyricsFullscreen
+        val activity = generateSequence(view.context) { (it as? android.content.ContextWrapper)?.baseContext }
+            .filterIsInstance<android.app.Activity>().firstOrNull()
+        val controller = activity?.window?.let { WindowCompat.getInsetsController(it, view) }
+        val previousBehavior = controller?.systemBarsBehavior
+        if (fullscreenActive) {
+            controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller?.hide(WindowInsetsCompat.Type.systemBars())
+        }
+        onDispose {
+            if (fullscreenActive) {
+                controller?.show(WindowInsetsCompat.Type.systemBars())
+                previousBehavior?.let { controller?.systemBarsBehavior = it }
+            }
+        }
+    }
     var showTrackMenu by remember(track.videoId, track.title) { mutableStateOf(false) }
     var artworkDragX by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     var dismissDragY by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
@@ -1597,7 +1629,7 @@ private fun FullPlayer(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // ── Header: slimmer, calmer, premium ─────────────────────
-                Box(
+                if (!lyricsFullscreen) Box(
                     Modifier
                         .fillMaxWidth()
                         .adaptiveContentWidth(maxWidth = 640.dp)
@@ -1676,7 +1708,7 @@ private fun FullPlayer(
                     }
                 }
 
-                Spacer(Modifier.height(6.dp))
+                if (!lyricsFullscreen) Spacer(Modifier.height(6.dp))
 
                 AnimatedContent(
                     targetState = currentTab,
@@ -1706,7 +1738,8 @@ private fun FullPlayer(
                                     progressState = progressState,
                                     wavySeekbarEnabled = wavySeekbarEnabled,
                                     onRetry = onRetryLyrics,
-                                    onOpenPlayer = { onTabChange(FullPlayerTab.NOW_PLAYING) },
+                                    onToggleFullscreen = { lyricsFullscreen = !lyricsFullscreen },
+                                    isFullscreen = lyricsFullscreen,
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .adaptiveContentWidth(maxWidth = 720.dp),
@@ -1720,7 +1753,8 @@ private fun FullPlayer(
                                     lyricsAnimation = lyricsAnimation,
                                     wavySeekbarEnabled = wavySeekbarEnabled,
                                     onRetry = onRetryLyrics,
-                                    onOpenPlayer = { onTabChange(FullPlayerTab.NOW_PLAYING) },
+                                    onToggleFullscreen = { lyricsFullscreen = !lyricsFullscreen },
+                                    isFullscreen = lyricsFullscreen,
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .adaptiveContentWidth(maxWidth = 720.dp),
@@ -2145,7 +2179,7 @@ private fun FullPlayer(
                         }
                     }
                 }
-                state.error?.let { message ->
+                state.error?.takeUnless { lyricsFullscreen }?.let { message ->
                     Surface(
                         onClick = player::retry,
                         shape = RoundedCornerShape(20.dp),
