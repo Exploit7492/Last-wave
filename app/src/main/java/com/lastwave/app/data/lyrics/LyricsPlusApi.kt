@@ -81,10 +81,25 @@ class LyricsPlusApi @Inject constructor(
             return@withContext directResult
         }
 
+        // Duration-gated server miss (music-video vs audio lengths): retry
+        // without duration before falling back to other providers.
+        if (durationSeconds != null && durationSeconds > 0) {
+            val noDurationResult = queryEndpoints(title, artist, album, null)
+            if (noDurationResult != null && !noDurationResult.lyrics.isNullOrEmpty()) {
+                return@withContext noDurationResult
+            }
+        }
+
         if (cleanedTitle != title || cleanedArtist != artist) {
             val cleanedResult = queryEndpoints(cleanedTitle, cleanedArtist, album, durationSeconds)
             if (cleanedResult != null && !cleanedResult.lyrics.isNullOrEmpty()) {
                 return@withContext cleanedResult
+            }
+            if (durationSeconds != null && durationSeconds > 0) {
+                val cleanedNoDuration = queryEndpoints(cleanedTitle, cleanedArtist, album, null)
+                if (cleanedNoDuration != null && !cleanedNoDuration.lyrics.isNullOrEmpty()) {
+                    return@withContext cleanedNoDuration
+                }
             }
         }
 

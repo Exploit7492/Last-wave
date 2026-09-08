@@ -68,6 +68,7 @@ sealed interface LyricsResult {
 @Singleton
 class LyricsRepository @Inject constructor(
     private val lyricsPlusApi: LyricsPlusApi,
+    private val betterLyricsApi: BetterLyricsApi,
     private val kugouApi: KugouLyricsApi,
     private val lrclibApi: LrclibLyricsApi,
     private val downloadedTrackDao: dagger.Lazy<com.lastwave.app.data.local.db.DownloadedTrackDao>,
@@ -185,7 +186,29 @@ class LyricsRepository @Inject constructor(
                 // Silently fall back to secondary word-by-word provider
             }
 
-            // 2. SECONDARY: Try Kugou KRC word-by-word / syllable sync
+            // 2. SECONDARY: Try BetterLyrics TTML word-by-word sync (free, no key)
+            try {
+                val betterLines = betterLyricsApi.fetchWordLyrics(title, artist)
+                if (!betterLines.isNullOrEmpty()) {
+                    val hasWordTiming = betterLines.any { it.hasSyllables }
+                    val result = LyricsResult.Success(
+                        lines = betterLines,
+                        isSynced = true,
+                        isWordSynced = hasWordTiming,
+                        plainLyrics = betterLines.joinToString("\n") { it.text },
+                        isInstrumental = false,
+                        source = if (hasWordTiming) "BetterLyrics (Word-Sync)" else "BetterLyrics (Line-Sync)",
+                    )
+                    cache[cacheKey] = result
+                    return@withContext result
+                }
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // Silently fall back to Kugou word-by-word provider
+            }
+
+            // 3. TERTIARY: Try Kugou KRC word-by-word / syllable sync
             try {
                 val kugouLines = kugouApi.fetchWordLyrics(title, artist, durationSeconds)
                 if (!kugouLines.isNullOrEmpty()) {
@@ -208,7 +231,7 @@ class LyricsRepository @Inject constructor(
             }
         }
 
-        // 3. TERTIARY: Fall back to LRCLIB line-by-line sync
+        // 4. FALLBACK: Fall back to LRCLIB line-by-line sync
         val lrclibRecord = try {
             lrclibApi.fetchLyrics(title, artist, album, durationSeconds)
         } catch (cancellation: kotlinx.coroutines.CancellationException) {
@@ -263,7 +286,7 @@ class LyricsRepository @Inject constructor(
             }
         }
 
-        // 3. TERTIARY: If both fail, return Empty (no lyrics)
+        // 4. FALLBACK: If all fail, return Empty (no lyrics)
         val empty = LyricsResult.Empty
         cache[cacheKey] = empty
         empty

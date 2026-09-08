@@ -178,6 +178,12 @@ fun ModernLyricsPanel(
                             onRetry = onRetry,
                         )
                     } else if (targetState.isSynced && targetState.lines.isNotEmpty()) {
+                        // Word-sync can fail (all providers down / LRCLIB line
+                        // fallback): huge karaoke type then overflows off-screen.
+                        // Fall back to a smaller line style, and sit the list a
+                        // little lower so the first line clears the header.
+                        val isWordSynced = targetState.isWordSynced ||
+                            remember(targetState.lines) { targetState.lines.any { it.hasSyllables } }
                         val isOverallRtl = remember(targetState.lines) {
                             val meaningful = targetState.lines.filter { it.text.isNotBlank() && it.text != "♪" }
                             if (meaningful.isEmpty()) false
@@ -195,7 +201,41 @@ fun ModernLyricsPanel(
                         val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialLineIndex)
 
                         val layoutDirection = if (isOverallRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
+                        // Short provider badge: makes it visible why words
+                        // animate (word-sync) or just scroll (line-sync).
+                        val syncLabel = remember(targetState.source, isWordSynced) {
+                            val provider = targetState.source
+                                ?.substringBefore(" (")
+                                ?.takeIf { it.isNotBlank() } ?: "Lyrics"
+                            "${if (isWordSynced) "WORD SYNC" else "LINE SYNC"} • $provider"
+                        }
                         CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(top = 12.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 6.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    ) {
+                                        Text(
+                                            text = syncLabel,
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                letterSpacing = 0.6.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                            ),
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                                        )
+                                    }
+                                }
                             KaraokeLyricsView(
                                 listState = listState,
                                 lyrics = syncedLyrics,
@@ -206,20 +246,23 @@ fun ModernLyricsPanel(
                                     player.seekTo(line.start.toLong())
                                 },
                                 onLinePressed = {},
-                                modifier = Modifier.fillMaxSize(),
-                                offset = 64.dp,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                                offset = 84.dp,
                                 normalLineTextStyle = LocalTextStyle.current.copy(
-                                    fontSize = 34.sp,
+                                    fontSize = if (isWordSynced) 34.sp else 27.sp,
                                     fontWeight = FontWeight.Black,
                                     textMotion = TextMotion.Animated,
                                 ),
                                 accompanimentLineTextStyle = LocalTextStyle.current.copy(
-                                    fontSize = 22.sp,
+                                    fontSize = if (isWordSynced) 22.sp else 19.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     textMotion = TextMotion.Animated,
                                 ),
                                 textColor = Color.White,
                             )
+                            }
                         }
                     } else if (!targetState.plainLyrics.isNullOrBlank()) {
                         ModernPlainLyricsView(

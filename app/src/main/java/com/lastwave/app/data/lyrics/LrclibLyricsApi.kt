@@ -39,7 +39,9 @@ class LrclibLyricsApi @Inject constructor(
 
     /**
      * Attempts to fetch lyrics from LRCLIB.
-     * Tries exact match via /api/get first, and falls back to /api/search if not found or 404.
+     * Exact match via /api/get is tried with progressively looser parameters
+     * (a wrong album tag or a YouTube-length duration must not 404 away a
+     * record the database holds), then falls back to /api/search.
      */
     suspend fun fetchLyrics(
         title: String,
@@ -49,24 +51,37 @@ class LrclibLyricsApi @Inject constructor(
     ): LrclibRecord? = withContext(Dispatchers.IO) {
         if (title.isBlank() || artist.isBlank()) return@withContext null
 
-        // 1. Try exact match with raw track & artist
-        val exact = getLyricsExact(title, artist, album, durationSeconds)
-        if (exact != null && (!exact.syncedLyrics.isNullOrBlank() || !exact.plainLyrics.isNullOrBlank() || exact.instrumental == true)) {
-            return@withContext exact
+        // 1. Exact matches, strictest first so a correct album/duration still
+        // pins the right version (studio vs live/remix).
+        val exactAttempts = listOf(
+            Triple(title, artist, Pair(album, durationSeconds)),
+            Triple(title, artist, Pair(null, durationSeconds)),
+            Triple(title, artist, Pair(null, null)),
+        )
+        for ((t, a, params) in exactAttempts) {
+            val exact = getLyricsExact(t, a, params.first, params.second)
+            if (exact != null && (!exact.syncedLyrics.isNullOrBlank() || !exact.plainLyrics.isNullOrBlank() || exact.instrumental == true)) {
+                return@withContext exact
+            }
         }
 
         // 2. Clean title (strip "(feat. ...)", "- Extended", "[Official Video]", etc.) and retry exact
         val cleanedTitle = cleanTrackTitle(title)
         val cleanedArtist = cleanArtistName(artist)
         if (cleanedTitle != title || cleanedArtist != artist) {
-            val cleanedExact = getLyricsExact(cleanedTitle, cleanedArtist, album, durationSeconds)
-            if (cleanedExact != null && (!cleanedExact.syncedLyrics.isNullOrBlank() || !cleanedExact.plainLyrics.isNullOrBlank() || cleanedExact.instrumental == true)) {
-                return@withContext cleanedExact
+            for (params in listOf(Pair(album, durationSeconds), Pair(null, durationSeconds), Pair(null, null))) {
+                val cleanedExact = getLyricsExact(cleanedTitle, cleanedArtist, params.first, params.second)
+                if (cleanedExact != null && (!cleanedExact.syncedLyrics.isNullOrBlank() || !cleanedExact.plainLyrics.isNullOrBlank() || cleanedExact.instrumental == true)) {
+                    return@withContext cleanedExact
+                }
             }
         }
 
-        // 3. Fallback to /api/search query with strict validation
-        searchLyrics(cleanedTitle, cleanedArtist, durationSeconds) ?: searchLyrics(title, artist, durationSeconds)
+        // 3. Fallback to /api/search query with tiered duration tolerance.
+        // Raw title is passed for version-tag comparison (cleaning strips
+        // "(Live)"/"(Remix)" markers that distinguish recordings).
+        searchLyrics(cleanedTitle, cleanedArtist, durationSeconds, rawTitle = title)
+            ?: searchLyrics(title, artist, durationSeconds, rawTitle = title)
     }
 
     private fun getLyricsExact(
@@ -107,6 +122,7 @@ class LrclibLyricsApi @Inject constructor(
         title: String,
         artist: String,
         durationSeconds: Int? = null,
+        rawTitle: String = title,
     ): LrclibRecord? {
         val urlBuilder = "https://lrclib.net/api/search".toHttpUrlOrNull()?.newBuilder() ?: return null
         urlBuilder.addQueryParameter("q", "$artist $title".trim())
@@ -123,32 +139,53 @@ class LrclibLyricsApi @Inject constructor(
                 val list = json.decodeFromString<List<LrclibRecord>>(body)
                 if (list.isEmpty()) return null
 
-                // Filter & score candidates based on artist similarity, title similarity, and duration delta
-                val validCandidates = list.filter { candidate ->
+                // Score candidates on artist/title only; duration is a soft
+                // preference, not a reject gate — YouTube/music-video lengths
+                // routinely differ 10-60s from the database's audio length.
+                // Tiers: <=8s (right version) -> <=30s -> closest overall.
+                data class Scored(val record: LrclibRecord, val durationDelta: Double)
+
+                val matched = list.mapNotNull { candidate ->
                     val candArtist = cleanArtistName(candidate.artistName ?: "")
                     val reqArtist = cleanArtistName(artist)
                     val artistMatches = candArtist.contains(reqArtist, ignoreCase = true) ||
                             reqArtist.contains(candArtist, ignoreCase = true) ||
                             isSimilar(candArtist, reqArtist)
+                    if (!artistMatches) return@mapNotNull null
 
-                    val candTitle = cleanTrackTitle(candidate.trackName ?: candidate.name ?: "")
+                    val candRawTitle = candidate.trackName ?: candidate.name ?: ""
+                    // Never serve the wrong recording: a live/remix/cover tag
+                    // present on one side but not the other rejects the record
+                    // at every tier, however close the duration is.
+                    if (!sameVersion(rawTitle, candRawTitle)) return@mapNotNull null
+
+                    val candTitle = cleanTrackTitle(candRawTitle)
                     val reqTitle = cleanTrackTitle(title)
-                    val titleMatches = candTitle.contains(reqTitle, ignoreCase = true) ||
-                            reqTitle.contains(candTitle, ignoreCase = true) ||
-                            isSimilar(candTitle, reqTitle)
+                    val titleMatches = titlesMatch(candTitle, reqTitle)
+                    if (!titleMatches) return@mapNotNull null
 
-                    val durationMatches = if (durationSeconds != null && durationSeconds > 0 && candidate.duration != null && candidate.duration > 0) {
-                        kotlin.math.abs(candidate.duration - durationSeconds) <= 8.0
+                    val delta = if (durationSeconds != null && durationSeconds > 0 && candidate.duration != null && candidate.duration > 0) {
+                        kotlin.math.abs(candidate.duration - durationSeconds)
                     } else {
-                        true
+                        0.0
                     }
+                    Scored(candidate, delta)
+                }.sortedBy { it.durationDelta }
 
-                    artistMatches && titleMatches && durationMatches
-                }
+                if (matched.isEmpty()) return null
 
-                validCandidates.firstOrNull { !it.syncedLyrics.isNullOrBlank() }
-                    ?: validCandidates.firstOrNull { !it.plainLyrics.isNullOrBlank() }
-                    ?: validCandidates.firstOrNull { it.instrumental == true }
+                fun pick(predicate: (LrclibRecord) -> Boolean, maxDelta: Double): LrclibRecord? =
+                    matched.firstOrNull { it.durationDelta <= maxDelta && predicate(it.record) }?.record
+
+                // Synced lyrics: strict version pin first, then relaxed.
+                pick({ !it.syncedLyrics.isNullOrBlank() }, STRICT_DURATION_DELTA)
+                    ?: pick({ !it.syncedLyrics.isNullOrBlank() }, RELAXED_DURATION_DELTA)
+                    ?: matched.firstOrNull { !it.record.syncedLyrics.isNullOrBlank() }?.record
+                    // Plain lyrics: same tiers.
+                    ?: pick({ !it.plainLyrics.isNullOrBlank() }, STRICT_DURATION_DELTA)
+                    ?: pick({ !it.plainLyrics.isNullOrBlank() }, RELAXED_DURATION_DELTA)
+                    ?: matched.firstOrNull { !it.record.plainLyrics.isNullOrBlank() }?.record
+                    ?: matched.firstOrNull { it.record.instrumental == true }?.record
             }
         } catch (e: IOException) {
             null
@@ -158,6 +195,82 @@ class LrclibLyricsApi @Inject constructor(
     }
 
     companion object {
+        /** Exact-version pin: studio vs live/remix stay distinct. */
+        const val STRICT_DURATION_DELTA = 8.0
+
+        /** Music-video/intro lengths vs database audio lengths. */
+        const val RELAXED_DURATION_DELTA = 30.0
+
+        /**
+         * Title match that also tolerates dirty community titles carrying an
+         * "Artist - Title" prefix (e.g. trackName "Ed Sheeran - Shape Of You
+         * [Official Video]"): the prefix-stripped variant is tried too.
+         */
+        fun titlesMatch(candidateTitle: String, requestTitle: String): Boolean {
+            val variants = listOf(candidateTitle, stripLeadingArtistPrefix(candidateTitle))
+            return variants.any { cand ->
+                cand.contains(requestTitle, ignoreCase = true) ||
+                        requestTitle.contains(cand, ignoreCase = true) ||
+                        isSimilar(cand, requestTitle)
+            }
+        }
+
+        /** Removes a leading "Artist - " / "Artist – " / "Artist: " segment. */
+        fun stripLeadingArtistPrefix(raw: String): String {
+            val stripped = raw.replace(
+                Regex("""^\s*.+?\s*[-–—:]\s+(?=\S)"""),
+                "",
+            ).trim()
+            // Guard against legit "A - B" song titles: only accept the strip
+            // when something meaningful remains.
+            return if (stripped.length >= 2) stripped else raw.trim()
+        }
+
+        /**
+         * Recording-version tags that distinguish releases of one song.
+         * Remaster/radio-edit style markers are deliberately absent: cleaning
+         * already normalizes those, and they denote the same recording.
+         */
+        private val VERSION_KEYWORDS = mapOf(
+            "live" to "live",
+            "concert" to "live",
+            "session" to "live",
+            "unplugged" to "unplugged",
+            "acoustic" to "acoustic",
+            "remix" to "remix",
+            "cover" to "cover",
+            "karaoke" to "karaoke",
+            "instrumental" to "instrumental",
+            "slowed" to "slowed",
+            "sped up" to "sped",
+            "speed up" to "sped",
+            "spedup" to "sped",
+            "sped" to "sped",
+            "nightcore" to "sped",
+            "demo" to "demo",
+            "lullaby" to "lullaby",
+            "8d" to "8d",
+        )
+
+        /** Version tags found in brackets or a trailing "- X" suffix. */
+        fun versionTags(rawTitle: String): Set<String> {
+            val tags = mutableSetOf<String>()
+            val segments = mutableListOf<String>()
+            Regex("""[\(\[](.*?)[\)\]]""").findAll(rawTitle).forEach { segments.add(it.groupValues[1]) }
+            Regex("""\s*[-–—:]\s*([^-–—:\(\[]+)\s*$""").find(rawTitle)?.let { segments.add(it.groupValues[1]) }
+            for (segment in segments) {
+                val lower = " $segment ".lowercase()
+                for ((keyword, tag) in VERSION_KEYWORDS) {
+                    if (lower.contains(keyword)) tags.add(tag)
+                }
+            }
+            return tags
+        }
+
+        /** True only when both titles describe the same recording version. */
+        fun sameVersion(requestTitle: String, candidateTitle: String): Boolean =
+            versionTags(requestTitle) == versionTags(candidateTitle)
+
         fun isSimilar(s1: String, s2: String): Boolean {
             val a = s1.trim().lowercase()
             val b = s2.trim().lowercase()

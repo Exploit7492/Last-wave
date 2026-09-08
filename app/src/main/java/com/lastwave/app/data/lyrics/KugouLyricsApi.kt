@@ -77,8 +77,10 @@ class KugouLyricsApi @Inject constructor(
         if (title.isBlank() || artist.isBlank()) return@withContext null
 
         try {
-            // 1. Search candidate
-            val searchUrl = "http://lyrics.kugou.com/search".toHttpUrlOrNull()
+            // HTTPS only: AndroidManifest enforces android:usesCleartextTraffic="false",
+            // so cleartext http:// is blocked by the OS on API 28+. HTTPS serves
+            // identical responses (verified 200 on search + download).
+            val searchUrl = "https://lyrics.kugou.com/search".toHttpUrlOrNull()
                 ?.newBuilder()
                 ?.addQueryParameter("ver", "1")
                 ?.addQueryParameter("man", "yes")
@@ -105,27 +107,39 @@ class KugouLyricsApi @Inject constructor(
             val cleanedTitle = LrclibLyricsApi.cleanTrackTitle(title)
             val cleanedArtist = LrclibLyricsApi.cleanArtistName(artist)
 
-            // Select best candidate based on artist similarity, title similarity, and duration delta
-            val candidate = searchResult.candidates.firstOrNull { cand ->
+            // Select best candidate based on artist similarity, title similarity, and duration delta.
+            // Duration is tiered, not a reject gate: music-video lengths differ
+            // 10-60s from database audio lengths (same failure as LRCLIB).
+            // Tiers: <=8s (right version) -> <=30s -> closest overall.
+            fun durationDelta(cand: KugouCandidate): Long =
+                if (durationSeconds != null && durationSeconds > 0 && cand.duration > 0) {
+                    kotlin.math.abs(cand.duration - (durationSeconds * 1000L))
+                } else {
+                    0L
+                }
+
+            fun textMatches(cand: KugouCandidate): Boolean {
+                // Never serve the wrong recording (live/remix/cover/etc.).
+                if (!LrclibLyricsApi.sameVersion(title, cand.song)) return false
+
                 val candSinger = LrclibLyricsApi.cleanArtistName(cand.singer)
                 val candSong = LrclibLyricsApi.cleanTrackTitle(cand.song)
 
                 val artistMatches = candSinger.contains(cleanedArtist, ignoreCase = true) ||
                         cleanedArtist.contains(candSinger, ignoreCase = true) ||
                         LrclibLyricsApi.isSimilar(candSinger, cleanedArtist)
+                if (!artistMatches) return false
 
-                val titleMatches = candSong.contains(cleanedTitle, ignoreCase = true) ||
-                        cleanedTitle.contains(candSong, ignoreCase = true) ||
-                        LrclibLyricsApi.isSimilar(candSong, cleanedTitle)
+                return LrclibLyricsApi.titlesMatch(candSong, cleanedTitle)
+            }
 
-                val durationMatches = if (durationSeconds != null && durationSeconds > 0 && cand.duration > 0) {
-                    kotlin.math.abs(cand.duration - (durationSeconds * 1000L)) <= 8000L
-                } else {
-                    true
-                }
+            val textMatched = searchResult.candidates.filter(::textMatches)
+                .sortedBy(::durationDelta)
 
-                artistMatches && titleMatches && durationMatches
-            } ?: searchResult.candidates.firstOrNull { cand ->
+            val candidate = textMatched.firstOrNull { durationDelta(it) <= 8_000L }
+                ?: textMatched.firstOrNull { durationDelta(it) <= 30_000L }
+                ?: textMatched.firstOrNull()
+                ?: searchResult.candidates.firstOrNull { cand ->
                 if (durationSeconds != null && durationSeconds > 0 && cand.duration > 0) {
                     kotlin.math.abs(cand.duration - (durationSeconds * 1000L)) <= 8000L
                 } else {
@@ -133,8 +147,8 @@ class KugouLyricsApi @Inject constructor(
                 }
             } ?: return@withContext null
 
-            // 2. Download KRC encrypted content
-            val downloadUrl = "http://lyrics.kugou.com/download".toHttpUrlOrNull()
+            // 2. Download KRC encrypted content (HTTPS — see search note above)
+            val downloadUrl = "https://lyrics.kugou.com/download".toHttpUrlOrNull()
                 ?.newBuilder()
                 ?.addQueryParameter("ver", "1")
                 ?.addQueryParameter("client", "pc")
