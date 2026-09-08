@@ -536,6 +536,11 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         return START_STICKY
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        musicPlayer.stopAndClear()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         runCatching { if (playbackWakeLock?.isHeld == true) playbackWakeLock?.release() }
         runCatching { if (playbackWifiLock?.isHeld == true) playbackWifiLock?.release() }
@@ -546,6 +551,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             else @Suppress("DEPRECATION") stopForeground(true)
             isPlaybackForeground = false
         }
+        getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
         val releasedToken = platformSessionToken
         runCatching { mediaSession?.isActive = false }
         runCatching { mediaSession?.release() }
