@@ -1,5 +1,8 @@
 package com.lastwave.app.data.lyrics
 
+import com.lastwave.app.data.artwork.awaitSuccessfulBodyOrNull
+import kotlinx.coroutines.CancellationException
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -58,7 +61,7 @@ class BetterLyricsApi @Inject constructor(
         null
     }
 
-    private fun queryEndpoints(title: String, artist: String): List<LyricLine>? {
+    private suspend fun queryEndpoints(title: String, artist: String): List<LyricLine>? {
         // Primary: {"ttml": "<tt ...>"} — params are s (song) + a (artist).
         fetchTtml(
             baseUrl = "https://lyrics-api.boidu.dev/getLyrics",
@@ -80,7 +83,7 @@ class BetterLyricsApi @Inject constructor(
 
     private enum class BetterField { TTML, LYRICS }
 
-    private fun fetchTtml(
+    private suspend fun fetchTtml(
         baseUrl: String,
         title: String,
         artist: String,
@@ -99,16 +102,15 @@ class BetterLyricsApi @Inject constructor(
             .build()
 
         return try {
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                val body = response.body?.string() ?: return null
-                val ttml = when (field) {
-                    BetterField.TTML -> json.decodeFromString<BetterLyricsGetResponse>(body).ttml
-                    BetterField.LYRICS -> json.decodeFromString<BetterLyricsTtmlResponse>(body).lyrics
-                }
-                if (ttml.isNullOrBlank()) return null
-                parseTtml(ttml).takeIf { it.isNotEmpty() }
+            val body = okHttpClient.newCall(request).awaitSuccessfulBodyOrNull() ?: return null
+            val ttml = when (field) {
+                BetterField.TTML -> json.decodeFromString<BetterLyricsGetResponse>(body).ttml
+                BetterField.LYRICS -> json.decodeFromString<BetterLyricsTtmlResponse>(body).lyrics
             }
+            if (ttml.isNullOrBlank()) return null
+            parseTtml(ttml).takeIf { it.isNotEmpty() }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
         } catch (_: IOException) {
             null
         } catch (_: Exception) {

@@ -1,5 +1,8 @@
 package com.lastwave.app.data.lyrics
 
+import com.lastwave.app.data.artwork.awaitSuccessfulBodyOrNull
+import kotlinx.coroutines.CancellationException
+
 import com.lastwave.app.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -106,7 +109,7 @@ class LyricsPlusApi @Inject constructor(
         null
     }
 
-    private fun queryEndpoints(
+    private suspend fun queryEndpoints(
         title: String,
         artist: String,
         album: String?,
@@ -138,15 +141,11 @@ class LyricsPlusApi @Inject constructor(
             }
 
             try {
-                okHttpClient.newCall(requestBuilder.build()).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val body = response.body?.string() ?: return@use
-                        val parsed = json.decodeFromString<LyricsPlusResponse>(body)
-                        if (!parsed.lyrics.isNullOrEmpty()) {
-                            return parsed
-                        }
-                    }
-                }
+                val body = okHttpClient.newCall(requestBuilder.build()).awaitSuccessfulBodyOrNull() ?: continue
+                val parsed = json.decodeFromString<LyricsPlusResponse>(body)
+                if (!parsed.lyrics.isNullOrEmpty()) return parsed
+            } catch (cancellation: CancellationException) {
+                throw cancellation
             } catch (e: IOException) {
                 // Continue to fallback endpoint
             } catch (e: Exception) {

@@ -1,5 +1,8 @@
 package com.lastwave.app.data.lyrics
 
+import com.lastwave.app.data.artwork.awaitSuccessfulBodyOrNull
+import kotlinx.coroutines.CancellationException
+
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -96,10 +99,8 @@ class KugouLyricsApi @Inject constructor(
                 .get()
                 .build()
 
-            val searchJsonString = client.newCall(searchRequest).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-                response.body?.string() ?: return@withContext null
-            }
+            val searchJsonString = client.newCall(searchRequest).awaitSuccessfulBodyOrNull()
+                ?: return@withContext null
 
             val searchResult = json.decodeFromString<KugouSearchResponse>(searchJsonString)
             if (searchResult.candidates.isEmpty()) return@withContext null
@@ -164,10 +165,8 @@ class KugouLyricsApi @Inject constructor(
                 .get()
                 .build()
 
-            val downloadJsonString = client.newCall(downloadRequest).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-                response.body?.string() ?: return@withContext null
-            }
+            val downloadJsonString = client.newCall(downloadRequest).awaitSuccessfulBodyOrNull()
+                ?: return@withContext null
 
             val downloadResult = json.decodeFromString<KugouDownloadResponse>(downloadJsonString)
             val rawBase64 = downloadResult.content ?: return@withContext null
@@ -177,6 +176,8 @@ class KugouLyricsApi @Inject constructor(
 
             // 4. Parse KRC into LyricLine / LyricSyllable
             parseKrc(decryptedKrcText)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
         } catch (_: Exception) {
             null
         }

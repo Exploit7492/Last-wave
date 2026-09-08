@@ -2125,16 +2125,17 @@ class InnerTubeMusicApi @Inject constructor(
         artist: String,
         prefetchStreams: Boolean = true,
         excludedVideoId: String? = null,
+        excludedVideoIds: Set<String> = emptySet(),
     ): YouTubeMusicTrack {
         val cacheKey = "${normalize(artist)}|${normalize(title)}"
-        matchCache[cacheKey]?.takeIf { it.videoId != excludedVideoId }?.let { return it }
+        matchCache[cacheKey]?.takeIf { it.videoId != excludedVideoId && it.videoId !in excludedVideoIds }?.let { return it }
         val results = searchSongs(
             query = listOf(title, artist).filter { it.isNotBlank() }.joinToString(" "),
             limit = 30,
             prefetchStreams = prefetchStreams,
         )
         val best = results.asSequence()
-            .filter { it.videoId.isNotBlank() && it.videoId != excludedVideoId }
+            .filter { it.videoId.isNotBlank() && it.videoId != excludedVideoId && it.videoId !in excludedVideoIds }
             .filter { candidate ->
                 maxOf(similarity(candidate.title, title), similarity(baseTitle(candidate.title), baseTitle(title))) >= 72 &&
                     (artist.isBlank() || similarity(candidate.artist, artist) >= 50)

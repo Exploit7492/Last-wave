@@ -344,6 +344,12 @@ class PlayerViewModel @Inject constructor(
                 lyricsRepository.getLyrics(
                     track.title, track.artist, track.album, durationSeconds, forceRefresh,
                     wordByWord = settingsPreferences.settings.first().wordByWordLyrics,
+                    onPartialResult = { partial ->
+                        withContext(Dispatchers.Main.immediate) {
+                            coroutineContext.ensureActive()
+                            publishLyrics(partial)
+                        }
+                    },
                 )
             } catch (error: CancellationException) {
                 throw error
@@ -351,23 +357,29 @@ class PlayerViewModel @Inject constructor(
                 LyricsResult.Error(error.message ?: "Couldn't load lyrics")
             }
             coroutineContext.ensureActive()
-            when (result) {
-                is LyricsResult.Success -> {
-                    _lyricsState.value = LyricsUiState.Success(
-                        lines = result.lines,
-                        isSynced = result.isSynced,
-                        isWordSynced = result.isWordSynced,
-                        plainLyrics = result.plainLyrics,
-                        isInstrumental = result.isInstrumental,
-                        source = result.source,
-                    )
-                }
-                is LyricsResult.Empty -> {
-                    _lyricsState.value = LyricsUiState.Empty
-                }
-                is LyricsResult.Error -> {
-                    _lyricsState.value = LyricsUiState.Error(result.message)
-                }
+            if (result is LyricsResult.Success || _lyricsState.value !is LyricsUiState.Success) {
+                publishLyrics(result)
+            }
+        }
+    }
+
+    private fun publishLyrics(result: LyricsResult) {
+        when (result) {
+            is LyricsResult.Success -> {
+                _lyricsState.value = LyricsUiState.Success(
+                    lines = result.lines,
+                    isSynced = result.isSynced,
+                    isWordSynced = result.isWordSynced,
+                    plainLyrics = result.plainLyrics,
+                    isInstrumental = result.isInstrumental,
+                    source = result.source,
+                )
+            }
+            is LyricsResult.Empty -> {
+                _lyricsState.value = LyricsUiState.Empty
+            }
+            is LyricsResult.Error -> {
+                _lyricsState.value = LyricsUiState.Error(result.message)
             }
         }
     }

@@ -80,13 +80,15 @@ class AudioTagWriter @Inject constructor(
         artworkUrl: String? = null,
         lyrics: String? = null,
         year: String? = null,
+        artworkFallbackUrl: String? = null,
     ): Boolean {
         if (!audioFile.exists() || audioFile.length() <= 0) return false
 
         return try {
-            val artworkBytes = if (!artworkUrl.isNullOrBlank()) {
-                downloadArtworkBytes(artworkUrl)?.let { normalizedArtwork(it) }
-            } else null
+            val artworkBytes = listOfNotNull(artworkUrl, artworkFallbackUrl)
+                .filter(String::isNotBlank).distinct().firstNotNullOfOrNull { url ->
+                    (downloadArtworkBytes(url) ?: downloadArtworkBytes(url))?.let(::normalizedArtwork)
+                }
 
             val kind = detectContainerKind(audioFile)
             val ok = when (kind) {
@@ -369,7 +371,11 @@ class AudioTagWriter @Inject constructor(
         }
 
         val replacedFields = buildSet {
-            addAll(setOf("TITLE", "ARTIST", "ALBUMARTIST", "ALBUM", "LYRICS", "UNSYNCEDLYRICS", "DATE", "YEAR"))
+            if (title.isNotBlank()) add("TITLE")
+            if (artist.isNotBlank()) addAll(setOf("ARTIST", "ALBUMARTIST"))
+            if (!album.isNullOrBlank()) add("ALBUM")
+            if (!lyrics.isNullOrBlank()) addAll(setOf("LYRICS", "UNSYNCEDLYRICS"))
+            if (!year.isNullOrBlank()) addAll(setOf("DATE", "YEAR"))
             if (artworkBytes != null) {
                 addAll(setOf("METADATA_BLOCK_PICTURE", "COVERART", "COVERARTMIME"))
             }
@@ -732,7 +738,11 @@ class AudioTagWriter @Inject constructor(
         year: String? = null,
     ): ByteArray {
         val replacedFields = buildSet {
-            addAll(setOf("TITLE", "ARTIST", "ALBUMARTIST", "ALBUM", "LYRICS", "UNSYNCEDLYRICS", "DATE", "YEAR"))
+            if (title.isNotBlank()) add("TITLE")
+            if (artist.isNotBlank()) addAll(setOf("ARTIST", "ALBUMARTIST"))
+            if (!album.isNullOrBlank()) add("ALBUM")
+            if (!lyrics.isNullOrBlank()) addAll(setOf("LYRICS", "UNSYNCEDLYRICS"))
+            if (!year.isNullOrBlank()) addAll(setOf("DATE", "YEAR"))
             if (artworkBytes != null) {
                 addAll(setOf("METADATA_BLOCK_PICTURE", "COVERART", "COVERARTMIME"))
             }
@@ -1214,8 +1224,24 @@ class AudioTagWriter @Inject constructor(
         if (offset != fileSize) return false                          // trailing garbage / odd layout
         if (moovStart < 0 || moovSize < 8 || moovSize - 8 > Int.MAX_VALUE) return false
 
-        // Build the small in-memory atom tree (metadata only).
+        val moovBody = ByteArray((moovSize - 8).toInt())
+        java.io.RandomAccessFile(audioFile, "r").use { raf ->
+            raf.seek(moovStart + 8)
+            raf.readFully(moovBody)
+        }
+        val existingUdta = mp4BoxBody(moovBody, "udta") ?: byteArrayOf()
+        val existingMeta = mp4BoxBody(existingUdta, "meta")?.takeIf { it.size >= 4 }?.let { it.copyOfRange(4, it.size) } ?: byteArrayOf()
+        val existingItems = mp4BoxBody(existingMeta, "ilst") ?: byteArrayOf()
+        val replacedItems = buildSet {
+            if (title.isNotBlank()) add("\u00A9nam")
+            if (artist.isNotBlank()) addAll(setOf("\u00A9ART", "aART"))
+            if (!album.isNullOrBlank()) add("\u00A9alb")
+            if (!lyrics.isNullOrBlank()) add("\u00A9lyr")
+            if (!year.isNullOrBlank()) add("\u00A9day")
+            if (artworkBytes != null) add("covr")
+        }
         val ilstItems = ByteArrayOutputStream()
+        ilstItems.write(removeTopLevelBoxes(existingItems, replacedItems))
         addMp4TextItem(ilstItems, "\u00A9nam", title)       // ©nam
         addMp4TextItem(ilstItems, "\u00A9ART", artist)      // ©ART
         addMp4TextItem(ilstItems, "aART", artist)
@@ -1240,14 +1266,10 @@ class AudioTagWriter @Inject constructor(
         val metaBody = ByteArrayOutputStream()
         metaBody.write(0x00); metaBody.write(0x00); metaBody.write(0x00); metaBody.write(0x00) // version+flags (FullBox)
         metaBody.write(hdlrBox)
+        metaBody.write(removeTopLevelBoxes(existingMeta, setOf("hdlr", "ilst")))
         metaBody.write(ilstBox)
-        val udtaBox = wrapBox("udta", wrapBox("meta", metaBody.toByteArray()))
+        val udtaBox = wrapBox("udta", removeTopLevelBoxes(existingUdta, setOf("meta")) + wrapBox("meta", metaBody.toByteArray()))
 
-        val moovBody = ByteArray((moovSize - 8).toInt())
-        java.io.RandomAccessFile(audioFile, "r").use { raf ->
-            raf.seek(moovStart + 8)
-            raf.readFully(moovBody)
-        }
 
         // Clean out any existing udta boxes so we don't produce duplicate udta boxes
         // which standard players and Android MediaMetadataRetriever ignore.
@@ -1313,6 +1335,25 @@ class AudioTagWriter @Inject constructor(
         return replaceOriginal(audioFile, tempFile, minimumValidLength = 16)
     }
 
+    private fun mp4BoxBody(bytes: ByteArray, wantedType: String): ByteArray? {
+        var offset = 0
+        while (offset + 8 <= bytes.size) {
+            val size32 = readBeUInt32(bytes, offset)
+            val headerSize = if (size32 == 1L) 16 else 8
+            if (offset + headerSize > bytes.size) return null
+            val size = when (size32) {
+                0L -> (bytes.size - offset).toLong()
+                1L -> readBeUInt64(bytes, offset + 8) ?: return null
+                else -> size32
+            }
+            if (size < headerSize || size > bytes.size - offset) return null
+            if (String(bytes, offset + 4, 4, StandardCharsets.ISO_8859_1) == wantedType) {
+                return bytes.copyOfRange(offset + headerSize, offset + size.toInt())
+            }
+            offset += size.toInt()
+        }
+        return null
+    }
     private fun removeTopLevelBoxes(bytes: ByteArray, boxTypes: Set<String>): ByteArray {
         val out = ByteArrayOutputStream()
         var offset = 0
