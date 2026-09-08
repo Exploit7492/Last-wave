@@ -46,7 +46,7 @@ android {
 
     defaultConfig {
         applicationId = "com.lastwave.app"
-        minSdk = 29
+        minSdk = 24
         targetSdk = 35
         versionCode = 16
         versionName = "4.0.0"
