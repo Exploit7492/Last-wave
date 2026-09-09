@@ -3,6 +3,48 @@
 ## Unreleased
 
 ### Fixed
+- **Player state and cached track lost after leaving the app in the background with nothing playing.** (Fix by [@musaibbhat120605](https://github.com/musaibbhat120605))
+
+  `MusicPlaybackService.onTaskRemoved()` unconditionally called
+  `musicPlayer.stopAndClear()` whenever the task left Recents — even when
+  nothing was playing. `stopAndClear()` wipes both the in-memory player
+  state and the persisted session in SharedPreferences
+  (`clearPersistedPlaybackSession()`), so the next launch had nothing to
+  restore: the player appeared closed and the last track wasn't cached,
+  regardless of battery-optimization settings.
+
+  Fixed by (1) skipping the stop entirely when something is actively
+  playing, so playback isn't killed just because the task left Recents,
+  and (2) giving `stopAndClear()` an optional `clearSession` parameter
+  (default `true`, unchanged for every other call site) so the
+  paused/idle case can stop the service without deleting the persisted
+  session — leaving it restorable on the next launch.
+
+  Files changed:
+  `app/src/main/java/com/lastwave/app/playback/MusicPlaybackService.kt`,
+  `app/src/main/java/com/lastwave/app/playback/MusicPlayer.kt`
+
+- **Songs silently disappearing from the Home listing during background polling.** (Fix by [@musaibbhat120605](https://github.com/musaibbhat120605))
+
+  `HomeViewModel`'s 12-second background refresh loop merged newly
+  polled recent tracks with the existing in-memory history and then
+  truncated the **entire combined list** to `HOME_TRACK_HISTORY_CAP`
+  (500 entries). `loadNextPage()` (triggered by scrolling) appends
+  paginated tracks without any cap of its own — so once a user
+  scrolled far enough to load more than 500 tracks, the very next
+  background poll would silently drop everything past position 500,
+  including tracks the user had just scrolled into view seconds
+  earlier. This made songs appear to randomly vanish from the Home
+  listing with no user action to explain it.
+
+  Fixed by making the background poll's cap dynamic: it now only
+  bounds organic growth from polling (`max(HOME_TRACK_HISTORY_CAP,
+  currentListSize)`), so it can never truncate below what pagination
+  has already legitimately loaded into view.
+
+  Files changed:
+  `app/src/main/java/com/lastwave/app/ui/home/HomeViewModel.kt`
+
 - **Duplicate/overlapping "now playing" notification on Android 10 (One UI 2.x).**
   `buildNotification()` used `Notification.DecoratedMediaCustomViewStyle`
   with a `MediaSession` attached, alongside a fully custom `RemoteViews`
