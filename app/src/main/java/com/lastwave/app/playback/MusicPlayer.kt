@@ -1574,7 +1574,18 @@ class MusicPlayer @Inject constructor(
             player.removeMediaItems(current + 1, player.mediaItemCount)
         }
     }
-    fun stopAndClear() = onMain {
+    /**
+     * Stops playback and tears down the service.
+     *
+     * @param clearSession When true (the default — matches every existing
+     *   caller's prior behavior), the persisted queue/track in
+     *   SharedPreferences is wiped along with the in-memory state, so the
+     *   next launch starts with no player. Pass false when the stop is
+     *   incidental (e.g. the task was swiped from Recents while nothing was
+     *   playing) and the last session should still be restorable the next
+     *   time the app opens.
+     */
+    fun stopAndClear(clearSession: Boolean = true) = onMain {
         if (isCasting) castPlayback?.disconnect()
         cancelCrossfade()
         resolutionRequests.values.forEach { it.second.cancel() }
@@ -1590,7 +1601,7 @@ class MusicPlayer @Inject constructor(
         player.clearMediaItems()
         preparedStreams.clear()
         _state.value = MusicPlayerState()
-        clearPersistedPlaybackSession()
+        if (clearSession) clearPersistedPlaybackSession()
         applicationScope.launch(Dispatchers.IO) { WidgetUpdater.clear(appContext) }
         appContext.stopService(Intent(appContext, MusicPlaybackService::class.java))
     }
