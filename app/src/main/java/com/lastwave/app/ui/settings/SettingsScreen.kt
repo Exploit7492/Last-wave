@@ -942,7 +942,7 @@ fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("About")
-                    SettingsGroup(rowCount = 2) { index, position ->
+                    SettingsGroup(rowCount = 3) { index, position ->
                         when (index) {
                             0 -> SettingsActionCard(
                                 icon = Icons.AutoMirrored.Filled.Send,
@@ -968,6 +968,15 @@ fun SettingsScreen(
                                         viewModel.showToast("No compatible browser or Telegram app is available")
                                     }
                                 },
+                                position = position,
+                            )
+                            2 -> SettingsActionCard(
+                                icon = Icons.Filled.Code,
+                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                title = "Export diagnostics",
+                                subtitle = "Share logs for troubleshooting",
+                                onClick = { viewModel.exportDiagnostics() },
                                 position = position,
                             )
                         }
