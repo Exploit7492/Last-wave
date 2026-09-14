@@ -30,12 +30,14 @@ class NativeProcessingAudioSink(
     private val fallbackDelegate: DefaultAudioSink,
     private val processor: NativePcmAudioProcessor,
     private val onPlatformEffectsRequired: (Boolean) -> Unit = {},
+    private val usbOutput: UsbBitPerfectOutput? = null,
 ) : AudioSink {
     private var activeDelegate: DefaultAudioSink = fallbackDelegate
     private var processingActive = false
     private var floatOutputDisabled = false
     private var nativePathDisabled = false
     private var playing = false
+    @Volatile private var bitPerfectRequested = false
 
     private var configuredFormat: Format? = null
     private var configuredBufferSize = 0
@@ -98,6 +100,11 @@ class NativeProcessingAudioSink(
         processingActive = false
         processedFormat = null
 
+        if (bitPerfectRequested && format.pcmEncoding == C.ENCODING_PCM_16BIT) {
+            configureFallback(format, specifiedBufferSize, outputChannels)
+            return
+        }
+
         if (!nativePathDisabled && processor.isAvailable && canProcess(format) &&
             tryConfigureNativePath(format, outputChannels)
         ) {
@@ -149,6 +156,7 @@ class NativeProcessingAudioSink(
                 if (activeDelegate !== enhancedDelegate) safeFlush(fallbackDelegate)
                 activeDelegate = enhancedDelegate
                 processingActive = true
+                configureUsbOutput(floatFormat, C.ENCODING_PCM_FLOAT, outputChannels)
                 notifyPlatformEffectsRequired(false)
                 if (playing) enhancedDelegate.play()
                 return true
@@ -167,6 +175,7 @@ class NativeProcessingAudioSink(
             if (activeDelegate !== fallbackDelegate) safeFlush(enhancedDelegate)
             activeDelegate = fallbackDelegate
             processingActive = true
+            configureUsbOutput(floatFormat, C.ENCODING_PCM_16BIT, outputChannels)
             notifyPlatformEffectsRequired(false)
             if (playing) fallbackDelegate.play()
             Log.i(TAG, "Using native Float32 DSP with PCM16 AudioTrack compatibility output")
@@ -193,6 +202,7 @@ class NativeProcessingAudioSink(
         fallbackDelegate.configure(format, specifiedBufferSize, outputChannels)
         if (activeDelegate !== fallbackDelegate) safeFlush(enhancedDelegate)
         activeDelegate = fallbackDelegate
+        configureUsbOutput(format, C.ENCODING_PCM_16BIT, outputChannels)
         notifyPlatformEffectsRequired(true)
         if (playing) fallbackDelegate.play()
     }
@@ -347,6 +357,7 @@ class NativeProcessingAudioSink(
         activeDelegate.getSkipSilenceEnabled()
 
     override fun setAudioAttributes(audioAttributes: AudioAttributes) {
+        usbOutput?.setAttributes(audioAttributes.audioAttributesV21.audioAttributes)
         enhancedDelegate.setAudioAttributes(audioAttributes)
         fallbackDelegate.setAudioAttributes(audioAttributes)
     }
@@ -365,6 +376,7 @@ class NativeProcessingAudioSink(
     }
 
     override fun setPreferredDevice(audioDeviceInfo: AudioDeviceInfo?) {
+        usbOutput?.setDevice(audioDeviceInfo)
         enhancedDelegate.setPreferredDevice(audioDeviceInfo)
         fallbackDelegate.setPreferredDevice(audioDeviceInfo)
     }
@@ -380,7 +392,32 @@ class NativeProcessingAudioSink(
 
     /** Actual rate the sink configured, 0 when unresolved. */
     fun currentOutputSampleRateHz(): Int =
-        runCatching { processor.nativeOutputSampleRate }.getOrDefault(0)
+        if (processingActive) processedFormat?.sampleRate ?: 0 else configuredFormat?.sampleRate ?: 0
+
+    fun setBitPerfectRequested(enabled: Boolean) {
+        bitPerfectRequested = enabled
+        usbOutput?.setEnabled(enabled)
+    }
+
+    fun isPlatformBitPerfectConfigured(): Boolean = usbOutput?.isConfigured() == true
+
+    private fun configureUsbOutput(format: Format, encoding: Int, channels: IntArray?) {
+        if (format.sampleMimeType != MimeTypes.AUDIO_RAW || format.sampleRate <= 0) {
+            usbOutput?.setFormat(null)
+            return
+        }
+        val count = channels?.size ?: format.channelCount
+        val mask = when (count) {
+            1 -> android.media.AudioFormat.CHANNEL_OUT_MONO
+            2 -> android.media.AudioFormat.CHANNEL_OUT_STEREO
+            else -> { usbOutput?.setFormat(null); return }
+        }
+        val pcm = runCatching {
+            android.media.AudioFormat.Builder().setSampleRate(format.sampleRate)
+                .setEncoding(encoding).setChannelMask(mask).build()
+        }.getOrNull()
+        usbOutput?.setFormat(pcm)
+    }
 
     override fun setOutputStreamOffsetUs(outputStreamOffsetUs: Long) {
         enhancedDelegate.setOutputStreamOffsetUs(outputStreamOffsetUs)
@@ -442,6 +479,7 @@ class NativeProcessingAudioSink(
     }
 
     override fun reset() {
+        usbOutput?.setFormat(null)
         clearPending()
         clearEndOfStream()
         configuredFormat = null
@@ -458,6 +496,7 @@ class NativeProcessingAudioSink(
     }
 
     override fun release() {
+        usbOutput?.setFormat(null)
         clearPending()
         clearEndOfStream()
         processedFormat = null
@@ -498,6 +537,7 @@ class NativeProcessingAudioSink(
             fallbackDelegate.configure(floatFormat, 0, configuredOutputChannels)
             activeDelegate = fallbackDelegate
             processingActive = true
+            configureUsbOutput(floatFormat, C.ENCODING_PCM_16BIT, configuredOutputChannels)
             notifyPlatformEffectsRequired(false)
             if (playing) fallbackDelegate.play()
             Log.w(TAG, "Recovered with native Float32 DSP and PCM16 AudioTrack output")
@@ -529,6 +569,7 @@ class NativeProcessingAudioSink(
             )
             activeDelegate = fallbackDelegate
             notifyPlatformEffectsRequired(true)
+            configureUsbOutput(format, C.ENCODING_PCM_16BIT, configuredOutputChannels)
             if (playing) fallbackDelegate.play()
             true
         } catch (fallbackError: Exception) {

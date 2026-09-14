@@ -7,12 +7,8 @@ import com.lastwave.app.R
 /**
  * Verified USB-DAC signal-path model.
  *
- * Stock Android exposes no public exclusive-mode PCM API to Media3 apps, so
- * LastWave never claims an "exclusive" path it cannot prove. Instead every
- * condition that defines bit-perfect delivery is measured individually —
- * source rate, app resampler, DSP bypass, gain staging, platform mixer rate
- * and USB route — and the BIT-PERFECT badge is shown only when all of them
- * pass. The dialog names the first failing check (label + detail).
+ * A matching nominal mixer rate does not prove bit-perfect output. USB mixer
+ * configuration and actual routing must be distinguished from device preference.
  */
 
 /** A USB audio peripheral visible to the platform mixer. */
@@ -55,6 +51,7 @@ data class SignalPathInput(
     val driftPpm: Double?,
     val glitchCount: Long,
     val isPlaying: Boolean,
+    val platformBitPerfectConfigured: Boolean = false,
 )
 
 /**
@@ -244,13 +241,16 @@ fun evaluateSignalPath(i: SignalPathInput): SignalPathReport {
 
     // 7 — Platform mixer (AudioFlinger resamples when rates differ).
     val plat = i.platformMixerRateHz.takeIf { it > 0 }
-    if (app != null && plat != null) {
+    if (i.platformBitPerfectConfigured) {
+        checks += PathCheck(R.string.signal_label_mixer,
+            R.string.signal_detail_bit_perfect_configured, passed = true)
+    } else if (app != null && plat != null) {
         if (plat == app) {
             checks += PathCheck(
                 R.string.signal_label_mixer,
-                R.string.signal_detail_mixer_ok,
+                R.string.signal_detail_bit_perfect_unavailable,
                 listOf(plat),
-                passed = true,
+                passed = false,
             )
         } else {
             checks += PathCheck(
@@ -276,12 +276,6 @@ fun evaluateSignalPath(i: SignalPathInput): SignalPathReport {
             R.string.signal_detail_no_dac,
             passed = false,
         )
-        !dac.usbPermissionGranted && dac.hasUsbPeripheral ->
-            checks += PathCheck(
-                R.string.signal_label_output,
-                R.string.signal_detail_usb_perm,
-                passed = false,
-            )
         !i.routedToDac -> checks += PathCheck(
             R.string.signal_label_output,
             R.string.signal_detail_not_routed,
@@ -300,20 +294,21 @@ fun evaluateSignalPath(i: SignalPathInput): SignalPathReport {
                 R.string.signal_label_output,
                 R.string.signal_detail_usb_ok_rejects,
                 listOf(dac.name, app),
-                passed = true,
+                passed = false,
             )
         else -> checks += PathCheck(
             R.string.signal_label_output,
             R.string.signal_detail_usb_ok_plain,
             listOf(dac.name),
-            passed = true,
+            passed = false,
         )
     }
 
-    val firstFailure = checks.firstOrNull { !it.passed }
+    checks += PathCheck(R.string.signal_label_output,
+        R.string.signal_detail_route_unverified, passed = false)
     return SignalPathReport(
         checks = checks,
-        bitPerfect = firstFailure == null,
+        bitPerfect = checks.all { it.passed },
         sourceLabel = i.sourceLabel,
         sourceRateHz = src,
         appRateHz = app ?: 0,

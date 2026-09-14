@@ -660,7 +660,9 @@ class MusicPlayer @Inject constructor(
                     fallbackDelegate = fallbackSink,
                     processor = NativePcmAudioProcessor(engine),
                     onPlatformEffectsRequired = effects::setFallbackRequired,
+                    usbOutput = if (handleAudioFocus) UsbBitPerfectOutput(audioManager) else null,
                 ).also { sink ->
+                    sink.setBitPerfectRequested(bitPerfectEnabled)
                     audioSinks.add(sink)
                     // A sink built after routing was requested (e.g. crossfade
                     // player) must join the same DAC route immediately.
@@ -972,6 +974,8 @@ class MusicPlayer @Inject constructor(
             ensureForegroundService()
             cancelCrossfade()
             losslessBypassMediaIds.clear()
+            errorRetryCount = 0
+            retryMediaId = null
             if (playerDelegate.isInitialized()) {
                 player.stop()
                 player.clearMediaItems()
@@ -1032,12 +1036,18 @@ class MusicPlayer @Inject constructor(
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (error: Throwable) {
+                currentCoroutineContext().ensureActive()
+                if (generation != playRequestGeneration.get()) return@launch
                 logResolutionFailure(selectedTrack, "resolve-before-prepare", 0, error)
                 if (selectedTrack.mediaIdKey() !in losslessBypassMediaIds) {
                     losslessBypassMediaIds += selectedTrack.mediaIdKey()
-                    val ytFallback = runCatching {
+                    val ytFallback = try {
                         resolveYoutubeTrackAudioStream(selectedTrack, selectedTrack.videoId)
-                    }.getOrNull()
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (_: Exception) {
+                        null
+                    }
                     if (ytFallback != null && generation == playRequestGeneration.get()) {
                         withContext(Dispatchers.Main.immediate) {
                             if (generation != playRequestGeneration.get()) return@withContext
@@ -1433,6 +1443,7 @@ class MusicPlayer @Inject constructor(
         }
         routedDacDeviceId = device?.id
         audioSinks.forEach { sink ->
+            sink.setBitPerfectRequested(bitPerfectEnabled)
             runCatching { sink.setPreferredDevice(device) }
             runCatching { sink.setOutputSampleRateOverride(sourceRateHz?.takeIf { device != null }) }
         }
@@ -1523,6 +1534,7 @@ class MusicPlayer @Inject constructor(
                 isLossless = snapshot.isLossless,
                 appOutputRateHz = appRateHz,
                 platformMixerRateHz = platformRateHz,
+                platformBitPerfectConfigured = audioSinks.any { it.isPlatformBitPerfectConfigured() },
                 dspBypassEnabled = bitPerfectEnabled,
                 crossfadeMixing = outgoingPlayer != null,
                 speed = speed,
@@ -2678,7 +2690,7 @@ class MusicPlayer @Inject constructor(
         }
 
         val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
-        val key = listOf(track.title, track.artist, track.album, videoId, allowLossless, misc.losslessQuality, excludedLosslessUrls, allowLocalDownloads)
+        val key = listOf(track.title, track.artist, track.album, videoId, allowLossless, misc.losslessQuality, misc.preferLosslessStreaming, excludedLosslessUrls, allowLocalDownloads)
         val now = SystemClock.elapsedRealtime()
         resolutionRequests.entries.removeIf { now - it.value.first > 60_000L }
         if (resolutionRequests.size >= 64) {
@@ -2754,7 +2766,7 @@ class MusicPlayer @Inject constructor(
             mimeType = losslessStream.mimeType,
             bitrateKbps = losslessStream.bitrateKbps,
             audioCodec = codec,
-            cacheKey = "lossless:${track.mediaIdKey()}:${losslessStream.formatId}",
+            cacheKey = "lossless:${track.mediaIdKey()}:${losslessStream.formatId}:${java.util.UUID.nameUUIDFromBytes(losslessStream.url.toByteArray(Charsets.UTF_8))}",
             isLossless = true,
             bitDepth = losslessStream.bitDepth.takeIf { it > 0 },
             samplingRateKHz = losslessStream.samplingRate.takeIf { it > 0 },

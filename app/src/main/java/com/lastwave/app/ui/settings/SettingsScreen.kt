@@ -767,9 +767,9 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 title = stringResource(R.string.settings_bit_perfect),
                                 subtitle = if (misc.isBitPerfectEnabled) {
-                                    "Bit-exact passthrough on all tracks (Lossless & YouTube) \u2022 All DSP bypassed"
+                                    stringResource(R.string.settings_bit_perfect_on_detail)
                                 } else {
-                                    "Bypass all DSP, EQ & audio processing for bit-exact reproduction"
+                                    stringResource(R.string.settings_bit_perfect_off_detail)
                                 },
                                 checked = misc.isBitPerfectEnabled,
                                 onCheckedChange = viewModel::setBitPerfectEnabled,

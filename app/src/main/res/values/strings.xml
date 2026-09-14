@@ -242,6 +242,11 @@
     <string name="signal_detail_sysvol_scaled">%1$d/%2$d — digital attenuation before DAC</string>
     <string name="signal_detail_unreadable">Unreadable</string>
     <string name="signal_detail_mixer_ok">No platform SRC — mixer at %1$d Hz</string>
+    <string name="signal_detail_bit_perfect_unavailable">Nominal mixer rate %1$d Hz — bit-perfect mode not configured</string>
+    <string name="signal_detail_bit_perfect_configured">Android accepted the bit-perfect USB output configuration</string>
+    <string name="signal_detail_route_unverified">DAC routing requested; actual output route is not verified</string>
+    <string name="settings_bit_perfect_on_detail">DSP bypassed; requests bit-perfect USB output on supported Android 14+ devices</string>
+    <string name="settings_bit_perfect_off_detail">Bypass DSP and request supported bit-perfect USB output</string>
     <string name="signal_detail_mixer_src">Resamples %1$d Hz → %2$d Hz</string>
     <string name="signal_detail_mixer_unreadable">Mixer rate unreadable</string>
     <string name="signal_detail_no_dac">No USB DAC connected</string>
