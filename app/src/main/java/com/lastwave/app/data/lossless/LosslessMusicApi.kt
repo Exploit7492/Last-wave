@@ -28,6 +28,7 @@ data class LosslessAudioStream(
     val formatId: Int = 6,
     val bitrateKbps: Int? = null,
     val trackId: Long = 0,
+    val durationSeconds: Int = 0,
 )
 
 @Serializable
@@ -292,6 +293,7 @@ class LosslessMusicApi @Inject constructor(
                 formatId = data.formatId,
                 bitrateKbps = bitrateKbps,
                 trackId = candidate.id,
+                durationSeconds = data.duration.takeIf { it > 0 } ?: candidate.duration,
             )
         } catch (e: CancellationException) {
             throw e

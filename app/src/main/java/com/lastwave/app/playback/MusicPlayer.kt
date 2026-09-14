@@ -268,6 +268,7 @@ class MusicPlayer @Inject constructor(
     private val playRequestGeneration = AtomicLong()
     private var queueEnrichmentJob: Job? = null
     private var preloadJob: Job? = null
+    private var currentTrackCacheJob: Job? = null
     private val resolutionRequests = ConcurrentHashMap<List<Any?>, Pair<Long, Deferred<ResolvedStream>>>()
     private var discoverQueueLoadJob: Job? = null
     private var discoverQueueActive = false
@@ -533,6 +534,7 @@ class MusicPlayer @Inject constructor(
                                 publishResolvedQuality(stream)
                                 applyDacRoutingFor(dacRateFor(stream))
                                 logStreamEvent("player-retry", stream, retry = retry)
+                                cacheCurrentTrackStream(stream)
                                 player.replaceMediaItem(failedIndex, updated.toMediaItem(stream))
                                 player.seekTo(failedIndex, currentPos)
                                 player.prepare()
@@ -1015,6 +1017,7 @@ class MusicPlayer @Inject constructor(
                         publishResolvedQuality(it)
                         applyDacRoutingFor(dacRateFor(it))
                         logStreamEvent("player-prepare", it, retry = 0)
+                        cacheCurrentTrackStream(it)
                     }
                     if (selectedTrack.playbackUrl != null) {
                         applicationScope.launch(Dispatchers.IO) { publishLocalTrackQuality(selectedTrack) }
@@ -1053,6 +1056,7 @@ class MusicPlayer @Inject constructor(
                             if (generation != playRequestGeneration.get()) return@withContext
                             registerPreparedStream(ytFallback)
                             publishResolvedQuality(ytFallback)
+                            cacheCurrentTrackStream(ytFallback)
                             val mediaItems = tracks.mapIndexed { index, track ->
                                 track.toMediaItem(if (index == selectedIndex) ytFallback else null)
                             }
@@ -1695,6 +1699,7 @@ class MusicPlayer @Inject constructor(
                     publishResolvedQuality(resolved)
                     applyDacRoutingFor(dacRateFor(resolved))
                     logStreamEvent("queue-prepare", resolved, retry = 0)
+                    cacheCurrentTrackStream(resolved)
                     player.replaceMediaItem(index, track.toMediaItem(resolved))
                     player.seekToDefaultPosition(index)
                     player.prepare()
@@ -1731,6 +1736,8 @@ class MusicPlayer @Inject constructor(
         playRequest = null
         preloadJob?.cancel()
         preloadJob = null
+        currentTrackCacheJob?.cancel()
+        currentTrackCacheJob = null
         unavailableSkipJob?.cancel()
         unavailableSkipJob = null
     }
@@ -2075,6 +2082,89 @@ class MusicPlayer @Inject constructor(
         }
     }
 
+    /**
+     * Progressively caches the current stream ahead of playback under one
+     * stable [ResolvedStream.cacheKey].
+     *
+     * Startup stays streaming-immediate: playback is prepared/started first
+     * and this job begins only after [CURRENT_TRACK_CACHE_START_DELAY_MS],
+     * then fills bounded [CURRENT_TRACK_CACHE_CHUNK_BYTES] windows with
+     * [CURRENT_TRACK_CACHE_CHUNK_DELAY_MS] yields so it never competes as a
+     * full-track predownload. Playback reads go through the same
+     * CacheDataSource key (see [createPlayer]'s ResolvingDataSource), so
+     * backward seeks hit ranges ExoPlayer already buffered and forward seeks
+     * increasingly hit progressively cached ranges locally. YouTube fallback
+     * resolution/playback is untouched; this job only adds cache.
+     */
+    private fun cacheCurrentTrackStream(stream: ResolvedStream?) {
+        currentTrackCacheJob?.cancel()
+        if (stream == null) return
+        val uri = Uri.parse(stream.url)
+        if (uri.scheme !in setOf("http", "https")) return
+        val cacheKey = stream.cacheKey
+        val requestHeaders = stream.requestHeaders
+        currentTrackCacheJob = applicationScope.launch(Dispatchers.IO) {
+            // Let ExoPlayer open the stream and buffer the opening window
+            // first; background caching must never delay audibility.
+            delay(CURRENT_TRACK_CACHE_START_DELAY_MS)
+            currentCoroutineContext().ensureActive()
+            var offset = 0L
+            while (isActive) {
+                currentCoroutineContext().ensureActive()
+                // Skip windows ExoPlayer already cached while playing so we
+                // extend ahead of playback instead of re-downloading it.
+                var skippedWindows = 0
+                while (isActive && skippedWindows < CURRENT_TRACK_CACHE_MAX_SKIP_WINDOWS &&
+                    runCatching { mediaCache.isCached(cacheKey, offset, CURRENT_TRACK_CACHE_CHUNK_BYTES) }.getOrDefault(false)
+                ) {
+                    offset += CURRENT_TRACK_CACHE_CHUNK_BYTES
+                    skippedWindows++
+                    if (offset >= CURRENT_TRACK_CACHE_MAX_BYTES) return@launch
+                }
+                if (offset >= CURRENT_TRACK_CACHE_MAX_BYTES) return@launch
+                currentCoroutineContext().ensureActive()
+                val dataSpec = DataSpec.Builder()
+                    .setUri(uri)
+                    .setPosition(offset)
+                    .setLength(CURRENT_TRACK_CACHE_CHUNK_BYTES)
+                    .setKey(cacheKey)
+                    .build()
+                    .withRequestHeaders(requestHeaders)
+                try {
+                    cacheSingleChunk(dataSpec)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                    // Upstream range failure (e.g. rotated signed URL) must
+                    // never break playback; ExoPlayer keeps streaming and the
+                    // next resolve restarts this job with the same stable key.
+                    break
+                }
+                offset += CURRENT_TRACK_CACHE_CHUNK_BYTES
+                if (offset >= CURRENT_TRACK_CACHE_MAX_BYTES) break
+                delay(CURRENT_TRACK_CACHE_CHUNK_DELAY_MS)
+            }
+        }
+    }
+
+    /** Caches one bounded [dataSpec] window; cancellable via the parent job. */
+    private suspend fun cacheSingleChunk(dataSpec: DataSpec) {
+        val cacheWriter = CacheWriter(
+            cacheDataSourceFactory.createDataSource(),
+            dataSpec,
+            null,
+            null,
+        )
+        val cancellationHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+            if (cause is CancellationException) cacheWriter.cancel()
+        }
+        try {
+            cacheWriter.cache()
+        } finally {
+            cancellationHandle?.dispose()
+        }
+    }
+
     /** Keeps a Discover-started queue supplied before its loaded tail is reached. */
     private fun extendDiscoverQueueIfNeeded(currentIndex: Int) {
         if (!discoverQueueActive || discoverQueueLoadJob?.isActive == true) return
@@ -2405,6 +2495,7 @@ class MusicPlayer @Inject constructor(
         val bitDepth: Int? = null,
         val samplingRateKHz: Double? = null,
         val youtubeCandidate: YouTubeAudioStream? = null,
+        val durationMs: Long? = null,
     )
 
     private fun isNetworkException(error: Throwable): Boolean {
@@ -2761,12 +2852,18 @@ class MusicPlayer @Inject constructor(
             losslessStream.formatId == LosslessMusicApi.QUALITY_MP3_320 -> "MP3 320k"
             else -> "LOSSLESS"
         }
+        // One stable CacheDataSource key per track + quality (no per-URL hash).
+        // Amazon FLAC URLs are signed and rotate; keying by URL fragments the
+        // disk cache so backward/forward seeks can never hit locally cached
+        // ranges. Playback reads (via ResolvingDataSource customCacheKey) and
+        // the progressive current-stream cacher below share this key, so
+        // cached ranges are served locally across seeks and URL refreshes.
         return ResolvedStream(
             url = losslessStream.url,
             mimeType = losslessStream.mimeType,
             bitrateKbps = losslessStream.bitrateKbps,
             audioCodec = codec,
-            cacheKey = "lossless:${track.mediaIdKey()}:${losslessStream.formatId}:${java.util.UUID.nameUUIDFromBytes(losslessStream.url.toByteArray(Charsets.UTF_8))}",
+            cacheKey = "lossless:${track.mediaIdKey()}:${losslessStream.formatId}",
             isLossless = true,
             bitDepth = losslessStream.bitDepth.takeIf { it > 0 },
             samplingRateKHz = losslessStream.samplingRate.takeIf { it > 0 },
@@ -3240,6 +3337,14 @@ class MusicPlayer @Inject constructor(
         const val MEDIA_STREAM_CACHE_BYTES = 64L * 1024 * 1024
         const val NEXT_TRACK_PREFETCH_BYTES = 1L * 1024 * 1024
         const val NEXT_TRACK_PREFETCH_DELAY_MS = 500L
+        /** Delayed start keeps current-track caching off the startup path. */
+        const val CURRENT_TRACK_CACHE_START_DELAY_MS = 2_000L
+        /** Bounded windows: progressive ahead-cache, never a full predownload. */
+        const val CURRENT_TRACK_CACHE_CHUNK_BYTES = 2L * 1024 * 1024
+        const val CURRENT_TRACK_CACHE_CHUNK_DELAY_MS = 500L
+        /** Safety cap so one hi-res FLAC cannot fill the whole stream cache. */
+        const val CURRENT_TRACK_CACHE_MAX_BYTES = 48L * 1024 * 1024
+        const val CURRENT_TRACK_CACHE_MAX_SKIP_WINDOWS = 64
         const val MAX_PREPARED_STREAMS = 256
         const val RESOLVED_URL_EXPIRY_MARGIN_MS = 2 * 60 * 1000L
         val PERMANENT_PLAYBACK_ERROR_CODES = setOf(
