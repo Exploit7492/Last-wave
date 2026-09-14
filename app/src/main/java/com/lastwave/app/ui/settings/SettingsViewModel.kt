@@ -522,6 +522,91 @@ class SettingsViewModel @Inject constructor(
 
     fun dismissToast() = _uiState.update { it.copy(toastMessage = null) }
 
+    // ── Diagnostics ──
+
+    /** Builds a troubleshooting report (app/device info, notification-listener
+     *  grant, widget snapshot + placed-widget count, and this process's own
+     *  logcat — readable without any permission) and opens the system share
+     *  sheet for it via the existing FileProvider export path. Runs off the
+     *  main thread; failures surface as a toast through [launchSettingsAction]. */
+    fun exportDiagnostics() {
+        launchSettingsAction("export diagnostics") {
+            val report = withContext(Dispatchers.IO) { buildDiagnosticsReport() }
+            val filename = "lastwave-diagnostics-${System.currentTimeMillis()}.txt"
+            fileExportHelper.shareFile(filename, report, "text/plain")
+            _uiState.update { it.copy(toastMessage = "Diagnostics ready to share") }
+        }
+    }
+
+    private suspend fun buildDiagnosticsReport(): String = withContext(Dispatchers.IO) {
+        val sb = StringBuilder()
+        sb.appendLine("LastWave diagnostics")
+        sb.appendLine("time=${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())}")
+        val versionName = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: "unknown"
+        val versionCode = runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toString()
+            } else {
+                @Suppress("DEPRECATION") context.packageManager.getPackageInfo(context.packageName, 0).versionCode.toString()
+            }
+        }.getOrNull() ?: "unknown"
+        sb.appendLine("app=${context.packageName} version=$versionName ($versionCode)")
+        sb.appendLine("device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} sdk=${android.os.Build.VERSION.SDK_INT}")
+        val hasNotificationAccess = runCatching {
+            androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(context)
+                .contains(context.packageName)
+        }.getOrDefault(false)
+        sb.appendLine("notificationListenerAccess=$hasNotificationAccess")
+        val snapshot = runCatching { com.lastwave.app.widget.NowPlayingWidgetSnapshot.read(context) }.getOrNull()
+        if (snapshot == null) {
+            sb.appendLine("widgetSnapshot=<unreadable>")
+        } else {
+            val artExists = snapshot.artPath?.let { java.io.File(it).exists() } ?: false
+            sb.appendLine("widgetSnapshot: hasSession=${snapshot.hasSession} isPlaying=${snapshot.isPlaying}")
+            sb.appendLine("  title=${snapshot.title} artist=${snapshot.artist} album=${snapshot.album}")
+            sb.appendLine("  sourceApp=${snapshot.sourceApp} sourcePackage=${snapshot.sourcePackage}")
+            sb.appendLine("  artPath=${snapshot.artPath} artExists=$artExists")
+        }
+        val placedWidgets = runCatching {
+            androidx.glance.appwidget.GlanceAppWidgetManager(context)
+                .getGlanceIds(com.lastwave.app.widget.NowPlayingWidget::class.java).size
+        }.getOrNull()
+        sb.appendLine("placedGlanceWidgets=${placedWidgets ?: "<lookup failed>"}")
+        sb.appendLine("---- logcat (this process) ----")
+        sb.append(readOwnLogcat())
+        sb.appendLine("---- end ----")
+        sb.toString()
+    }
+
+    /** Dumps this process's logcat ring buffer. An app may always read its
+     *  own logs without any permission; capped to the newest lines so the
+     *  share sheet stays responsive. Never throws — failures become a
+     *  one-line note. */
+    private fun readOwnLogcat(): String = runCatching {
+        val pid = android.os.Process.myPid().toString()
+        val process = ProcessBuilder("logcat", "-d", "-v", "threadtime", "--pid", pid)
+            .redirectErrorStream(true)
+            .start()
+        val lines = ArrayDeque<String>()
+        process.inputStream.bufferedReader(Charsets.UTF_8).useLines { seq ->
+            seq.forEach { line ->
+                lines.addLast(line)
+                if (lines.size > LOGCAT_MAX_LINES) lines.removeFirst()
+            }
+        }
+        if (!process.waitFor(LOGCAT_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)) {
+            runCatching { process.destroy() }
+        }
+        lines.joinToString("\n").ifBlank { "(empty log buffer)" }
+    }.getOrElse { "(logcat unavailable: ${it.message})" }
+
+    private companion object {
+        const val LOGCAT_MAX_LINES = 3000
+        const val LOGCAT_TIMEOUT_SEC = 8L
+    }
+
     // ── Scrobbler ──
 
     /** The master toggle only turns scrobbling on if a session key already
