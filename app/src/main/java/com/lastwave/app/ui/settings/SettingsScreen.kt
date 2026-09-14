@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BubbleChart
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Waves
@@ -71,6 +72,7 @@ import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.QueueMusic
@@ -92,6 +94,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -116,6 +119,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import com.lastwave.app.data.local.AppLanguage
+import com.lastwave.app.data.local.nativeDisplayName
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -235,6 +241,7 @@ fun SettingsScreen(
     onLoggedOut: () -> Unit = {},
     onOpenChooseApps: () -> Unit = {},
     onOpenDownloads: () -> Unit = {},
+    onOpenHomeSections: () -> Unit = {},
     onOpenExcludedSongs: () -> Unit = {},
     onOpenYouTubeImport: () -> Unit = {},
     onOpenYouTubeLogin: () -> Unit = {},
@@ -266,6 +273,8 @@ fun SettingsScreen(
     var showSyncPlaylistsSheet by remember { mutableStateOf(false) }
     var showYtLibraryVisibilitySheet by remember { mutableStateOf(false) }
     var showYtDisconnectConfirm by remember { mutableStateOf(false) }
+    var showLanguageDialog by remember { mutableStateOf(false) }
+    val currentLanguage = remember(misc.appLanguageTag) { AppLanguage.fromTag(misc.appLanguageTag) }
 
     // Sends the user to Android's own Notification Listener access screen
     // — the one permission this feature needs that the app can never grant
@@ -317,7 +326,7 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .adaptiveContentWidth(maxWidth = 760.dp),
         ) {
-        ExpressiveHeader(title = "Settings", onBack = onBack)
+        ExpressiveHeader(title = stringResource(R.string.settings), onBack = onBack)
 
         LazyColumn(
             contentPadding = PaddingValues(
@@ -339,7 +348,24 @@ fun SettingsScreen(
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionLabel("YouTube Music")
+                    SectionLabel(stringResource(R.string.settings_section_language))
+                    SettingsGroup(rowCount = 1) { _, position ->
+                        SettingsActionCard(
+                            icon = Icons.Filled.Language,
+                            iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                            iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            title = stringResource(R.string.settings_language_title),
+                            subtitle = currentLanguage.nativeDisplayName(),
+                            onClick = { showLanguageDialog = true },
+                            position = position,
+                        )
+                    }
+                }
+            }
+
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionLabel(stringResource(R.string.settings_section_youtube))
                     val ytConnected = ytConnection.isConnected
                     val syncSubtitle = when (val sync = ytSyncState) {
                         is com.lastwave.app.data.ytmusic.YtSyncState.Running ->
@@ -368,8 +394,8 @@ fun SettingsScreen(
                                     icon = Icons.Filled.CloudSync,
                                     iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                     iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    title = "Connect YouTube Music",
-                                    subtitle = "Sign in to see and sync every playlist",
+                                    title = stringResource(R.string.settings_connect_yt),
+                                    subtitle = stringResource(R.string.settings_connect_yt_sub),
                                     onClick = onOpenYouTubeLogin,
                                     position = position,
                                 )
@@ -378,7 +404,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.CloudSync,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Two-way Playlist Sync",
+                                title = stringResource(R.string.settings_yt_sync),
                                 subtitle = syncSubtitle,
                                 checked = ytConnected && ytSyncEnabled,
                                 onCheckedChange = viewModel::setYtSyncEnabled,
@@ -395,7 +421,7 @@ fun SettingsScreen(
                                     icon = Icons.Filled.FormatListBulleted,
                                     iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                     iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    title = "Select Playlists to Sync",
+                                    title = stringResource(R.string.settings_select_playlists),
                                     subtitle = syncCountText,
                                     onClick = { showSyncPlaylistsSheet = true },
                                     position = position,
@@ -422,7 +448,7 @@ fun SettingsScreen(
                                     icon = Icons.Filled.Visibility,
                                     iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                     iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    title = "YouTube Playlists Shown",
+                                    title = stringResource(R.string.settings_yt_shown),
                                     subtitle = visibilitySubtitle,
                                     onClick = { showYtLibraryVisibilitySheet = true },
                                     position = position,
@@ -432,8 +458,8 @@ fun SettingsScreen(
                                 icon = Icons.Filled.QueueMusic,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Make YouTube Playlists Local",
-                                subtitle = "Optional: browse and save local copies",
+                                title = stringResource(R.string.settings_make_local),
+                                subtitle = stringResource(R.string.settings_make_local_sub),
                                 onClick = onOpenYouTubeImport,
                                 position = position,
                             )
@@ -442,7 +468,7 @@ fun SettingsScreen(
                                     icon = Icons.Filled.History,
                                     iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                     iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    title = "Sync Playback to YouTube Music History",
+                                    title = stringResource(R.string.settings_yt_history),
                                     subtitle = if (ytHistorySyncEnabled) {
                                         "On • songs you listen to in LastWave, including lossless & downloads, appear in your YouTube Music history"
                                     } else {
@@ -461,7 +487,26 @@ fun SettingsScreen(
             item {
                 val mb = (downloadTotalBytes ?: 0L).toDouble() / (1024 * 1024)
                 val formattedStorage = if (mb >= 1000) "%.1f GB".format(mb / 1024) else "%.1f MB".format(mb)
-                val downloadsSubtitle = if (downloadCount > 0) "$downloadCount song(s) \u2022 $formattedStorage \u2022 Music/LastWave" else "No offline songs downloaded"
+                val downloadsSubtitle = if (downloadCount > 0) {
+                    if (misc.downloadStructure == com.lastwave.app.data.local.DownloadFolderStructure.FLAT) {
+                        stringResource(
+                            R.string.settings_downloads_sub,
+                            downloadCount,
+                            formattedStorage,
+                            misc.downloadFolder,
+                        )
+                    } else {
+                        stringResource(
+                            R.string.settings_downloads_sub_structured,
+                            downloadCount,
+                            formattedStorage,
+                            misc.downloadFolder,
+                            stringResource(misc.downloadStructure.shortLabelRes),
+                        )
+                    }
+                } else {
+                    stringResource(R.string.settings_downloads_empty)
+                }
 
                 Card(
                     onClick = onOpenDownloads,
@@ -491,7 +536,7 @@ fun SettingsScreen(
                         Spacer(Modifier.width(16.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
-                                "Downloads & Offline Music",
+                                stringResource(R.string.settings_downloads_title),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -515,15 +560,15 @@ fun SettingsScreen(
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionLabel("Appearance")
-                    SettingsGroup(rowCount = 4) { index, position ->
+                    SectionLabel(stringResource(R.string.settings_section_appearance))
+                    SettingsGroup(rowCount = 5) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.Contrast,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                title = "AMOLED Mode",
-                                subtitle = "Pure black background",
+                                title = stringResource(R.string.settings_amoled),
+                                subtitle = stringResource(R.string.settings_amoled_sub),
                                 checked = theme?.amoled ?: false,
                                 onCheckedChange = viewModel::setAmoled,
                                 position = position,
@@ -532,8 +577,8 @@ fun SettingsScreen(
                                 icon = Icons.Filled.Palette,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Dynamic Color",
-                                subtitle = "Use your wallpaper's colors",
+                                title = stringResource(R.string.settings_dynamic_color),
+                                subtitle = stringResource(R.string.settings_dynamic_color_sub),
                                 checked = theme?.mode == AccentMode.DYNAMIC,
                                 onCheckedChange = { enabled ->
                                     viewModel.setAccentMode(if (enabled) AccentMode.DYNAMIC else AccentMode.MANUAL)
@@ -544,8 +589,8 @@ fun SettingsScreen(
                                 icon = Icons.Filled.Album,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                title = "Dynamic Now Playing",
-                                subtitle = "Match player artwork",
+                                title = stringResource(R.string.settings_dynamic_now_playing),
+                                subtitle = stringResource(R.string.settings_dynamic_now_playing_sub),
                                 checked = misc.dynamicNowPlayingEnabled,
                                 onCheckedChange = viewModel::setDynamicNowPlaying,
                                 position = position,
@@ -554,10 +599,23 @@ fun SettingsScreen(
                                 icon = Icons.Filled.TextFields,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Use Application Font",
-                                subtitle = "A custom look across the whole app",
+                                title = stringResource(R.string.settings_app_font),
+                                subtitle = stringResource(R.string.settings_app_font_sub),
                                 checked = misc.useCustomFont,
                                 onCheckedChange = viewModel::setUseCustomFont,
+                                position = position,
+                            )
+                            4 -> SettingsActionCard(
+                                icon = Icons.Filled.Dashboard,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                title = stringResource(R.string.settings_home_sections),
+                                subtitle = run {
+                                    val total = com.lastwave.app.data.local.HomeSection.entries.size
+                                    val visible = total - misc.hiddenHomeSections.size
+                                    stringResource(R.string.home_sections_visible, visible, total)
+                                },
+                                onClick = onOpenHomeSections,
                                 position = position,
                             )
                         }
@@ -567,7 +625,7 @@ fun SettingsScreen(
 
             item {
                 Column {
-                    SectionLabel("Accent")
+                    SectionLabel(stringResource(R.string.settings_section_accent))
                     Spacer(Modifier.height(10.dp))
                     Card(
                         shape = CardOuterShape,
@@ -588,15 +646,15 @@ fun SettingsScreen(
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionLabel("Experimental")
+                    SectionLabel(stringResource(R.string.settings_section_experimental))
                     SettingsGroup(rowCount = 5) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.BubbleChart,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Liquid Glass",
-                                subtitle = "iOS-style translucent materials across the app",
+                                title = stringResource(R.string.settings_liquid_glass),
+                                subtitle = stringResource(R.string.settings_liquid_glass_sub),
                                 checked = theme?.liquidGlass ?: false,
                                 onCheckedChange = viewModel::setLiquidGlass,
                                 position = position,
@@ -605,7 +663,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.Lyrics,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                title = "Lyrics Animation",
+                                title = stringResource(R.string.settings_lyrics_animation),
                                 subtitle = if (misc.lyricsUiVersion == LyricsUiVersion.MODERN) {
                                     "New UI (Modern)"
                                 } else {
@@ -618,7 +676,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.GraphicEq,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Equalizer",
+                                title = stringResource(R.string.settings_equalizer),
                                 subtitle = if (misc.isBitPerfectEnabled && eq.enabled) {
                                     "On \u2022 ${eq.presetName} (Bypassed by Bit-Perfect Mode)"
                                 } else if (eq.enabled) {
@@ -633,7 +691,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.Waves,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Wavy Seekbar",
+                                title = stringResource(R.string.settings_wavy_seekbar),
                                 subtitle = if (misc.wavySeekbarEnabled) {
                                     "Multi-layer fluid wavy progress slider"
                                 } else {
@@ -647,7 +705,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.AutoAwesome,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Studio Master Clarity",
+                                title = stringResource(R.string.settings_studio_clarity),
                                 subtitle = if (misc.isStudioMasterClarityEnabled) {
                                     "Crystal-clear open sound \u2022 airy detail \u2022 deep clean separation"
                                 } else {
@@ -664,7 +722,7 @@ fun SettingsScreen(
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionLabel("Audio & Streaming")
+                    SectionLabel(stringResource(R.string.settings_section_audio))
                     val qualitySubtitle = when (misc.losslessQuality) {
                         27 -> "Max (Up to 24-bit / 192 kHz)"
                         7 -> "Hi-Res (24-bit / 96 kHz)"
@@ -689,7 +747,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.HighQuality,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Streaming Quality",
+                                title = stringResource(R.string.settings_streaming_quality),
                                 subtitle = if (misc.losslessQuality == -1) "YouTube Music • Native stream" else "$qualitySubtitle • YouTube Music fallback",
                                 onClick = { showQualityDialog = true },
                                 position = position,
@@ -698,7 +756,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.CloudDownload,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Download Quality",
+                                title = stringResource(R.string.settings_download_quality),
                                 subtitle = "$downloadQualitySubtitle \u2022 Lossless & YouTube",
                                 onClick = { showDownloadQualityDialog = true },
                                 position = position,
@@ -707,7 +765,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.Tune,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Bit-Perfect Mode (Direct Passthrough)",
+                                title = stringResource(R.string.settings_bit_perfect),
                                 subtitle = if (misc.isBitPerfectEnabled) {
                                     "Bit-exact passthrough on all tracks (Lossless & YouTube) \u2022 All DSP bypassed"
                                 } else {
@@ -721,7 +779,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.GraphicEq,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                title = "Crossfade",
+                                title = stringResource(R.string.settings_crossfade),
                                 subtitle = if (misc.crossfadeEnabled && misc.isBitPerfectEnabled) {
                                     "Paused while Bit-Perfect is enabled"
                                 } else if (misc.crossfadeEnabled) {
@@ -744,7 +802,7 @@ fun SettingsScreen(
                                     icon = Icons.Filled.Lyrics,
                                     iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                     iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    title = "Download Synced Lyrics",
+                                    title = stringResource(R.string.settings_download_lyrics),
                                     subtitle = if (misc.downloadLyrics) {
                                         "Save .lrc companion files & embed lyrics in downloads"
                                     } else {
@@ -760,7 +818,7 @@ fun SettingsScreen(
                                     icon = Icons.Filled.Lyrics,
                                     iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                     iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    title = "Download Synced Lyrics",
+                                    title = stringResource(R.string.settings_download_lyrics),
                                     subtitle = if (misc.downloadLyrics) {
                                         "Save .lrc companion files & embed lyrics in downloads"
                                     } else {
@@ -776,7 +834,7 @@ fun SettingsScreen(
                                     icon = Icons.Filled.Bolt,
                                     iconContainer = if (isIgnored) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
                                     iconTint = if (isIgnored) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer,
-                                    title = "Background Playback (Battery Optimization)",
+                                    title = stringResource(R.string.settings_battery_title),
                                     subtitle = if (isIgnored) {
                                         "Unrestricted \u2022 Protected against Samsung & OEM background killing"
                                     } else {
@@ -792,7 +850,7 @@ fun SettingsScreen(
                                     icon = Icons.Filled.Bolt,
                                     iconContainer = if (isIgnored) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
                                     iconTint = if (isIgnored) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer,
-                                    title = "Background Playback (Battery Optimization)",
+                                    title = stringResource(R.string.settings_battery_title),
                                     subtitle = if (isIgnored) {
                                         "Unrestricted \u2022 Protected against Samsung & OEM background killing"
                                     } else {
@@ -810,14 +868,14 @@ fun SettingsScreen(
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionLabel("Library & Playlist Imports")
+                    SectionLabel(stringResource(R.string.settings_section_imports))
                     SettingsGroup(rowCount = 1) { _, position ->
                         SettingsActionCard(
                             icon = Icons.Filled.FileDownload,
                             iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                             iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                            title = "Import Playlist from File",
-                            subtitle = "CSV, TSV, M3U/M3U8, or TXT • uncertain tracks are skipped",
+                            title = stringResource(R.string.settings_import_file),
+                            subtitle = stringResource(R.string.settings_import_file_sub),
                             onClick = {
                                 runCatching {
                                     csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/csv", "audio/x-mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "*/*"))
@@ -831,14 +889,14 @@ fun SettingsScreen(
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionLabel("Scrobbler")
+                    SectionLabel(stringResource(R.string.settings_section_scrobbler))
                     SettingsGroup(rowCount = 4) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.GraphicEq,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Scrobble Music",
+                                title = stringResource(R.string.settings_scrobble),
                                 subtitle = if (scrobbler.enabled) "Watching ${scrobbler.selectedPackages.size} app(s)" else "Detect and submit plays from other apps",
                                 checked = scrobbler.enabled,
                                 onCheckedChange = { enabled ->
@@ -851,7 +909,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.Apps,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Choose apps",
+                                title = stringResource(R.string.settings_choose_apps),
                                 subtitle = if (scrobbler.selectedPackages.isEmpty()) "None selected yet" else "${scrobbler.selectedPackages.size} app(s) selected",
                                 onClick = onOpenChooseApps,
                                 position = position,
@@ -860,8 +918,8 @@ fun SettingsScreen(
                                 icon = Icons.Filled.NotificationsActive,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                title = "Submit Now Playing",
-                                subtitle = "Show what's playing on your profile instantly",
+                                title = stringResource(R.string.settings_now_playing),
+                                subtitle = stringResource(R.string.settings_now_playing_sub),
                                 checked = scrobbler.submitNowPlaying,
                                 onCheckedChange = viewModel::setSubmitNowPlaying,
                                 position = position,
@@ -878,14 +936,14 @@ fun SettingsScreen(
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionLabel("Data Management")
+                    SectionLabel(stringResource(R.string.settings_section_data))
                     SettingsGroup(rowCount = 2) { index, position ->
                         when (index) {
                             0 -> SettingsActionCard(
                                 icon = Icons.Filled.RestartAlt,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Excluded Songs",
+                                title = stringResource(R.string.settings_excluded_songs),
                                 subtitle = "${state.recommendationExclusionCount} songs excluded",
                                 onClick = onOpenExcludedSongs,
                                 position = position,
@@ -894,8 +952,8 @@ fun SettingsScreen(
                                 icon = Icons.Filled.Delete,
                                 iconContainer = MaterialTheme.colorScheme.errorContainer,
                                 iconTint = MaterialTheme.colorScheme.onErrorContainer,
-                                title = "Clear All Saved Data",
-                                subtitle = "Wipes all local data",
+                                title = stringResource(R.string.settings_clear_all),
+                                subtitle = stringResource(R.string.settings_clear_all_sub),
                                 danger = true,
                                 onClick = viewModel::requestClearAllData,
                                 position = position,
@@ -907,15 +965,15 @@ fun SettingsScreen(
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionLabel("Backup & Restore")
+                    SectionLabel(stringResource(R.string.settings_section_backup))
                     SettingsGroup(rowCount = 2) { index, position ->
                         when (index) {
                             0 -> SettingsActionCard(
                                 icon = Icons.Filled.Backup,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Backup",
-                                subtitle = "Save all your data to a file",
+                                title = stringResource(R.string.settings_backup),
+                                subtitle = stringResource(R.string.settings_backup_sub),
                                 onClick = {
                                     runCatching { backupLauncher.launch("lastwave-backup-${System.currentTimeMillis()}.json") }
                                         .onFailure { viewModel.showToast("No file picker is available") }
@@ -926,8 +984,8 @@ fun SettingsScreen(
                                 icon = Icons.Filled.CloudDownload,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Restore",
-                                subtitle = "Load a backup or playlist JSON",
+                                title = stringResource(R.string.settings_restore),
+                                subtitle = stringResource(R.string.settings_restore_sub),
                                 onClick = {
                                     runCatching { restoreLauncher.launch(arrayOf("*/*")) }
                                         .onFailure { viewModel.showToast("No file picker is available") }
@@ -941,14 +999,14 @@ fun SettingsScreen(
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionLabel("About")
+                    SectionLabel(stringResource(R.string.settings_section_about))
                     SettingsGroup(rowCount = 3) { index, position ->
                         when (index) {
                             0 -> SettingsActionCard(
                                 icon = Icons.AutoMirrored.Filled.Send,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Updates & Support",
+                                title = stringResource(R.string.settings_updates_support),
                                 subtitle = "Join @clashprojects on Telegram",
                                 onClick = {
                                     if (!openTelegramChannel(context, "clashprojects")) {
@@ -961,7 +1019,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.AutoAwesome,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                title = "More From Us",
+                                title = stringResource(R.string.settings_more_from_us),
                                 subtitle = "Join @MaterialYouApp on Telegram",
                                 onClick = {
                                     if (!openTelegramChannel(context, "MaterialYouApp")) {
@@ -974,8 +1032,8 @@ fun SettingsScreen(
                                 icon = Icons.Filled.Code,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Export diagnostics",
-                                subtitle = "Share logs for troubleshooting",
+                                title = stringResource(R.string.settings_diagnostics),
+                                subtitle = stringResource(R.string.settings_diagnostics_sub),
                                 onClick = { viewModel.exportDiagnostics() },
                                 position = position,
                             )
@@ -1070,7 +1128,7 @@ fun SettingsScreen(
                         icon = Icons.Filled.Code,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                        title = "Source Code",
+                                title = stringResource(R.string.settings_source_code),
                         subtitle = "github.com/Clash-Projects/LastWave-native",
                         onClick = {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Clash-Projects/LastWave-native"))
@@ -1094,10 +1152,10 @@ fun SettingsScreen(
     if (state.showClearAllConfirm) {
         AlertDialog(
             onDismissRequest = viewModel::dismissClearAllConfirm,
-            title = { Text("Clear all data?") },
-            text = { Text("This removes your credentials, playlists, and cached data. This can't be undone.") },
-            confirmButton = { TextButton(onClick = { viewModel.confirmClearAllData(onLoggedOut) }) { Text("Clear Everything") } },
-            dismissButton = { TextButton(onClick = viewModel::dismissClearAllConfirm) { Text("Cancel") } },
+            title = { Text(stringResource(R.string.dialog_clear_all_title)) },
+            text = { Text(stringResource(R.string.dialog_clear_all_text)) },
+            confirmButton = { TextButton(onClick = { viewModel.confirmClearAllData(onLoggedOut) }) { Text(stringResource(R.string.dialog_clear_all_confirm)) } },
+            dismissButton = { TextButton(onClick = viewModel::dismissClearAllConfirm) { Text(stringResource(R.string.common_cancel)) } },
         )
     }
 
@@ -1105,16 +1163,16 @@ fun SettingsScreen(
     if (showYtDisconnectConfirm) {
         AlertDialog(
             onDismissRequest = { showYtDisconnectConfirm = false },
-            title = { Text("Disconnect YouTube Music?") },
-            text = { Text("Playlists already mirrored to your account stay there, but LastWave stops syncing and forgets the connection.") },
+            title = { Text(stringResource(R.string.dialog_disconnect_yt_title)) },
+            text = { Text(stringResource(R.string.dialog_disconnect_yt_text)) },
             confirmButton = {
                 TextButton(onClick = {
                     showYtDisconnectConfirm = false
                     viewModel.disconnectYouTube()
-                }) { Text("Disconnect") }
+                }) { Text(stringResource(R.string.common_disconnect)) }
             },
             dismissButton = {
-                TextButton(onClick = { showYtDisconnectConfirm = false }) { Text("Cancel") }
+                TextButton(onClick = { showYtDisconnectConfirm = false }) { Text(stringResource(R.string.common_cancel)) }
             },
         )
     }
@@ -1133,8 +1191,70 @@ fun SettingsScreen(
                     },
                 )
             },
-            confirmButton = { TextButton(onClick = { viewModel.confirmRestore(onBack) }) { Text(if (isPlaylistMirror) "Sync" else "Restore") } },
-            dismissButton = { TextButton(onClick = viewModel::dismissRestoreConfirm) { Text("Cancel") } },
+            confirmButton = { TextButton(onClick = { viewModel.confirmRestore(onBack) }) { Text(if (isPlaylistMirror) stringResource(R.string.common_sync) else stringResource(R.string.common_restore)) } },
+            dismissButton = { TextButton(onClick = viewModel::dismissRestoreConfirm) { Text(stringResource(R.string.common_cancel)) } },
+        )
+    }
+
+    // -- App language picker (Settings -> Language) --
+    if (showLanguageDialog) {
+        AlertDialog(
+            onDismissRequest = { showLanguageDialog = false },
+            title = { Text(stringResource(R.string.settings_language_dialog_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    AppLanguage.SELECTABLE.forEach { language ->
+                        val selected = language == currentLanguage
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable {
+                                    viewModel.setAppLanguage(language)
+                                    showLanguageDialog = false
+                                }
+                                .padding(horizontal = 8.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = selected,
+                                onClick = {
+                                    viewModel.setAppLanguage(language)
+                                    showLanguageDialog = false
+                                },
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    language.nativeDisplayName(),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                )
+                                if (language == AppLanguage.SYSTEM) {
+                                    Text(
+                                        stringResource(R.string.settings_language_system_sub),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            if (selected) {
+                                Icon(
+                                    Icons.Filled.Check,
+                                    contentDescription = stringResource(R.string.common_selected),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLanguageDialog = false }) {
+                    Text(stringResource(R.string.common_done))
+                }
+            },
         )
     }
 
@@ -1994,10 +2114,10 @@ private fun AccountCard(
     if (showLogoutConfirm) {
         AlertDialog(
             onDismissRequest = { showLogoutConfirm = false },
-            title = { Text("Log out from Last.fm?") },
-            text = { Text("Your playlists and cached data will be kept.") },
-            confirmButton = { TextButton(onClick = { showLogoutConfirm = false; onLogOut() }) { Text("Log Out") } },
-            dismissButton = { TextButton(onClick = { showLogoutConfirm = false }) { Text("Cancel") } },
+            title = { Text(stringResource(R.string.dialog_logout_title)) },
+            text = { Text(stringResource(R.string.dialog_logout_text)) },
+            confirmButton = { TextButton(onClick = { showLogoutConfirm = false; onLogOut() }) { Text(stringResource(R.string.common_log_out)) } },
+            dismissButton = { TextButton(onClick = { showLogoutConfirm = false }) { Text(stringResource(R.string.common_cancel)) } },
         )
     }
 }

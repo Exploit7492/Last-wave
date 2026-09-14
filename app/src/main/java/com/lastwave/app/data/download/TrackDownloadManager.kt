@@ -23,8 +23,10 @@ import com.lastwave.app.data.lyrics.LyricsResult
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.music.YouTubeMusicTrack
 import com.lastwave.app.data.lossless.LosslessMusicApi
+import com.lastwave.app.data.local.DownloadFolderStructure
 import com.lastwave.app.data.local.MiscSettings
 import com.lastwave.app.data.local.SettingsPreferences
+import com.lastwave.app.data.local.sanitizeDownloadFolderName
 import com.lastwave.app.data.artwork.ArtworkNormalizer
 import com.lastwave.app.data.artwork.ArtworkRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -132,6 +134,8 @@ class TrackDownloadManager @Inject constructor(
         const val EXTRA_DOWNLOAD_ARTIST = "download_artist"
         const val EXTRA_NAVIGATE_TO = "navigate_to"
         private const val PUBLIC_DIR_NAME = "LastWave"
+        /** Legacy default kept for reading files downloaded before a custom folder was chosen. */
+        private const val LEGACY_PUBLIC_DIR_NAME = "LastWave"
         private const val DOWNLOAD_BUFFER_SIZE = 512 * 1024 // 512 KB
         private const val PARALLEL_YOUTUBE_PARTS = 4
         private const val MIN_PARALLEL_DOWNLOAD_BYTES = 2L * 1024 * 1024
@@ -202,6 +206,76 @@ class TrackDownloadManager @Inject constructor(
     fun makeDownloadKey(title: String, artist: String): String =
         "${artist.trim().lowercase()}_${title.trim().lowercase()}"
 
+    /** Active download subfolder under Music/ (sanitized single segment). */
+    private suspend fun currentDownloadDirName(): String = runCatching {
+        sanitizeDownloadFolderName(settingsPreferences.settings.first().downloadFolder)
+    }.getOrDefault(PUBLIC_DIR_NAME)
+
+    /** All dirs to search for existing files: active folder first, then the
+     *  legacy default so tracks downloaded before a folder change still resolve. */
+    private fun downloadSearchDirs(preferred: String): List<File> {
+        val dirs = mutableListOf<File>()
+        dirs.add(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), preferred))
+        if (preferred != LEGACY_PUBLIC_DIR_NAME) {
+            dirs.add(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), LEGACY_PUBLIC_DIR_NAME))
+        }
+        return dirs
+    }
+
+    /** Strips featured/collaborating artists for folder names:
+     *  "A feat. B", "A, B", "A & B", "A x B" -> "A". */
+    private fun primaryArtistName(artist: String): String {
+        var name = artist.trim()
+        name = name.split(Regex("(?i)\\s+(feat\\.?|ft\\.?|featuring|with)\\s+.*$"))
+            .firstOrNull()?.trim().orEmpty().ifBlank { name }
+        name = name.split(',', ';', '&', '/', '、', '×')
+            .firstOrNull()?.trim().orEmpty().ifBlank { name }
+        name = name.split(Regex("(?i)\\s+x\\s+"))
+            .firstOrNull()?.trim().orEmpty().ifBlank { name }
+        return name.ifBlank { artist.trim() }
+    }
+
+    /**
+     * Relative subfolder under Music/<dir>/ for a track, "" = flat.
+     * Singles = missing/blank/"Singles" album (no release-type metadata exists
+     * to distinguish EPs, so Artist/Album and Artist/Album+Singles coincide).
+     */
+    private fun downloadSubpath(
+        artist: String,
+        albumArtist: String? = null,
+        album: String? = null,
+        year: String? = null,
+        structure: DownloadFolderStructure = DownloadFolderStructure.FLAT,
+        useAlbumArtist: Boolean = true,
+        primaryOnly: Boolean = true,
+    ): String {
+        if (structure == DownloadFolderStructure.FLAT) return ""
+        var folderArtist = (if (useAlbumArtist) albumArtist?.takeIf { it.isNotBlank() } else null)
+            ?: artist
+        if (primaryOnly) folderArtist = primaryArtistName(folderArtist)
+        folderArtist = sanitizeFilename(folderArtist.trim()).trim().ifBlank { "Unknown Artist" }
+        val rawAlbum = album?.trim().orEmpty()
+        val isSingle = rawAlbum.isBlank() || rawAlbum.equals("Singles", ignoreCase = true)
+        val albumSeg = sanitizeFilename(rawAlbum).trim().ifBlank { "Singles" }
+        val yearSeg = year?.filter { it.isDigit() }?.take(4)?.takeIf { it.length == 4 }
+        val yearAlbumSeg = if (yearSeg != null && !isSingle) "[$yearSeg] $albumSeg" else albumSeg
+        val segments = when (structure) {
+            DownloadFolderStructure.FLAT -> emptyList()
+            DownloadFolderStructure.ARTIST_ALBUM,
+            DownloadFolderStructure.ARTIST_ALBUM_SINGLES ->
+                if (isSingle) listOf(folderArtist, "Singles") else listOf(folderArtist, albumSeg)
+            DownloadFolderStructure.ARTIST_YEAR_ALBUM ->
+                if (isSingle) listOf(folderArtist, "Singles") else listOf(folderArtist, yearAlbumSeg)
+            DownloadFolderStructure.ALBUM_ONLY ->
+                listOf(if (isSingle) "Singles" else albumSeg)
+            DownloadFolderStructure.YEAR_ALBUM ->
+                listOf(if (isSingle) "Singles" else yearAlbumSeg)
+            DownloadFolderStructure.ARTIST_ALBUM_SINGLES_FLAT ->
+                if (isSingle) listOf(folderArtist) else listOf(folderArtist, albumSeg)
+        }
+        return segments.filter { it.isNotBlank() }.joinToString("/")
+    }
+
     fun isDownloading(title: String, artist: String): Boolean {
         val key = makeDownloadKey(title, artist)
         val progress = _downloads.value[key]
@@ -229,18 +303,19 @@ class TrackDownloadManager @Inject constructor(
             if (fileStillPresent) return@withContext true
         }
 
-        // Check if file already exists in public Music/LastWave directory
-        val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME)
-        if (publicDir.exists() && publicDir.isDirectory) {
-            val sanitizedBase = sanitizeFilename("${artist.trim()} - ${title.trim()}")
-            val candidateExtensions = listOf("flac", "m4a", "opus", "mp3", "webm")
-            if (candidateExtensions.any { ext ->
-                    val f = File(publicDir, "$sanitizedBase.$ext")
-                    f.exists() && f.length() > 0
-                }
-            ) {
-                return@withContext true
+        // Check if file already exists in the download directories (active folder + legacy default, incl. subfolders)
+        val dirName = currentDownloadDirName()
+        val candidateExtensions = listOf("flac", "m4a", "opus", "mp3", "webm")
+        val sanitizedBase = sanitizeFilename("${artist.trim()} - ${title.trim()}")
+        val candidateNames = candidateExtensions.map { "$sanitizedBase.$it" }.toSet()
+        if (downloadSearchDirs(dirName).any { publicDir ->
+                publicDir.exists() && publicDir.isDirectory &&
+                    publicDir.walkTopDown().maxDepth(6).any { f ->
+                        f.isFile && f.name in candidateNames && f.length() > 0
+                    }
             }
+        ) {
+            return@withContext true
         }
 
         false
@@ -307,16 +382,18 @@ class TrackDownloadManager @Inject constructor(
                 // and re-download; the unique trackKey index means the insert
                 // below will REPLACE this row instead of duplicating it.
             } else {
-                val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME)
-                if (publicDir.exists() && publicDir.isDirectory) {
-                    val sanitizedBase = sanitizeFilename("${artist.trim()} - ${title.trim()}")
-                    val candidateExtensions = listOf("flac", "m4a", "opus", "mp3", "webm")
-                    val existingFile = candidateExtensions.map { File(publicDir, "$sanitizedBase.$it") }
-                        .firstOrNull { it.exists() && it.length() > 0 }
-                    if (existingFile != null) {
-                        activeKeys.remove(key)
-                        return@launch
-                    }
+                val dirName = currentDownloadDirName()
+                val sanitizedBase = sanitizeFilename("${artist.trim()} - ${title.trim()}")
+                val candidateNames = setOf("flac", "m4a", "opus", "mp3", "webm").map { "$sanitizedBase.$it" }.toSet()
+                val found = downloadSearchDirs(dirName).any { publicDir ->
+                    publicDir.exists() && publicDir.isDirectory &&
+                        publicDir.walkTopDown().maxDepth(6).any { f ->
+                            f.isFile && f.name in candidateNames && f.length() > 0
+                        }
+                }
+                if (found) {
+                    activeKeys.remove(key)
+                    return@launch
                 }
             }
             val notifId = key.hashCode()
@@ -376,16 +453,12 @@ class TrackDownloadManager @Inject constructor(
                 val isYouTubeRequested = downloadQuality == LosslessMusicApi.QUALITY_YOUTUBE
 
                 if (!isYouTubeRequested) {
-                    val losslessStream = kotlinx.coroutines.withTimeoutOrNull(4_000L) {
-                        runCatching {
-                            losslessMusicApi.resolveStream(
-                                title = title,
-                                artist = artist,
-                                expectedAlbum = resolvedAlbum,
-                                preferredQuality = downloadQuality,
-                            )
-                        }.getOrNull()
-                    }
+                    val losslessStream = losslessMusicApi.resolveStream(
+                        title = title,
+                        artist = artist,
+                        expectedAlbum = resolvedAlbum,
+                        preferredQuality = downloadQuality,
+                    )
 
                     if (losslessStream != null) {
                         resolvedUrl = losslessStream.url
@@ -646,6 +719,15 @@ class TrackDownloadManager @Inject constructor(
                     }
 
                     // 5. Transfer tagged file to public storage / MediaStore
+                    val dirName = sanitizeDownloadFolderName(misc.downloadFolder)
+                    val subpath = downloadSubpath(
+                        artist = artist,
+                        album = resolvedAlbum,
+                        year = year,
+                        structure = misc.downloadStructure,
+                        useAlbumArtist = misc.useAlbumArtistForFolders,
+                        primaryOnly = misc.primaryArtistOnly,
+                    )
                     val (destStream, uri, file) = openPublicOutputStream(
                         filename = safeFilename,
                         mimeType = mimeType,
@@ -654,6 +736,8 @@ class TrackDownloadManager @Inject constructor(
                         album = resolvedAlbum,
                         year = year,
                         durationMs = durationMs,
+                        dirName = dirName,
+                        subpath = subpath,
                     )
                     destinationUri = uri
                     destinationFile = file
@@ -684,8 +768,9 @@ class TrackDownloadManager @Inject constructor(
                         )
                     }
 
-                    val publicMusicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME)
-                    val expectedPublicFile = File(publicMusicDir, safeFilename)
+                    val publicMusicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), dirName)
+                    val publicSubdir = if (subpath.isNotBlank()) File(publicMusicDir, subpath) else publicMusicDir
+                    val expectedPublicFile = File(publicSubdir, safeFilename)
                     val finalPath = file?.absolutePath
                         ?: expectedPublicFile.takeIf { it.exists() && it.length() > 0 }?.absolutePath
                         ?: uri?.toString()
@@ -697,7 +782,7 @@ class TrackDownloadManager @Inject constructor(
                     val lyricsText = syncedLyrics ?: plainLyrics
                     if (!lyricsText.isNullOrBlank()) {
                         val lrcFilename = sanitizeFilename("$artist - $title") + ".lrc"
-                        lrcPath = writePublicCompanionFile(lrcFilename, lyricsText, "text/plain")
+                        lrcPath = writePublicCompanionFile(lrcFilename, lyricsText, "text/plain", dirName, subpath)
                     }
                 }
 
@@ -1214,8 +1299,18 @@ class TrackDownloadManager @Inject constructor(
         album: String?,
         year: String? = null,
         durationMs: Long = 0L,
+        dirName: String = PUBLIC_DIR_NAME,
+        subpath: String = "",
     ): Triple<java.io.OutputStream, Uri?, File?> {
         val resolver = context.contentResolver
+        val safeDir = sanitizeDownloadFolderName(dirName)
+        val safeSubpath = subpath.split('/').map { sanitizeFilename(it.trim()) }
+            .filter { it.isNotBlank() }.joinToString("/")
+        val audioRelativePath = if (safeSubpath.isNotBlank()) {
+            "${Environment.DIRECTORY_MUSIC}/$safeDir/$safeSubpath"
+        } else {
+            "${Environment.DIRECTORY_MUSIC}/$safeDir"
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             // Android MediaStore Audio only accepts standard audio MIME types
@@ -1229,13 +1324,15 @@ class TrackDownloadManager @Inject constructor(
                 else -> "audio/mp4"
             }
 
-            // Remove any pre-existing entry with the same filename to avoid Android appending (1), (2), etc.
+            // Remove any pre-existing entry with the same filename IN THE SAME
+            // FOLDER to avoid Android appending (1), (2), etc. Scoped to the
+            // relative path so identically-named tracks in other album folders survive.
             runCatching {
                 resolver.query(
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                     arrayOf(MediaStore.Audio.Media._ID),
-                    "${MediaStore.Audio.Media.DISPLAY_NAME} = ?",
-                    arrayOf(filename),
+                    "${MediaStore.Audio.Media.DISPLAY_NAME} = ? AND ${MediaStore.Audio.Media.RELATIVE_PATH} = ?",
+                    arrayOf(filename, "$audioRelativePath/"),
                     null,
                 )?.use { cursor ->
                     val idCol = cursor.getColumnIndex(MediaStore.Audio.Media._ID)
@@ -1250,7 +1347,7 @@ class TrackDownloadManager @Inject constructor(
             val audioContentValues = ContentValues().apply {
                 put(MediaStore.Audio.Media.DISPLAY_NAME, filename)
                 put(MediaStore.Audio.Media.MIME_TYPE, audioMime)
-                put(MediaStore.Audio.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/$PUBLIC_DIR_NAME")
+                put(MediaStore.Audio.Media.RELATIVE_PATH, audioRelativePath)
                 put(MediaStore.Audio.Media.TITLE, title)
                 put(MediaStore.Audio.Media.ARTIST, artist)
                 put(MediaStore.Audio.Media.ALBUM_ARTIST, artist)
@@ -1271,10 +1368,15 @@ class TrackDownloadManager @Inject constructor(
             }
 
             // Fallback 1: MediaStore.Downloads (pure download columns only)
+            val downloadsRelativePath = if (safeSubpath.isNotBlank()) {
+                "${Environment.DIRECTORY_DOWNLOADS}/$safeDir/Music/$safeSubpath"
+            } else {
+                "${Environment.DIRECTORY_DOWNLOADS}/$safeDir/Music"
+            }
             val downloadContentValues = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, filename)
                 put(MediaStore.Downloads.MIME_TYPE, if (mimeType.isNotBlank()) mimeType else "application/octet-stream")
-                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_DIR_NAME/Music")
+                put(MediaStore.Downloads.RELATIVE_PATH, downloadsRelativePath)
                 put(MediaStore.Downloads.IS_PENDING, 1)
             }
 
@@ -1286,15 +1388,17 @@ class TrackDownloadManager @Inject constructor(
             }
 
             // Fallback 2: Direct public / external app music directory
-            val fallbackDir = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
-                ?: File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME).apply { if (!exists()) mkdirs() }
+            val fallbackBase = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
+                ?: File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), safeDir).apply { if (!exists()) mkdirs() }
+            val fallbackDir = if (safeSubpath.isNotBlank()) File(fallbackBase, safeSubpath) else fallbackBase
             if (!fallbackDir.exists()) fallbackDir.mkdirs()
             val fallbackFile = File(fallbackDir, filename)
             val stream = FileOutputStream(fallbackFile)
             return Triple(stream, null, fallbackFile)
         } else {
             // Android 9 and below
-            val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME)
+            val musicBase = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), safeDir)
+            val musicDir = if (safeSubpath.isNotBlank()) File(musicBase, safeSubpath) else musicBase
             if (!musicDir.exists()) musicDir.mkdirs()
             val file = File(musicDir, filename)
             val stream = FileOutputStream(file)
@@ -1439,18 +1543,31 @@ class TrackDownloadManager @Inject constructor(
         filename: String,
         content: String,
         mimeType: String,
+        dirName: String = PUBLIC_DIR_NAME,
+        subpath: String = "",
     ): String? {
+        val safeDir = sanitizeDownloadFolderName(dirName)
+        val safeSubpath = subpath.split('/').map { sanitizeFilename(it.trim()) }
+            .filter { it.isNotBlank() }.joinToString("/")
+        // Mirror the audio subfolder so .lrc sits next to its track. Note the
+        // audio lives under Music/ while companions live under Downloads/.
+        val lrcRelativePath = if (safeSubpath.isNotBlank()) {
+            "${Environment.DIRECTORY_DOWNLOADS}/$safeDir/Music/$safeSubpath"
+        } else {
+            "${Environment.DIRECTORY_DOWNLOADS}/$safeDir/Music"
+        }
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val resolver = context.contentResolver
 
-                // Remove pre-existing companion file with the same name to prevent (1).lrc duplicates
+                // Remove pre-existing companion file with the same name IN THE
+                // SAME FOLDER to prevent (1).lrc duplicates.
                 runCatching {
                     resolver.query(
                         MediaStore.Downloads.EXTERNAL_CONTENT_URI,
                         arrayOf(MediaStore.Downloads._ID),
-                        "${MediaStore.Downloads.DISPLAY_NAME} = ?",
-                        arrayOf(filename),
+                        "${MediaStore.Downloads.DISPLAY_NAME} = ? AND ${MediaStore.Downloads.RELATIVE_PATH} = ?",
+                        arrayOf(filename, "$lrcRelativePath/"),
                         null,
                     )?.use { cursor ->
                         val idCol = cursor.getColumnIndex(MediaStore.Downloads._ID)
@@ -1465,7 +1582,7 @@ class TrackDownloadManager @Inject constructor(
                 val contentValues = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, filename)
                     put(MediaStore.Downloads.MIME_TYPE, mimeType)
-                    put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_DIR_NAME/Music")
+                    put(MediaStore.Downloads.RELATIVE_PATH, lrcRelativePath)
                     put(MediaStore.Downloads.IS_PENDING, 0)
                 }
                 val uri = runCatching { resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues) }.getOrNull()
@@ -1476,15 +1593,17 @@ class TrackDownloadManager @Inject constructor(
                     }
                     uri.toString()
                 } else {
-                    val fallbackDir = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
+                    val fallbackBase = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
                         ?: File(context.filesDir, "lyrics").apply { if (!exists()) mkdirs() }
+                    val fallbackDir = if (safeSubpath.isNotBlank()) File(fallbackBase, safeSubpath) else fallbackBase
                     if (!fallbackDir.exists()) fallbackDir.mkdirs()
                     val file = File(fallbackDir, filename)
                     file.writeText(content, Charsets.UTF_8)
                     file.absolutePath
                 }
             } else {
-                val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME)
+                val musicBase = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), safeDir)
+                val musicDir = if (safeSubpath.isNotBlank()) File(musicBase, safeSubpath) else musicBase
                 if (!musicDir.exists()) musicDir.mkdirs()
                 val file = File(musicDir, filename)
                 file.writeText(content, Charsets.UTF_8)
@@ -1552,18 +1671,17 @@ class TrackDownloadManager @Inject constructor(
         val existingPaths = existingEntities.map { it.filePath }.toMutableSet()
         val existingUris = existingEntities.mapNotNull { it.mediaStoreUri }.toMutableSet()
         val existingKeys = existingEntities.map { makeDownloadKey(it.title, it.artist) }.toMutableSet()
+        val dirName = currentDownloadDirName()
 
-        // 1. Scan Public Music/LastWave directory on device
-        val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME)
-        if (musicDir.exists() && musicDir.isDirectory) {
-            val audioFiles = musicDir.listFiles { file ->
-                file.isFile && (file.extension.equals("flac", true) ||
-                                file.extension.equals("m4a", true) ||
-                                file.extension.equals("mp3", true) ||
-                                file.extension.equals("opus", true) ||
-                                file.extension.equals("ogg", true) ||
-                                file.extension.equals("webm", true))
-            }.orEmpty()
+        // 1. Scan download directories on device (active folder + legacy default, incl. subfolders)
+        val musicDirs = downloadSearchDirs(dirName).filter { it.exists() && it.isDirectory }
+        val seenDirs = mutableSetOf<String>()
+        val audioExtensions = setOf("flac", "m4a", "mp3", "opus", "ogg", "webm")
+        for (musicDir in musicDirs) {
+            if (!seenDirs.add(musicDir.absolutePath)) continue
+            val audioFiles = musicDir.walkTopDown().maxDepth(6)
+                .filter { file -> file.isFile && file.extension.lowercase() in audioExtensions }
+                .toList()
 
             for (file in audioFiles) {
                 if (file.absolutePath in existingPaths) continue
@@ -1593,7 +1711,7 @@ class TrackDownloadManager @Inject constructor(
                         else -> "AUDIO"
                     }
 
-                    val lrcFile = File(musicDir, file.nameWithoutExtension + ".lrc")
+                    val lrcFile = File(file.parentFile ?: musicDir, file.nameWithoutExtension + ".lrc")
                     val hasLyrics = lrcFile.exists() && lrcFile.length() > 0
                     val lrcText = if (hasLyrics) runCatching { lrcFile.readText() }.getOrNull() else null
 
@@ -1625,7 +1743,7 @@ class TrackDownloadManager @Inject constructor(
             }
         }
 
-        // 2. Query MediaStore for any items in Music/LastWave
+        // 2. Query MediaStore for items in the download folders (active + legacy)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val projection = arrayOf(
                 MediaStore.Audio.Media._ID,
@@ -1638,8 +1756,15 @@ class TrackDownloadManager @Inject constructor(
                 MediaStore.Audio.Media.RELATIVE_PATH,
                 MediaStore.Audio.Media.DATE_ADDED,
             )
-            val selection = "${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?"
-            val selectionArgs = arrayOf("Music/$PUBLIC_DIR_NAME%")
+            val selection: String
+            val selectionArgs: Array<String>
+            if (dirName != LEGACY_PUBLIC_DIR_NAME) {
+                selection = "(${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ? OR ${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?)"
+                selectionArgs = arrayOf("Music/$dirName%", "Music/$LEGACY_PUBLIC_DIR_NAME%")
+            } else {
+                selection = "${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?"
+                selectionArgs = arrayOf("Music/$dirName%")
+            }
 
             runCatching {
                 context.contentResolver.query(

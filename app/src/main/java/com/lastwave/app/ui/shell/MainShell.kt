@@ -100,10 +100,10 @@ class MainShellViewModel @Inject constructor(
     }
 }
 
-private enum class MainTab(val label: String) {
-    FEED("Feed"),
-    STATS("Stats"),
-    PLAYLISTS("Playlists"),
+private enum class MainTab(val labelRes: Int) {
+    FEED(com.lastwave.app.R.string.nav_feed),
+    STATS(com.lastwave.app.R.string.nav_stats),
+    PLAYLISTS(com.lastwave.app.R.string.nav_playlists),
 }
 
 /** Shared with any screen hosted inside [MainShell] so their scrolling
@@ -246,13 +246,13 @@ private fun UpdatePromptCard(
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Update Available",
+                    text = androidx.compose.ui.res.stringResource(com.lastwave.app.R.string.update_available),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
                 Text(
-                    text = "LastWave v$version is ready to install",
+                    text = androidx.compose.ui.res.stringResource(com.lastwave.app.R.string.update_ready_to_install, version),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
                 )
@@ -265,7 +265,7 @@ private fun UpdatePromptCard(
                     .clickable(onClick = onUpdate),
             ) {
                 Text(
-                    text = "Update",
+                    text = androidx.compose.ui.res.stringResource(com.lastwave.app.R.string.update),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onPrimary,
@@ -278,7 +278,7 @@ private fun UpdatePromptCard(
             ) {
                 Icon(
                     imageVector = Icons.Filled.Close,
-                    contentDescription = "Dismiss update",
+                    contentDescription = androidx.compose.ui.res.stringResource(com.lastwave.app.R.string.dismiss_update),
                     tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
                     modifier = Modifier.size(18.dp),
                 )
@@ -325,7 +325,7 @@ private fun FloatingNavBar(
                     tabs.forEachIndexed { index, tab ->
                         val onClick = remember(index) { { onSelect(index) } }
                         FloatingNavItem(
-                            label = tab.label,
+                            label = androidx.compose.ui.res.stringResource(tab.labelRes),
                             icon = tab.icon(),
                             selected = selectedIndex == index,
                             onClick = onClick,
@@ -359,7 +359,7 @@ private fun FloatingNavBar(
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                             Icon(
                                 imageVector = Icons.Filled.AutoAwesome,
-                                contentDescription = "Create / Generate Playlist",
+                                contentDescription = androidx.compose.ui.res.stringResource(com.lastwave.app.R.string.nav_create_playlist),
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 modifier = Modifier.size(24.dp),
                             )

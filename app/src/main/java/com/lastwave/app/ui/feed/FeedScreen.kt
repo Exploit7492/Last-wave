@@ -99,6 +99,7 @@ import com.lastwave.app.data.feed.FeedQuickTile
 import com.lastwave.app.data.feed.FeedSpotlight
 import com.lastwave.app.util.ArtistHelper
 import com.lastwave.app.data.generate.GeneratedTrack
+import com.lastwave.app.data.local.HomeSection
 import com.lastwave.app.data.model.FriendEntry
 import com.lastwave.app.data.model.RecentTrack
 import com.lastwave.app.data.music.YouTubeMusicTrack
@@ -152,6 +153,9 @@ fun FeedScreen(
     val musicPlayer = LocalMusicPlayer.current
     val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     var menuTrack by remember { mutableStateOf<YouTubeMusicTrack?>(null) }
+    // Sections hidden via Settings → Home sections.
+    val hiddenSections by viewModel.hiddenHomeSections.collectAsStateWithLifecycle()
+    fun isSectionVisible(section: HomeSection) = section.id !in hiddenSections
     val snackbarHostState = remember { SnackbarHostState() }
     val hasFeedContent = with(state.feedData) {
         quickTiles.isNotEmpty() || mixes.isNotEmpty() || topArtists.isNotEmpty() ||
@@ -245,6 +249,7 @@ fun FeedScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(24.dp),
                 ) {
+                    if (isSectionVisible(HomeSection.HERO)) {
                     item(key = "hero") {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Column(
@@ -280,6 +285,7 @@ fun FeedScreen(
                             )
                         }
                     }
+                    }
 
                     val quickTiles = if (state.feedData.isYtConnected) {
                         state.feedData.quickTiles
@@ -289,7 +295,7 @@ fun FeedScreen(
                                 it.playlistId != "yt_liked" && it.playlistId != "yt_recent"
                         }
                     }
-                    if (quickTiles.isNotEmpty()) {
+                    if (isSectionVisible(HomeSection.QUICK_TILES) && quickTiles.isNotEmpty()) {
                         item(key = "quick_tiles") {
                             QuickTilesGrid(
                                 tiles = quickTiles,
@@ -308,7 +314,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (state.feedData.tasteTags.isNotEmpty()) {
+                    if (isSectionVisible(HomeSection.TASTE_STRIP) && state.feedData.tasteTags.isNotEmpty()) {
                         item(key = "taste_strip") {
                             TasteStrip(
                                 tags = state.feedData.tasteTags,
@@ -318,7 +324,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (state.feedData.quickPicks.isNotEmpty()) {
+                    if (isSectionVisible(HomeSection.QUICK_PICKS) && state.feedData.quickPicks.isNotEmpty()) {
                         item(key = "quick_picks") {
                             val title = if (state.feedData.hasYtRecommendations) "Picked for you" else "Quick picks"
                             val subtitle = if (state.feedData.hasYtRecommendations) {
@@ -346,6 +352,7 @@ fun FeedScreen(
                         }
                     }
 
+                    if (isSectionVisible(HomeSection.BECAUSE_YOU_LISTEN_TO)) {
                     state.feedData.becauseYouListenTo?.takeIf { it.items.isNotEmpty() }?.let { section ->
                         item(key = "because_you_listen_to") {
                             FeedSectionHeader(
@@ -372,8 +379,9 @@ fun FeedScreen(
                             )
                         }
                     }
+                    }
 
-                    if (state.feedData.freshFinds.isNotEmpty()) {
+                    if (isSectionVisible(HomeSection.FRESH_FINDS) && state.feedData.freshFinds.isNotEmpty()) {
                         item(key = "fresh_finds") {
                             FeedSectionHeader(
                                 title = "Fresh finds",
@@ -401,7 +409,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (state.feedData.jumpBackIn.isNotEmpty()) {
+                    if (isSectionVisible(HomeSection.JUMP_BACK_IN) && state.feedData.jumpBackIn.isNotEmpty()) {
                         item(key = "jump_back_in") {
                             FeedSectionHeader(
                                 title = "Jump back in",
@@ -423,7 +431,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (state.feedData.mixes.isNotEmpty()) {
+                    if (isSectionVisible(HomeSection.MIXES) && state.feedData.mixes.isNotEmpty()) {
                         item(key = "mixed_for_you") {
                             FeedSectionHeader(
                                 title = "Mixes to explore",
@@ -450,6 +458,7 @@ fun FeedScreen(
                         }
                     }
 
+                    if (isSectionVisible(HomeSection.SPOTLIGHT)) {
                     state.feedData.spotlight?.let { spotlight ->
                         item(key = "spotlight_hero") {
                             SpotlightHeroCard(
@@ -463,8 +472,9 @@ fun FeedScreen(
                             )
                         }
                     }
+                    }
 
-                    if (individualTopArtists.isNotEmpty()) {
+                    if (isSectionVisible(HomeSection.TOP_ARTISTS) && individualTopArtists.isNotEmpty()) {
                         item(key = "top_artists") {
                             FeedSectionHeader(
                                     title = "Artists for you",
@@ -491,7 +501,7 @@ fun FeedScreen(
                             }
                         }
 
-                    if (state.feedData.heavyRotation.isNotEmpty()) {
+                    if (isSectionVisible(HomeSection.HEAVY_ROTATION) && state.feedData.heavyRotation.isNotEmpty()) {
                         item(key = "heavy_rotation") {
                             FeedSectionHeader(
                                 title = "Favorites to revisit",
@@ -517,7 +527,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (state.feedData.recentAlbums.isNotEmpty()) {
+                    if (isSectionVisible(HomeSection.ALBUMS) && state.feedData.recentAlbums.isNotEmpty()) {
                         item(key = "albums_in_rotation") {
                             FeedSectionHeader(
                                 title = "Albums for you",
@@ -545,7 +555,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (state.feedData.charts.isNotEmpty()) {
+                    if (isSectionVisible(HomeSection.CHARTS) && state.feedData.charts.isNotEmpty()) {
                         item(key = "trending_charts") {
                             FeedSectionHeader(
                                 title = "Trending now",
@@ -571,7 +581,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (state.feedData.newReleases.isNotEmpty()) {
+                    if (isSectionVisible(HomeSection.NEW_RELEASES) && state.feedData.newReleases.isNotEmpty()) {
                         item(key = "new_releases") {
                             FeedSectionHeader(
                                 title = "New releases",
@@ -603,7 +613,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (state.feedData.friends.isNotEmpty()) {
+                    if (isSectionVisible(HomeSection.FRIENDS) && state.feedData.friends.isNotEmpty()) {
                         item(key = "friends_activity") {
                             FeedSectionHeader(
                                 title = "Your friends",

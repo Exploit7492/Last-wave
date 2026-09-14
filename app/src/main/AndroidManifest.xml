@@ -21,6 +21,10 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <uses-feature
+        android:name="android.hardware.usb.host"
+        android:required="false" />
+
     <application
         android:name=".LastWaveApplication"
         android:allowBackup="true"
@@ -31,6 +35,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.LastWave.Splash"
         android:usesCleartextTraffic="false"
+        android:localeConfig="@xml/locales_config"
         android:hardwareAccelerated="true"
         android:largeHeap="true"
         android:enableOnBackInvokedCallback="true">

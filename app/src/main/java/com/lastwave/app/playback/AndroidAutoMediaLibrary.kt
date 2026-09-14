@@ -12,6 +12,7 @@ import com.lastwave.app.data.playlist.isYouTubeOnly
 import com.lastwave.app.data.search.SearchRepository
 import com.lastwave.app.data.search.SearchTab
 import com.lastwave.app.data.ytmusic.YtMusicLibraryManager
+import com.lastwave.app.data.generate.youtubeVideoIdOrNull
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -48,11 +49,15 @@ class AndroidAutoMediaLibrary @Inject constructor(
             parentId == QUEUE_ID -> state.queue.mapIndexed(::queueTrackItem)
             parentId == PLAYLISTS_ID -> getMergedPlaylists().map { playlist ->
                 val trackCount = playlist.remoteTrackCount ?: playlist.tracks.size
+                // Browsable-only on purpose (issue #58): flagging playlists
+                // PLAYABLE makes Android Auto play from track 0 on tap
+                // instead of opening the track list. Voice/assistant play
+                // still works via playMediaId("$PLAYLIST_PREFIX...").
                 browsableItem(
                     mediaId = "$PLAYLIST_PREFIX${playlist.id}",
                     title = playlist.title,
                     subtitle = if (playlist.isYouTubeOnly) "YouTube Music • ${trackCountLabel(trackCount)}" else trackCountLabel(trackCount),
-                    playable = trackCount > 0 || playlist.tracks.isNotEmpty(),
+                    iconUri = playlist.coverUri(),
                 )
             }
             parentId.startsWith(PLAYLIST_PREFIX) -> {
@@ -82,11 +87,13 @@ class AndroidAutoMediaLibrary @Inject constructor(
             getMergedPlaylists().filter { it.title.contains(cleanQuery, ignoreCase = true) }
         }.getOrDefault(emptyList()).map { playlist ->
             val count = playlist.remoteTrackCount ?: playlist.tracks.size
+            // Same as the Playlists node above: browsable-only so a tap
+            // opens the track list instead of playing from track 0.
             browsableItem(
                 mediaId = "$PLAYLIST_PREFIX${playlist.id}",
                 title = playlist.title,
                 subtitle = if (playlist.isYouTubeOnly) "YouTube Music • ${trackCountLabel(count)}" else trackCountLabel(count),
-                playable = true,
+                iconUri = playlist.coverUri(),
             )
         }
 
@@ -259,6 +266,7 @@ class AndroidAutoMediaLibrary @Inject constructor(
         title: String,
         subtitle: String,
         playable: Boolean = false,
+        iconUri: String? = null,
     ): MediaBrowserCompat.MediaItem {
         val flags = MediaBrowserCompat.MediaItem.FLAG_BROWSABLE or
             if (playable) MediaBrowserCompat.MediaItem.FLAG_PLAYABLE else 0
@@ -267,7 +275,7 @@ class AndroidAutoMediaLibrary @Inject constructor(
                 .setMediaId(mediaId)
                 .setTitle(title)
                 .setSubtitle(subtitle)
-                .setIconUri(appIconUri())
+                .setIconUri(iconUri?.toSafeUri() ?: appIconUri())
                 .build(),
             flags,
         )
@@ -279,6 +287,7 @@ class AndroidAutoMediaLibrary @Inject constructor(
             .setTitle(track.title)
             .setSubtitle(track.artist)
             .setDescription(track.album)
+            .setIconUri(track.coverUri()?.toSafeUri())
             .build(),
         MediaBrowserCompat.MediaItem.FLAG_PLAYABLE,
     )
@@ -288,6 +297,27 @@ class AndroidAutoMediaLibrary @Inject constructor(
     )
 
     private fun trackCountLabel(count: Int) = if (count == 1) "1 track" else "$count tracks"
+
+    /** Search results only carry a videoId when InnerTube matched a song —
+     *  fall back to its YouTube thumbnail so Auto still shows a cover. */
+    private fun PlayableTrack.coverUri(): String? {
+        artworkUrl?.takeIf { it.isNotBlank() }?.let { return it }
+        videoId?.takeIf { it.isNotBlank() }?.let { return "https://i.ytimg.com/vi/$it/hqdefault.jpg" }
+        return null
+    }
+
+    /** Best available playlist cover: custom > remote > first track art > first track YouTube thumb. */
+    private fun SavedPlaylist.coverUri(): String? {
+        customCoverUri?.takeIf { it.isNotBlank() }?.let { return it }
+        remoteArtworkUrl?.takeIf { it.isNotBlank() }?.let { return it }
+        return tracks.firstNotNullOfOrNull { track ->
+            track.artworkUrl?.takeIf { it.isNotBlank() }
+                ?: track.youtubeVideoIdOrNull()?.let { "https://i.ytimg.com/vi/$it/hqdefault.jpg" }
+        }
+    }
+
+    private fun String.toSafeUri(): Uri? =
+        runCatching { Uri.parse(this) }.getOrNull()?.takeIf { it.toString().isNotBlank() }
 
     companion object {
         const val ROOT_ID = "lastwave_root"

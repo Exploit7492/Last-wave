@@ -308,12 +308,26 @@ private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine 
     val isLineRtl = isRtl || (isOverallRtl && (text.isBlank() || text == "♪"))
 
     return if (hasSyllables) {
+        // Word-sync providers (BetterLyrics TTML spans, LyricsPlus syllabus)
+        // store each word trimmed, so concatenating contents directly would
+        // render "Allthatglittersisgold". The trailing space carries no
+        // timing — it is purely visual and keeps sync exact. Only insert
+        // when the line itself contains spaces so CJK lines without spaces
+        // and already-spaced providers (Kugou KRC) are untouched.
+        val needsSpacing = text.contains(' ') || text.contains('\u00A0')
         KaraokeLine.MainKaraokeLine(
-            syllables = syllables.map { syl ->
+            syllables = syllables.mapIndexed { index, syl ->
                 val sStart = syl.timeMs.toInt()
                 val sEnd = (syl.timeMs + syl.durationMs).toInt().coerceAtLeast(sStart)
+                val next = syllables.getOrNull(index + 1)
+                val separator = if (needsSpacing &&
+                    index < syllables.lastIndex &&
+                    !syl.text.endsWith(' ') &&
+                    !syl.text.endsWith('\u00A0') &&
+                    (next == null || (!next.text.startsWith(' ') && !next.text.startsWith('\u00A0')))
+                ) " " else ""
                 KaraokeSyllable(
-                    content = syl.text,
+                    content = syl.text + separator,
                     start = sStart,
                     end = sEnd,
                 )

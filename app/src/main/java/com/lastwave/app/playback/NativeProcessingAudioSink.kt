@@ -45,6 +45,8 @@ class NativeProcessingAudioSink(
 
     private var pendingInputLimit = 0
     private var pendingOutput: ByteBuffer? = null
+    @Volatile
+    private var lastVolume = 1f
     private var pendingPresentationTimeUs = 0L
     private var pendingAccessUnitCount = 0
     private var pendingOutputFrameCount = 0
@@ -367,6 +369,19 @@ class NativeProcessingAudioSink(
         fallbackDelegate.setPreferredDevice(audioDeviceInfo)
     }
 
+    /**
+     * USB-DAC mode: request the track's native rate so the sink opens its
+     * AudioTrack without app-side resampling. Null restores default
+     * behavior. Takes effect when the sink next configures (next track).
+     */
+    fun setOutputSampleRateOverride(sampleRateHz: Int?) {
+        runCatching { processor.setOutputSampleRateOverride(sampleRateHz) }
+    }
+
+    /** Actual rate the sink configured, 0 when unresolved. */
+    fun currentOutputSampleRateHz(): Int =
+        runCatching { processor.nativeOutputSampleRate }.getOrDefault(0)
+
     override fun setOutputStreamOffsetUs(outputStreamOffsetUs: Long) {
         enhancedDelegate.setOutputStreamOffsetUs(outputStreamOffsetUs)
         fallbackDelegate.setOutputStreamOffsetUs(outputStreamOffsetUs)
@@ -393,9 +408,16 @@ class NativeProcessingAudioSink(
     }
 
     override fun setVolume(volume: Float) {
+        // Recorded: Media3's audio-focus manager scales this on transient
+        // duck, bypassing ExoPlayer.getVolume. Bit-perfect verification must
+        // observe the gain that actually reaches AudioTrack, not the request.
+        lastVolume = volume
         enhancedDelegate.setVolume(volume)
         fallbackDelegate.setVolume(volume)
     }
+
+    /** Last gain forwarded to AudioTrack (1 = unity). */
+    fun currentVolume(): Float = lastVolume
 
     override fun pause() {
         playing = false

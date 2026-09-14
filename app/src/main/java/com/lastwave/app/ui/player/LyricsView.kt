@@ -633,11 +633,25 @@ private fun WordByWordLyricLine(
                 verticalArrangement = Arrangement.Center,
                 modifier = Modifier.fillMaxWidth(),
             ) {
+                // Providers store each word trimmed — without a visual
+                // separator FlowRow renders "Allthatglittersisgold". The
+                // space is display-only (no timing change). Skip it for
+                // spaceless (CJK) lines and when a provider already kept
+                // spacing (e.g. Kugou KRC trailing spaces).
+                val needsSpacing = line.text.contains(' ') || line.text.contains('\u00A0')
                 line.syllables.forEachIndexed { sIndex, syllable ->
                     val sylStart = syllable.timeMs
                     val sylEnd = syllable.timeMs + syllable.durationMs
                     val isSyllableActive = currentPositionMs in sylStart until sylEnd
                     val isSyllablePast = currentPositionMs >= sylEnd
+                    val nextSyllable = line.syllables.getOrNull(sIndex + 1)
+                    val separator = if (needsSpacing &&
+                        sIndex < line.syllables.lastIndex &&
+                        !syllable.text.endsWith(' ') &&
+                        !syllable.text.endsWith('\u00A0') &&
+                        (nextSyllable == null || (!nextSyllable.text.startsWith(' ') && !nextSyllable.text.startsWith('\u00A0')))
+                    ) " " else ""
+                    val displayText = syllable.text + separator
 
                     val sylScaleTarget = if (isSyllableActive) {
                         when (animationStyle) {
@@ -714,7 +728,7 @@ private fun WordByWordLyricLine(
                     )
 
                     Text(
-                        text = syllable.text,
+                        text = displayText,
                         style = fontStyle,
                         color = sylColor,
                         modifier = Modifier

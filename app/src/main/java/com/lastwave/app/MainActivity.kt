@@ -1,6 +1,7 @@
 package com.lastwave.app
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -11,9 +12,15 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lastwave.app.util.AppLocaleManager
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import com.lastwave.app.data.repository.LastFmAuthCallbackCoordinator
 import com.lastwave.app.ui.navigation.LastWaveNavHost
 import com.lastwave.app.ui.navigation.Screen
@@ -36,7 +43,19 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     @Inject
     lateinit var appRouteNavigator: dagger.Lazy<com.lastwave.app.ui.navigation.AppRouteNavigator>
 
+    @Inject
+    lateinit var settingsPreferences: com.lastwave.app.data.local.SettingsPreferences
+
+    @Inject
+    lateinit var appLocaleManager: AppLocaleManager
+
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    override fun attachBaseContext(newBase: Context) {
+        // FragmentActivity gets no AppCompat locale backport, so pin the
+        // selected locale here on every creation (all API levels).
+        super.attachBaseContext(AppLocaleManager.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Must be called before super.onCreate() and before setContent().
@@ -44,6 +63,26 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             .onFailure { android.util.Log.e(STARTUP_TAG, "Splash compatibility layer unavailable", it) }
             .getOrNull()
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // Adopt choices made via system Settings -> App languages so the
+            // in-app picker shows the truth. The framework recreates us itself.
+            lifecycleScope.launch {
+                runCatching { appLocaleManager.syncFromSystemIfNeeded() }
+            }
+        } else {
+            // No framework per-app locales here: recreate once per language
+            // change so attachBaseContext re-wraps with the new locale.
+            // drop(1) skips the initial emission — recreation never loops.
+            lifecycleScope.launch {
+                runCatching {
+                    settingsPreferences.settings
+                        .map { it.appLanguageTag }
+                        .distinctUntilChanged()
+                        .drop(1)
+                        .collect { recreate() }
+                }
+            }
+        }
         runCatching { lastFmAuthCallback.capture(intent) }
             .onFailure { android.util.Log.e(STARTUP_TAG, "Auth callback ignored during startup", it) }
         handlePlaybackIntent(intent)

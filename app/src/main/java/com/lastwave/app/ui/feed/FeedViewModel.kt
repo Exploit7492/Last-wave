@@ -11,6 +11,7 @@ import com.lastwave.app.data.feed.FeedRepository
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.generate.youtubeVideoIdOrNull
 import com.lastwave.app.data.local.SessionPreferences
+import com.lastwave.app.data.local.SettingsPreferences
 import com.lastwave.app.data.model.RecentTrack
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.music.YouTubeMusicTrack
@@ -25,9 +26,12 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -45,6 +49,7 @@ data class FeedUiState(
 class FeedViewModel @Inject constructor(
     private val repository: FeedRepository,
     private val sessionPreferences: SessionPreferences,
+    private val settingsPreferences: SettingsPreferences,
     private val musicPlayer: MusicPlayer,
     private val innerTube: InnerTubeMusicApi,
     private val ytAuth: YtMusicAuthManager,
@@ -52,6 +57,11 @@ class FeedViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(FeedUiState())
     val uiState: StateFlow<FeedUiState> = _uiState.asStateFlow()
+    /** Ids of Home sections the user hid in Settings → Home sections. */
+    val hiddenHomeSections: StateFlow<Set<String>> = settingsPreferences.settings
+        .map { it.hiddenHomeSections }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
     private var feedJob: Job? = null
     private var lastLoadedMillis: Long = 0L
 

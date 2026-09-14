@@ -24,6 +24,7 @@ sealed class Screen(val route: String) {
     data object ScrobblerApps : Screen("scrobbler_apps")
     data object Friends : Screen("friends")
     data object Downloads : Screen("downloads")
+    data object HomeSections : Screen("home_sections")
     data object ExcludedSongs : Screen("excluded_songs")
     data object YouTubeImport : Screen("youtube_import")
     data object YouTubeLogin : Screen("youtube_login")

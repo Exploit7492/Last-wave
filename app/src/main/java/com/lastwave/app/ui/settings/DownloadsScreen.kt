@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +47,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.MoreVert
@@ -71,6 +73,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -90,6 +93,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -177,6 +181,10 @@ fun DownloadsScreen(
     val totalBytes by viewModel.totalBytes.collectAsStateWithLifecycle()
     val activeDownloadsMap by viewModel.activeDownloads.collectAsStateWithLifecycle()
     val downloadLyrics by viewModel.downloadLyrics.collectAsStateWithLifecycle()
+    val downloadFolder by viewModel.downloadFolder.collectAsStateWithLifecycle()
+    val downloadStructure by viewModel.downloadStructure.collectAsStateWithLifecycle()
+    val useAlbumArtistForFolders by viewModel.useAlbumArtistForFolders.collectAsStateWithLifecycle()
+    val primaryArtistOnly by viewModel.primaryArtistOnly.collectAsStateWithLifecycle()
     val isOnline by viewModel.isOnline.collectAsStateWithLifecycle()
     val activeDownloads = activeDownloadsMap.values.filter { !it.isFinished && it.error == null }
 
@@ -199,6 +207,8 @@ fun DownloadsScreen(
     var showClearHistoryConfirm by remember { mutableStateOf(false) }
     var trackToDelete by remember { mutableStateOf<DownloadedTrackEntity?>(null) }
     var showOptionsMenu by remember { mutableStateOf(false) }
+    var showFolderDialog by remember { mutableStateOf(false) }
+    var showOrganizationDialog by remember { mutableStateOf(false) }
 
     fun navigateTo(subView: DownloadSubView) {
         subViewStack = subViewStack + subView
@@ -299,16 +309,61 @@ fun DownloadsScreen(
                                 onClick = { viewModel.setDownloadLyrics(!downloadLyrics) },
                             )
                             DropdownMenuItem(
-                                text = { Text("Open in File Manager") },
+                                text = { Text(stringResource(com.lastwave.app.R.string.dl_open_manager)) },
                                 leadingIcon = { Icon(Icons.Filled.FolderOpen, contentDescription = null) },
                                 onClick = {
                                     showOptionsMenu = false
                                     viewModel.openInFileManager()
                                 },
                             )
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(stringResource(com.lastwave.app.R.string.dl_folder))
+                                        Text(
+                                            "Music/$downloadFolder",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                },
+                                leadingIcon = { Icon(Icons.Filled.FolderOpen, contentDescription = null) },
+                                onClick = {
+                                    showOptionsMenu = false
+                                    showFolderDialog = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(stringResource(com.lastwave.app.R.string.dl_org))
+                                        Text(
+                                            if (downloadStructure == com.lastwave.app.data.local.DownloadFolderStructure.FLAT) {
+                                                stringResource(
+                                                    com.lastwave.app.R.string.dl_menu_flat,
+                                                    downloadFolder,
+                                                )
+                                            } else {
+                                                stringResource(
+                                                    com.lastwave.app.R.string.dl_menu_structured,
+                                                    stringResource(downloadStructure.shortLabelRes),
+                                                    downloadFolder,
+                                                )
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                },
+                                leadingIcon = { Icon(Icons.Filled.Folder, contentDescription = null) },
+                                onClick = {
+                                    showOptionsMenu = false
+                                    showOrganizationDialog = true
+                                },
+                            )
                             if (tracks.isNotEmpty()) {
                                 DropdownMenuItem(
-                                    text = { Text("Clear Download History Only") },
+                                    text = { Text(stringResource(com.lastwave.app.R.string.dl_clear_history_only)) },
                                     leadingIcon = { Icon(Icons.Filled.DeleteSweep, contentDescription = null) },
                                     onClick = {
                                         showOptionsMenu = false
@@ -316,7 +371,7 @@ fun DownloadsScreen(
                                     },
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("Delete All Files & Free Space", color = MaterialTheme.colorScheme.error) },
+                                    text = { Text(stringResource(com.lastwave.app.R.string.dl_delete_all_files), color = MaterialTheme.colorScheme.error) },
                                     leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
                                     onClick = {
                                         showOptionsMenu = false
@@ -419,6 +474,8 @@ fun DownloadsScreen(
                                     activeDownloads = activeDownloads,
                                     playbackState = playbackState,
                                     totalSizeText = totalSizeText,
+                                    downloadFolder = downloadFolder,
+                                    downloadStructure = downloadStructure,
                                     onPlayTrack = { track -> viewModel.playTrack(track, filteredTracks) },
                                     onPlayNext = { viewModel.playNext(it) },
                                     onAddToQueue = { viewModel.addToQueue(it) },
@@ -428,6 +485,7 @@ fun DownloadsScreen(
                                     onDeleteTrack = { trackToDelete = it },
                                     onCancelDownload = { viewModel.cancelDownload(it) },
                                     onOpenFileManager = { viewModel.openInFileManager() },
+                                    onChangeFolder = { showFolderDialog = true },
                                 )
                             }
                             DownloadTab.ARTISTS -> {
@@ -592,8 +650,8 @@ fun DownloadsScreen(
     if (showClearHistoryConfirm) {
         AlertDialog(
             onDismissRequest = { showClearHistoryConfirm = false },
-            title = { Text("Clear Download History?") },
-            text = { Text("This will clear the history list in the app. Your audio files in Music/LastWave will stay safely on your device.") },
+            title = { Text(stringResource(com.lastwave.app.R.string.dl_clear_history_title)) },
+            text = { Text(stringResource(com.lastwave.app.R.string.dl_clear_history, downloadFolder)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -601,11 +659,11 @@ fun DownloadsScreen(
                         showClearHistoryConfirm = false
                     },
                 ) {
-                    Text("Clear History")
+                    Text(stringResource(com.lastwave.app.R.string.dl_clear_history_confirm))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showClearHistoryConfirm = false }) { Text("Cancel") }
+                TextButton(onClick = { showClearHistoryConfirm = false }) { Text(stringResource(com.lastwave.app.R.string.common_cancel)) }
             },
         )
     }
@@ -614,8 +672,8 @@ fun DownloadsScreen(
     if (showClearAllConfirm) {
         AlertDialog(
             onDismissRequest = { showClearAllConfirm = false },
-            title = { Text("Delete All Downloaded Files?") },
-            text = { Text("This will permanently delete all ${tracks.size} downloaded audio files from Music/LastWave and free up $totalSizeText of storage.") },
+            title = { Text(stringResource(com.lastwave.app.R.string.dl_delete_all_title)) },
+            text = { Text(stringResource(com.lastwave.app.R.string.dl_delete_all, tracks.size, downloadFolder, totalSizeText)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -623,14 +681,186 @@ fun DownloadsScreen(
                         showClearAllConfirm = false
                     },
                 ) {
-                    Text("Delete All Files", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(com.lastwave.app.R.string.dl_delete_all_confirm), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showClearAllConfirm = false }) { Text("Cancel") }
+                TextButton(onClick = { showClearAllConfirm = false }) { Text(stringResource(com.lastwave.app.R.string.common_cancel)) }
             },
         )
     }
+
+    if (showFolderDialog) {
+        DownloadFolderDialog(
+            currentFolder = downloadFolder,
+            onDismiss = { showFolderDialog = false },
+            onConfirm = { name ->
+                viewModel.setDownloadFolder(name)
+                showFolderDialog = false
+            },
+        )
+    }
+
+    if (showOrganizationDialog) {
+        FolderOrganizationDialog(
+            currentStructure = downloadStructure,
+            useAlbumArtist = useAlbumArtistForFolders,
+            primaryOnly = primaryArtistOnly,
+            downloadFolder = downloadFolder,
+            onDismiss = { showOrganizationDialog = false },
+            onStructureChange = { viewModel.setDownloadStructure(it) },
+            onUseAlbumArtistChange = { viewModel.setUseAlbumArtistForFolders(it) },
+            onPrimaryOnlyChange = { viewModel.setPrimaryArtistOnly(it) },
+        )
+    }
+}
+
+@Composable
+private fun DownloadFolderDialog(
+    currentFolder: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var input by remember(currentFolder) { mutableStateOf(currentFolder) }
+    val sanitized = remember(input) {
+        com.lastwave.app.data.local.sanitizeDownloadFolderName(input.ifBlank { currentFolder })
+    }
+    val isChanged = sanitized != currentFolder
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(com.lastwave.app.R.string.dl_folder)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    stringResource(com.lastwave.app.R.string.dl_folder_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    label = { Text(stringResource(com.lastwave.app.R.string.dl_folder_name)) },
+                    prefix = { Text("Music/") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (isChanged) {
+                    Text(
+                        stringResource(com.lastwave.app.R.string.dl_folder_will_save, sanitized),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(input) },
+                enabled = input.isNotBlank() && isChanged,
+            ) { Text(stringResource(com.lastwave.app.R.string.common_save)) }
+        },
+        dismissButton = {
+            Row {
+                if (currentFolder != com.lastwave.app.data.local.DEFAULT_DOWNLOAD_FOLDER) {
+                    TextButton(onClick = { onConfirm(com.lastwave.app.data.local.DEFAULT_DOWNLOAD_FOLDER) }) {
+                        Text(stringResource(com.lastwave.app.R.string.common_reset))
+                    }
+                }
+                TextButton(onClick = onDismiss) { Text(stringResource(com.lastwave.app.R.string.common_cancel)) }
+            }
+        },
+    )
+}
+
+@Composable
+private fun FolderOrganizationDialog(
+    currentStructure: com.lastwave.app.data.local.DownloadFolderStructure,
+    useAlbumArtist: Boolean,
+    primaryOnly: Boolean,
+    downloadFolder: String,
+    onDismiss: () -> Unit,
+    onStructureChange: (com.lastwave.app.data.local.DownloadFolderStructure) -> Unit,
+    onUseAlbumArtistChange: (Boolean) -> Unit,
+    onPrimaryOnlyChange: (Boolean) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(com.lastwave.app.R.string.dl_org)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    stringResource(com.lastwave.app.R.string.dl_org_desc, downloadFolder),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                com.lastwave.app.data.local.DownloadFolderStructure.entries.forEach { structure ->
+                    val selected = structure == currentStructure
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onStructureChange(structure) }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = selected, onClick = { onStructureChange(structure) })
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(structure.titleRes),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                            )
+                            Text(
+                                structure.example.replace("<dir>", downloadFolder),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(com.lastwave.app.R.string.dl_use_album_artist), style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            stringResource(com.lastwave.app.R.string.dl_use_album_artist_sub),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = useAlbumArtist, onCheckedChange = onUseAlbumArtistChange)
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(com.lastwave.app.R.string.dl_primary_only), style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            stringResource(com.lastwave.app.R.string.dl_primary_only_sub),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = primaryOnly, onCheckedChange = onPrimaryOnlyChange)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(com.lastwave.app.R.string.common_done)) }
+        },
+    )
 }
 
 @Composable
@@ -876,6 +1106,8 @@ private fun DownloadedSongsList(
     activeDownloads: List<DownloadProgress>,
     playbackState: com.lastwave.app.playback.PlaybackChromeState,
     totalSizeText: String,
+    downloadFolder: String,
+    downloadStructure: com.lastwave.app.data.local.DownloadFolderStructure,
     onPlayTrack: (DownloadedTrackEntity) -> Unit,
     onPlayNext: (DownloadedTrackEntity) -> Unit,
     onAddToQueue: (DownloadedTrackEntity) -> Unit,
@@ -885,6 +1117,7 @@ private fun DownloadedSongsList(
     onDeleteTrack: (DownloadedTrackEntity) -> Unit,
     onCancelDownload: (String) -> Unit,
     onOpenFileManager: () -> Unit,
+    onChangeFolder: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
 
@@ -914,16 +1147,38 @@ private fun DownloadedSongsList(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            "Storage: $totalSizeText",
+                            stringResource(com.lastwave.app.R.string.dl_storage_used, totalSizeText),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            "Saved in Music/LastWave/ \u2022 ${tracks.size} song(s)",
+                            if (downloadStructure == com.lastwave.app.data.local.DownloadFolderStructure.FLAT) {
+                                stringResource(
+                                    com.lastwave.app.R.string.dl_saved_flat,
+                                    downloadFolder,
+                                    tracks.size,
+                                )
+                            } else {
+                                stringResource(
+                                    com.lastwave.app.R.string.dl_saved_structured,
+                                    downloadFolder,
+                                    stringResource(downloadStructure.shortLabelRes),
+                                    tracks.size,
+                                )
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Spacer(Modifier.height(6.dp))
+                        TextButton(
+                            onClick = onChangeFolder,
+                            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
+                        ) {
+                            Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(stringResource(com.lastwave.app.R.string.dl_change_folder), style = MaterialTheme.typography.labelMedium)
+                        }
                     }
                     FilledTonalButton(
                         onClick = onOpenFileManager,
@@ -931,7 +1186,7 @@ private fun DownloadedSongsList(
                     ) {
                         Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Files", style = MaterialTheme.typography.labelMedium)
+                        Text(stringResource(com.lastwave.app.R.string.dl_files), style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
@@ -2063,12 +2318,12 @@ private fun EmptyDownloadsState() {
                 }
             }
             Text(
-                "No Downloaded Songs",
+                stringResource(com.lastwave.app.R.string.dl_empty_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                "Tap the 3-dot menu on any song and select \"Download (Max Quality)\". Lossless FLAC tracks and YouTube audio are saved directly to your device's Music/LastWave folder with embedded metadata & synchronized LRCLIB lyrics.",
+                stringResource(com.lastwave.app.R.string.dl_empty_hint),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

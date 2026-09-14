@@ -534,6 +534,8 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             ACTION_PREVIOUS -> musicPlayer.previous()
             ACTION_TOGGLE -> musicPlayer.togglePlayPause()
             ACTION_NEXT -> musicPlayer.next()
+            ACTION_SHUFFLE -> musicPlayer.toggleShuffle()
+            ACTION_REPEAT -> musicPlayer.cycleRepeatMode()
             ACTION_STOP -> musicPlayer.stopAndClear()
         }
         return START_STICKY
@@ -933,7 +935,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         if (!isPlaybackForeground) {
             if (!promoteForPlayback()) return
         }
-        val signature = "${track.title}|${track.artist}|${track.album}|${state.isPlaying}|${state.isBuffering}|$artworkUrl|${artworkBitmap != null}"
+        val signature = "${track.title}|${track.artist}|${track.album}|${state.isPlaying}|${state.isBuffering}|${state.shuffleEnabled}|${state.repeatMode}|$artworkUrl|${artworkBitmap != null}"
         if (!force && signature == notificationSignature) return
         val success = runCatching {
             getSystemService(NotificationManager::class.java)
@@ -1043,6 +1045,16 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 .setShowActionsInCompactView(0, 1, 2)
             platformSessionToken?.let { mediaStyle.setMediaSession(it) }
 
+            val repeatIcon = when (state.repeatMode) {
+                androidx.media3.common.Player.REPEAT_MODE_ONE -> R.drawable.ic_widget_repeat_one
+                else -> R.drawable.ic_widget_repeat
+            }
+            val repeatLabel = when (state.repeatMode) {
+                androidx.media3.common.Player.REPEAT_MODE_ONE -> "Repeat one"
+                androidx.media3.common.Player.REPEAT_MODE_ALL -> "Repeat all"
+                else -> "Repeat off"
+            }
+
             return builder
                 .setSmallIcon(R.drawable.ic_launcher_logo)
                 .setContentTitle(state.current?.title ?: "LastWave")
@@ -1057,9 +1069,9 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 .setColor(notificationPalette.primary)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setStyle(mediaStyle)
-                .addAction(Notification.Action.Builder(R.drawable.ic_widget_skip_previous, "Previous", serviceAction(ACTION_PREVIOUS, 1)).build())
+                .addAction(Notification.Action.Builder(R.drawable.ic_widget_shuffle, if (state.shuffleEnabled) "Shuffle on" else "Shuffle off", serviceAction(ACTION_SHUFFLE, 5)).build())
                 .addAction(Notification.Action.Builder(if (state.isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play, "Play or pause", serviceAction(ACTION_TOGGLE, 2)).build())
-                .addAction(Notification.Action.Builder(R.drawable.ic_widget_skip_next, "Next", serviceAction(ACTION_NEXT, 3)).build())
+                .addAction(Notification.Action.Builder(repeatIcon, repeatLabel, serviceAction(ACTION_REPEAT, 6)).build())
                 .addAction(Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "Stop", serviceAction(ACTION_STOP, 4)).build())
                 .setColorized(true)
                 .apply {
@@ -1122,9 +1134,18 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             .setCustomContentView(compact)
             .setCustomBigContentView(expanded)
             .setCustomHeadsUpContentView(compact)
-            .addAction(Notification.Action.Builder(R.drawable.ic_widget_skip_previous, "Previous", serviceAction(ACTION_PREVIOUS, 1)).build())
+            .addAction(Notification.Action.Builder(R.drawable.ic_widget_shuffle, "Shuffle", serviceAction(ACTION_SHUFFLE, 5)).build())
             .addAction(Notification.Action.Builder(if (state.isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play, "Play or pause", serviceAction(ACTION_TOGGLE, 2)).build())
-            .addAction(Notification.Action.Builder(R.drawable.ic_widget_skip_next, "Next", serviceAction(ACTION_NEXT, 3)).build())
+            .addAction(
+                Notification.Action.Builder(
+                    when (state.repeatMode) {
+                        androidx.media3.common.Player.REPEAT_MODE_ONE -> R.drawable.ic_widget_repeat_one
+                        else -> R.drawable.ic_widget_repeat
+                    },
+                    "Repeat",
+                    serviceAction(ACTION_REPEAT, 6),
+                ).build(),
+            )
             .addAction(Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "Stop", serviceAction(ACTION_STOP, 4)).build())
             .apply {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) setColorized(true)
@@ -1155,14 +1176,30 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             R.id.notification_play_pause,
             if (state.isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play,
         )
-        setInt(R.id.notification_previous, "setColorFilter", palette.onSurface)
-        setInt(R.id.notification_next, "setColorFilter", palette.onSurface)
+        setImageViewResource(
+            R.id.notification_shuffle,
+            R.drawable.ic_widget_shuffle,
+        )
+        setImageViewResource(
+            R.id.notification_repeat,
+            if (state.repeatMode == androidx.media3.common.Player.REPEAT_MODE_ONE) R.drawable.ic_widget_repeat_one else R.drawable.ic_widget_repeat,
+        )
+        setInt(
+            R.id.notification_shuffle,
+            "setColorFilter",
+            if (state.shuffleEnabled) palette.primary else palette.onSurface,
+        )
+        setInt(
+            R.id.notification_repeat,
+            "setColorFilter",
+            if (state.repeatMode != androidx.media3.common.Player.REPEAT_MODE_OFF) palette.primary else palette.onSurface,
+        )
         setInt(R.id.notification_play_surface, "setColorFilter", palette.primary)
         setInt(R.id.notification_play_pause, "setColorFilter", palette.onPrimary)
         setOnClickPendingIntent(R.id.notification_root, openAppPendingIntent())
-        setOnClickPendingIntent(R.id.notification_previous, serviceAction(ACTION_PREVIOUS, 1))
+        setOnClickPendingIntent(R.id.notification_shuffle, serviceAction(ACTION_SHUFFLE, 5))
         setOnClickPendingIntent(R.id.notification_play_pause, serviceAction(ACTION_TOGGLE, 2))
-        setOnClickPendingIntent(R.id.notification_next, serviceAction(ACTION_NEXT, 3))
+        setOnClickPendingIntent(R.id.notification_repeat, serviceAction(ACTION_REPEAT, 6))
         if (expanded) {
             setTextColor(R.id.notification_brand, palette.primary)
             setTextViewText(R.id.notification_album, state.current?.album.orEmpty())
@@ -1255,6 +1292,8 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         const val ACTION_PREVIOUS = "com.lastwave.app.playback.PREVIOUS"
         const val ACTION_TOGGLE = "com.lastwave.app.playback.TOGGLE"
         const val ACTION_NEXT = "com.lastwave.app.playback.NEXT"
+        const val ACTION_SHUFFLE = "com.lastwave.app.playback.SHUFFLE"
+        const val ACTION_REPEAT = "com.lastwave.app.playback.REPEAT"
         const val ACTION_STOP = "com.lastwave.app.playback.STOP"
     }
 }

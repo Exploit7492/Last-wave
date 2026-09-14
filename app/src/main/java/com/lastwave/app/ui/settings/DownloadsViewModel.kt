@@ -173,6 +173,62 @@ class DownloadsViewModel @Inject constructor(
                 true,
             )
 
+    val downloadFolder: StateFlow<String> =
+        settingsPreferences.settings
+            .map { it.downloadFolder }
+            .withDownloadsFallback(com.lastwave.app.data.local.DEFAULT_DOWNLOAD_FOLDER)
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                com.lastwave.app.data.local.DEFAULT_DOWNLOAD_FOLDER,
+            )
+
+    fun setDownloadFolder(name: String) {
+        launchDownloadAction("update download folder") {
+            settingsPreferences.setDownloadFolder(name)
+        }
+    }
+
+    val downloadStructure: StateFlow<com.lastwave.app.data.local.DownloadFolderStructure> =
+        settingsPreferences.settings
+            .map { it.downloadStructure }
+            .withDownloadsFallback(com.lastwave.app.data.local.DownloadFolderStructure.FLAT)
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                com.lastwave.app.data.local.DownloadFolderStructure.FLAT,
+            )
+
+    val useAlbumArtistForFolders: StateFlow<Boolean> =
+        settingsPreferences.settings
+            .map { it.useAlbumArtistForFolders }
+            .withDownloadsFallback(true)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    val primaryArtistOnly: StateFlow<Boolean> =
+        settingsPreferences.settings
+            .map { it.primaryArtistOnly }
+            .withDownloadsFallback(true)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    fun setDownloadStructure(structure: com.lastwave.app.data.local.DownloadFolderStructure) {
+        launchDownloadAction("update folder structure") {
+            settingsPreferences.setDownloadStructure(structure)
+        }
+    }
+
+    fun setUseAlbumArtistForFolders(enabled: Boolean) {
+        launchDownloadAction("update album-artist folders") {
+            settingsPreferences.setUseAlbumArtistForFolders(enabled)
+        }
+    }
+
+    fun setPrimaryArtistOnly(enabled: Boolean) {
+        launchDownloadAction("update primary-artist filter") {
+            settingsPreferences.setPrimaryArtistOnly(enabled)
+        }
+    }
+
     init {
         launchDownloadAction("sync downloads from storage") {
             downloadManager.syncDownloadsFromStorage()
@@ -305,11 +361,12 @@ class DownloadsViewModel @Inject constructor(
 
     fun openInFileManager() {
         try {
+            val folder = com.lastwave.app.data.local.sanitizeDownloadFolderName(downloadFolder.value)
             val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(Uri.parse(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).path + "/LastWave"), "resource/folder")
+                setDataAndType(Uri.parse(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).path + "/$folder"), "resource/folder")
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
-            context.startActivity(Intent.createChooser(intent, "Open Music/LastWave").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            context.startActivity(Intent.createChooser(intent, context.getString(com.lastwave.app.R.string.dl_open_folder, folder)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (e: Exception) {
             // Fallback
         } catch (error: LinkageError) {

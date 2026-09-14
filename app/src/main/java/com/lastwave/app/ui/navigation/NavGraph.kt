@@ -337,6 +337,7 @@ fun LastWaveNavHost(
                     },
                     onOpenChooseApps = { navController.navigate(Screen.ScrobblerApps.route) },
                     onOpenDownloads = { navController.navigate(Screen.Downloads.route) },
+                    onOpenHomeSections = { navController.navigate(Screen.HomeSections.route) },
                     onOpenExcludedSongs = { navController.navigate(Screen.ExcludedSongs.route) },
                     onOpenYouTubeImport = { navController.navigate(Screen.YouTubeImport.route) },
                     onOpenYouTubeLogin = { navController.navigate(Screen.YouTubeLogin.route) },
@@ -367,6 +368,12 @@ fun LastWaveNavHost(
         composable(Screen.Downloads.route) {
             PredictiveBackScreen(onBack = { navController.popBackStack() }) {
                 com.lastwave.app.ui.settings.DownloadsScreen(onBack = { navController.popBackStack() })
+            }
+        }
+
+        composable(Screen.HomeSections.route) {
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                com.lastwave.app.ui.settings.HomeSectionsScreen(onBack = { navController.popBackStack() })
             }
         }
 

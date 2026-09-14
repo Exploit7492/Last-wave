@@ -30,9 +30,12 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
     @Inject lateinit var ytMusicHistorySyncManager: dagger.Lazy<com.lastwave.app.data.ytmusic.YtMusicHistorySyncManager>
     @Inject lateinit var likedSongsManager: dagger.Lazy<com.lastwave.app.data.playlist.LikedSongsManager>
     @Inject lateinit var trackDownloadManager: dagger.Lazy<com.lastwave.app.data.download.TrackDownloadManager>
+    @Inject lateinit var appLocaleManager: dagger.Lazy<com.lastwave.app.util.AppLocaleManager>
 
     override fun attachBaseContext(base: Context) {
-        super.attachBaseContext(base)
+        // Pin the selected locale before any component (providers, services,
+        // widgets) can load resources with the wrong configuration.
+        super.attachBaseContext(com.lastwave.app.util.AppLocaleManager.wrap(base))
         // Content providers (including AndroidX startup/profile components)
         // are created before Application.onCreate(). Install diagnostics here
         // so failures in that earlier device-dependent phase are not lost.
@@ -41,6 +44,10 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        // Sync per-app locale (Settings -> Language) before any UI is drawn.
+        // AppCompat restores the last requested locale itself; the collector
+        // inside keeps it in sync with DataStore afterwards.
+        runCatching { appLocaleManager.get().start() }
         runCatching { com.lastwave.app.playback.PlaybackDiagnostics.install(this) }
         runCatching { com.lastwave.app.data.music.potoken.BotGuardTokenGenerator.initialize(this) }
         applicationScope.launch(Dispatchers.IO) {

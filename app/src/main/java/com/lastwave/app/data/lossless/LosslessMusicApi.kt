@@ -51,6 +51,7 @@ private data class LosslessTrackItem(
     val id: Long,
     val title: String,
     val duration: Int = 0,
+    val source: String = "qobuz",
     val version: String? = null,
     val performer: LosslessPerformer? = null,
     val performers: String? = null,
@@ -104,7 +105,7 @@ class LosslessMusicApi @Inject constructor(
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
     private val resolutionClient = client.newBuilder()
-        .callTimeout(4, TimeUnit.SECONDS)
+        .callTimeout(6, TimeUnit.SECONDS)
         .build()
     private val json = Json {
         ignoreUnknownKeys = true
@@ -167,12 +168,17 @@ class LosslessMusicApi @Inject constructor(
         private val DIACRITICS = Regex("\\p{M}+")
         private val NON_ALPHANUMERIC = Regex("[^a-z0-9]+")
         private val MULTI_SPACE = Regex("\\s+")
+        private val TOPIC_CHANNEL_SUFFIX = Regex("""(?i)\s*[-–—]\s*topic\s*$|\s+topic\s*$""")
+        private val PIPE_NOISE = Regex("""\s*\|.*$""")
+        private val SOUNDTRACK_SUFFIX = Regex(
+            """(?i)\s*[\[(]\s*from\s+(?:the\s+(?:original\s+)?(?:motion\s+picture|movie|film|soundtrack)\s+)?["“][^"”\r\n]+["”]\s*[\])]\s*$""",
+        )
         private val FEATURING_CLAUSE = Regex("""(?i)(?:\s*[\[(])?\s*(feat\.?|ft\.?|featuring)\s+.*$""")
         private val BRACKETED_DISPLAY_NOISE = Regex(
-            """(?i)[\[(]\s*(?:official\s+)?(?:music\s+)?(?:audio|video|lyrics?|lyric\s+video|visualizer|hd|4k)\s*(?:\]|\))""",
+            """(?i)[\[(]\s*(?:explicit|clean|(?:official\s+)?(?:music\s+)?(?:audio|video|lyrics?|lyric\s+video|visualizer|hd|4k|mv|full\s+song|full\s+audio|prod\.?\s*(?:by\s*)?[^\])]+))\s*[\])]""",
         )
-        private val TRAILING_DISPLAY_NOISE = Regex("""(?i)\s*[-–—]\s*(?:official\s+)?(?:music\s+)?(?:audio|video|lyrics?|visualizer)\s*$""")
-        private val ARTIST_NOISE_WORDS = setOf("the", "and", "feat", "ft", "featuring", "with", "x")
+        private val TRAILING_DISPLAY_NOISE = Regex("""(?i)\s*[-–—]\s*(?:official\s+)?(?:music\s+)?(?:audio|video|lyrics?|visualizer|mv|full\s+song)\s*$""")
+        private val ARTIST_NOISE_WORDS = setOf("the", "and", "feat", "ft", "featuring", "with", "x", "topic")
         private val PERFORMING_ROLE_WORDS = setOf(
             "mainartist", "featuredartist", "performer", "vocal", "vocals", "vocalist", "singer",
         )
@@ -205,6 +211,7 @@ class LosslessMusicApi @Inject constructor(
         expectedDurationSeconds: Int? = null,
         expectedAlbum: String? = null,
         preferredQuality: Int = QUALITY_MAX_HI_RES,
+        excludedUrls: Set<String> = emptySet(),
     ): LosslessAudioStream? = withContext(Dispatchers.IO) {
         if (preferredQuality == QUALITY_YOUTUBE || title.isBlank() || artist.isBlank()) return@withContext null
 
@@ -217,15 +224,19 @@ class LosslessMusicApi @Inject constructor(
                 expectedAlbum = expectedAlbum,
             ) ?: return@withContext null
 
-            // 2. Fetch direct CDN streaming URL with upward/fallback tier resolution
-            val qualitiesToTry = getQualityAttemptOrder(preferredQuality)
+            // 2. Fetch direct CDN streaming URL with fallback tier resolution
+            val directStream = fetchTrackStreamUrl(candidate, preferredQuality, fallback = true)
+            if (directStream != null && directStream.url !in excludedUrls) {
+                return@withContext directStream
+            }
+
+            val qualitiesToTry = getQualityAttemptOrder(preferredQuality).filter { it != preferredQuality }
             for (quality in qualitiesToTry) {
                 currentCoroutineContext().ensureActive()
-                val stream = fetchTrackStreamUrl(candidate, quality, fallback = false)
-                if (stream != null) return@withContext stream
+                val stream = fetchTrackStreamUrl(candidate, quality, fallback = true)
+                if (stream != null && stream.url !in excludedUrls) return@withContext stream
             }
-            // Final fail-open fallback attempt
-            fetchTrackStreamUrl(candidate, preferredQuality, fallback = true)
+            null
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -243,6 +254,13 @@ class LosslessMusicApi @Inject constructor(
             ?: return null
         urlBuilder.addQueryParameter("quality", quality.toString())
         urlBuilder.addQueryParameter("fallback", fallback.toString())
+        urlBuilder.addQueryParameter("title", candidate.title)
+        candidate.performer?.name?.takeIf(String::isNotBlank)?.let {
+            urlBuilder.addQueryParameter("artist", it)
+        }
+        if (candidate.duration > 0) {
+            urlBuilder.addQueryParameter("duration", candidate.duration.toString())
+        }
 
         val requestBuilder = Request.Builder().url(urlBuilder.build()).get()
         if (BACKEND_API_KEY.isNotBlank()) requestBuilder.addHeader("X-API-Key", BACKEND_API_KEY)
@@ -292,8 +310,13 @@ class LosslessMusicApi @Inject constructor(
         val cleanTitle = cleanForSearch(title)
         val cleanArtist = cleanForSearch(artist)
 
+        val individualArtists = artist.split(Regex("""(?i)\s*(?:&|,|\bx\b|feat\.?|ft\.?|featuring|with|\+)\s*"""))
+            .map { cleanForSearch(it) }
+            .filter { it.isNotBlank() }
+
         val queries = listOfNotNull(
             "$cleanTitle $cleanArtist".trim().takeIf { it.isNotBlank() },
+            individualArtists.firstOrNull()?.let { "$cleanTitle $it".trim() }?.takeIf { it.isNotBlank() && it != "$cleanTitle $cleanArtist" },
             "$cleanArtist $cleanTitle".trim().takeIf { it.isNotBlank() },
             cleanTitle.takeIf { it.isNotBlank() },
             title.trim().takeIf { it.isNotBlank() },
@@ -336,7 +359,11 @@ class LosslessMusicApi @Inject constructor(
                         expectedAlbum = expectedAlbum,
                     )?.let { score -> item to score }
                 }
-                .maxByOrNull { it.second }
+                .sortedWith(
+                    compareBy<Pair<LosslessTrackItem, Int>> { it.first.source != "qobuz" }
+                        .thenByDescending { it.second }
+                )
+                .firstOrNull()
                 ?.first
                 ?.let { return it }
         }
@@ -351,26 +378,49 @@ class LosslessMusicApi @Inject constructor(
         expectedDurationSeconds: Int?,
         expectedAlbum: String?,
     ): Int? {
-        val targetTitle = normalizeTitle(title, artist)
-        val candidateTitle = normalizeTitle(item.title, artist)
-        if (targetTitle.isBlank() || targetTitle != candidateTitle) return null
-
-        val targetVariants = identityVariants(title, artist)
-        val candidateVariants = identityVariants("${item.title} ${item.version.orEmpty()}", artist)
-        if (targetVariants != candidateVariants) return null
+        val matchArtist = cleanForSearch(artist).ifBlank { artist }
+        val targetTitle = normalizeTitle(title, matchArtist)
+        val candidateTitle = normalizeTitle(item.title, matchArtist)
+        if (targetTitle.isBlank()) return null
 
         val performer = item.performer?.name.orEmpty()
         val albumArtist = item.album?.artist?.name.orEmpty()
-        if (!isVerifiedArtistMatch(artist, performer, albumArtist, item.performers)) return null
+        val primaryIdentities = listOf(performer, albumArtist)
+            .map(::normalizeText)
+            .filter(String::isNotBlank)
+
+        val targetArtists = matchArtist.split(Regex("""(?i)\s*(?:&|,|\bx\b|feat\.?|ft\.?|featuring|with|\+)\s*"""))
+            .map(::normalizeText)
+            .filter(String::isNotBlank)
+
+        val artistExact = primaryIdentities.any { iden ->
+            targetArtists.any { ta -> iden == ta }
+        }
+
+        val titleDistance = levenshtein(targetTitle, candidateTitle)
+        val isExactMatch = targetTitle == candidateTitle
+        val maxFuzz = (targetTitle.length / 5).coerceIn(1, 2)
+        val isFuzzyMatch = artistExact && titleDistance <= maxFuzz
+        val isDescriptorMatch = artistExact && targetTitle.length >= 4 && candidateTitle.length >= 4 && (
+            (candidateTitle.startsWith(targetTitle) && listOf("rap", "song", "theme", "track", "audio", "music").contains(candidateTitle.substring(targetTitle.length).trim())) ||
+            (targetTitle.startsWith(candidateTitle) && listOf("rap", "song", "theme", "track", "audio", "music").contains(targetTitle.substring(candidateTitle.length).trim()))
+        )
+
+        if (!isExactMatch && !isFuzzyMatch && !isDescriptorMatch) return null
+
+        val targetVariants = identityVariants(title, matchArtist)
+        val candidateVariants = identityVariants("${item.title} ${item.version.orEmpty()}", matchArtist)
+        if (targetVariants != candidateVariants) return null
+
+        if (!isVerifiedArtistMatch(matchArtist, performer, albumArtist, item.performers)) return null
 
         val durationDifference = if (expectedDurationSeconds != null && expectedDurationSeconds > 0) {
             if (item.duration <= 0) return null
             kotlin.math.abs(item.duration - expectedDurationSeconds).also { if (it > MAX_DURATION_DIFFERENCE_SECONDS) return null }
         } else null
 
-        var score = 1_000
-        val normalizedArtist = normalizeText(artist)
-        if (listOf(performer, albumArtist).any { normalizeText(it) == normalizedArtist }) score += 300
+        var score = 1_000 - titleDistance * 50
+        if (artistExact) score += 300
         expectedAlbum?.takeIf(String::isNotBlank)?.let { album ->
             if (normalizeTitle(album, "") == normalizeTitle(item.album?.title.orEmpty(), "")) score += 120
         }
@@ -380,6 +430,9 @@ class LosslessMusicApi @Inject constructor(
 
     private fun cleanForSearch(raw: String): String {
         return raw
+            .replace(TOPIC_CHANNEL_SUFFIX, "")
+            .replace(PIPE_NOISE, "")
+            .replace(SOUNDTRACK_SUFFIX, "")
             .replace(FEATURING_CLAUSE, " ")
             .replace(BRACKETED_DISPLAY_NOISE, " ")
             .replace(TRAILING_DISPLAY_NOISE, " ")
@@ -388,11 +441,41 @@ class LosslessMusicApi @Inject constructor(
     }
 
     private fun normalizeTitle(raw: String, artist: String): String {
-        val withoutArtistPrefix = if (artist.isBlank()) raw else raw.replaceFirst(
-            Regex("""^\s*${Regex.escape(artist)}\s*[-–—:]\s*""", RegexOption.IGNORE_CASE),
-            "",
-        )
-        return normalizeText(cleanForSearch(withoutArtistPrefix))
+        var cleaned = cleanForSearch(raw)
+        if (artist.isNotBlank()) {
+            val cleanArt = cleanForSearch(artist).ifBlank { artist }
+            cleaned = cleaned.replaceFirst(
+                Regex("""^\s*${Regex.escape(cleanArt)}\s*[-–—:]\s*""", RegexOption.IGNORE_CASE),
+                "",
+            )
+            cleaned = cleaned.replace(
+                Regex("""(?i)\s*[-–—:]\s*${Regex.escape(cleanArt)}\s*$"""),
+                "",
+            )
+        }
+        return normalizeText(cleaned)
+    }
+
+    private fun levenshtein(a: String, b: String): Int {
+        if (a == b) return 0
+        if (a.isEmpty()) return b.length
+        if (b.isEmpty()) return a.length
+        var previous = IntArray(b.length + 1) { it }
+        var current = IntArray(b.length + 1)
+        for (i in 1..a.length) {
+            current[0] = i
+            for (j in 1..b.length) {
+                current[j] = minOf(
+                    previous[j] + 1,
+                    current[j - 1] + 1,
+                    previous[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1,
+                )
+            }
+            val swap = previous
+            previous = current
+            current = swap
+        }
+        return previous[b.length]
     }
 
     private fun normalizeText(raw: String): String = Normalizer.normalize(raw, Normalizer.Form.NFD)
@@ -425,6 +508,21 @@ class LosslessMusicApi @Inject constructor(
             .map(::normalizeText)
             .filter(String::isNotBlank)
         if (primaryIdentities.any { it == target }) return true
+
+        val targetArtists = targetArtist.split(Regex("""(?i)\s*(?:&|,|\bx\b|feat\.?|ft\.?|featuring|with|\+)\s*"""))
+            .map(::normalizeText)
+            .filter(String::isNotBlank)
+
+        // Exact match of any individual artist in multi-artist target (e.g. "Lady Gaga" in "Lady Gaga & Bruno Mars")
+        if (primaryIdentities.any { iden -> targetArtists.any { ta -> iden == ta } }) return true
+
+        // Token containment for any individual artist (e.g. "Lady Gaga" in "Lady Gaga, Bruno Mars")
+        for (ta in targetArtists) {
+            val taTokens = ta.split(' ').filter { it !in ARTIST_NOISE_WORDS }.toSet()
+            if (taTokens.isNotEmpty() && primaryIdentities.any { iden -> taTokens.all(iden.split(' ').toSet()::contains) }) {
+                return true
+            }
+        }
 
         val targetTokens = target.split(' ').filter { it !in ARTIST_NOISE_WORDS }.toSet()
         if (targetTokens.isEmpty()) return false

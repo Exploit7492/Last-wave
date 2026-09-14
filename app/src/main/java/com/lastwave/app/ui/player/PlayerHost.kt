@@ -44,7 +44,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -76,6 +78,7 @@ import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.common.isTabletOrWideScreen
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -84,6 +87,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FastForward
@@ -165,6 +169,12 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
@@ -2260,6 +2270,10 @@ internal fun PlayerProgressSlider(
     val range = (valueRange.endInclusive - valueRange.start).coerceAtLeast(0.0001f)
     val fraction = ((value - valueRange.start) / range).coerceIn(0f, 1f)
 
+    // Playback progress is time, not directional content: pin to LTR so the
+    // Material Slider's touch mapping always matches the LTR custom drawing,
+    // even in RTL locales (Arabic, …) where Slider would otherwise mirror.
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
     Slider(
         value = value,
         onValueChange = onValueChange,
@@ -2309,6 +2323,7 @@ internal fun PlayerProgressSlider(
             disabledInactiveTickColor = Color.Transparent,
         ),
     )
+    }
 }
 
 @Composable
@@ -2358,6 +2373,8 @@ private fun SeekBar(
     }
     val textColor = if (isTranslucent) Color.White.copy(alpha = 0.85f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f)
 
+    // Same RTL pin as above: custom Canvas draws LTR, invisible Slider must match it.
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
@@ -2476,6 +2493,7 @@ private fun SeekBar(
                 color = textColor,
             )
         }
+    }
     }
 }
 
@@ -2634,6 +2652,9 @@ private fun PlayerModeButton(
 
 @Composable
 private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, isTranslucent: Boolean = false) {
+    var showSignalPath by remember { mutableStateOf(false) }
+    val signalPath by player.signalPath.collectAsStateWithLifecycle()
+    val usbDac by player.usbDacState.collectAsStateWithLifecycle()
     val edgeButtonBackground = if (isTranslucent) {
         Color.White.copy(alpha = 0.12f)
     } else {
@@ -2676,6 +2697,7 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             contentColor = qualityButtonContent,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
+            onClick = { showSignalPath = true },
             modifier = Modifier.weight(1.3f).height(if (isTranslucent) 44.dp else 48.dp)
                 .liquidGlassChrome(RoundedCornerShape(24.dp), LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
         ) {
@@ -2691,7 +2713,7 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
                     modifier = Modifier.size(17.dp),
                 )
                 Text(
-                    qualityLabel(state),
+                    qualityLabel(state) + if (signalPath.bitPerfect) " • " + stringResource(com.lastwave.app.R.string.signal_bit_perfect) else "",
                     style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.3.sp) else MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                     color = if (isTranslucent) Color.White.copy(alpha = 0.90f) else Color.Unspecified,
                     maxLines = 1,
@@ -2715,11 +2737,47 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
         )
     }
+    if (showSignalPath) {
+        val dac = usbDac.dac
+        SignalPathDialog(
+            report = signalPath,
+            needsUsbPermission = dac != null && dac.hasUsbPeripheral && !dac.usbPermissionGranted,
+            onRequestUsbAccess = player::requestUsbPermission,
+            onDismiss = { showSignalPath = false },
+        )
+    }
 }
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: Modifier = Modifier) {
+    val listState = rememberLazyListState()
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    var draggingIndex by remember { mutableIntStateOf(-1) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+
+    // Stable keys so animateItem() can animate moves instead of treating
+    // every shifted row as a new item. Duplicates get occurrence suffixes.
+    val queueKeys = remember(state.queue) {
+        val counts = mutableMapOf<String, Int>()
+        state.queue.map { item ->
+            val base = item.videoId ?: item.playbackUrl
+                ?: "${item.artist}|${item.title}|${item.album}"
+            val n = counts.getOrDefault(base, 0)
+            counts[base] = n + 1
+            "$base#$n"
+        }
+    }
+    // Abort a stale drag if the queue itself changes underneath us
+    // (track ended, clear-upcoming, fresh playQueue, …).
+    LaunchedEffect(state.queue.size) {
+        if (draggingIndex >= state.queue.size) {
+            draggingIndex = -1
+            dragOffsetY = 0f
+        }
+    }
+
     Column(modifier) {
         Row(
             Modifier.fillMaxWidth().padding(vertical = 12.dp, horizontal = 4.dp),
@@ -2736,6 +2794,13 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (state.queue.size > 1) {
+                    Text(
+                        stringResource(com.lastwave.app.R.string.queue_rearrange_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                }
             }
             IconButton(
                 onClick = player::clearUpcoming,
@@ -2749,11 +2814,14 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
             }
         }
         LazyColumn(
-            Modifier.fillMaxSize(),
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            itemsIndexed(state.queue, key = { index, item -> "$index:${item.videoId ?: item.artist + item.title}" }) { index, item ->
+            itemsIndexed(state.queue, key = { index, _ -> queueKeys.getOrNull(index) ?: index.toString() }) { index, item ->
                 val isCurrent = index == state.currentIndex
+                val isDragging = index == draggingIndex
+                val stableKey = queueKeys.getOrNull(index) ?: index.toString()
                 LiquidGlassSurface(
                     glassModifier = Modifier.liquidGlassChrome(RoundedCornerShape(20.dp), LocalLiquidGlass.current),
                     onClick = { player.seekToQueueItem(index) },
@@ -2764,7 +2832,17 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                     ),
                     contentColor = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer
                     else MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.animateItem(),
+                    modifier = Modifier
+                        .animateItem()
+                        .zIndex(if (isDragging) 1f else 0f)
+                        .graphicsLayer {
+                            translationY = if (isDragging) dragOffsetY else 0f
+                            shadowElevation = if (isDragging) 18f else 0f
+                            val s = if (isDragging) 1.025f else 1f
+                            scaleX = s
+                            scaleY = s
+                            alpha = if (isDragging) 0.96f else 1f
+                        },
                 ) {
                     Row(
                         Modifier.fillMaxWidth().padding(9.dp),
@@ -2796,6 +2874,75 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                                 modifier = Modifier.size(22.dp),
                             )
                         }
+                        Icon(
+                            Icons.Filled.DragHandle,
+                            stringResource(com.lastwave.app.R.string.queue_drag_hint),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isDragging) 1f else 0.6f),
+                            modifier = Modifier
+                                .padding(start = 4.dp)
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    if (isDragging) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                                    else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                                )
+                                .padding(8.dp)
+                                .pointerInput(stableKey) {
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = {
+                                            draggingIndex = index
+                                            dragOffsetY = 0f
+                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        },
+                                        onDragEnd = {
+                                            draggingIndex = -1
+                                            dragOffsetY = 0f
+                                        },
+                                        onDragCancel = {
+                                            draggingIndex = -1
+                                            dragOffsetY = 0f
+                                        },
+                                        onDrag = { change, dragAmount ->
+                                            change.consume()
+                                            val source = draggingIndex
+                                            if (source < 0) return@detectDragGesturesAfterLongPress
+                                            dragOffsetY += dragAmount.y
+                                            val layoutInfo = listState.layoutInfo
+                                            val draggedInfo = layoutInfo.visibleItemsInfo
+                                                .firstOrNull { it.index == source }
+                                                ?: return@detectDragGesturesAfterLongPress
+                                            val draggedCenter = draggedInfo.offset + draggedInfo.size / 2 + dragOffsetY.toInt()
+                                            val target = layoutInfo.visibleItemsInfo.firstOrNull { info ->
+                                                info.index != source &&
+                                                    info.index in state.queue.indices &&
+                                                    draggedCenter in info.offset..(info.offset + info.size)
+                                            }?.index
+                                            if (target != null && target != source) {
+                                                player.moveQueueItem(source, target)
+                                                // Keep the row glued under the finger across
+                                                // the layout shift caused by the move.
+                                                val targetInfo = layoutInfo.visibleItemsInfo
+                                                    .firstOrNull { it.index == target }
+                                                if (targetInfo != null) {
+                                                    dragOffsetY += (draggedInfo.offset - targetInfo.offset).toFloat()
+                                                }
+                                                draggingIndex = target
+                                                haptics.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+                                            }
+                                            // Edge auto-scroll while dragging.
+                                            val viewportStart = layoutInfo.viewportStartOffset
+                                            val viewportEnd = layoutInfo.viewportEndOffset
+                                            val edgeZone = 180
+                                            when {
+                                                draggedCenter < viewportStart + edgeZone ->
+                                                    scope.launch { listState.scrollBy(-28f) }
+                                                draggedCenter > viewportEnd - edgeZone ->
+                                                    scope.launch { listState.scrollBy(28f) }
+                                            }
+                                        },
+                                    )
+                                },
+                        )
                         IconButton(
                             onClick = { player.removeQueueItem(index) },
                             modifier = Modifier
