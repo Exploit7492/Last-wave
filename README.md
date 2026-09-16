@@ -31,6 +31,9 @@
   <a href="https://t.me/MaterialYouApp">
     <img src="https://img.shields.io/badge/Telegram-More%20From%20Us-0088cc?style=for-the-badge&logo=telegram&logoColor=white" alt="More From Us" />
   </a>
+  <a href="https://discord.gg/DmyM2p2fMe">
+    <img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord Community" />
+  </a>
 </p>
 
 <p align="center">
