@@ -177,6 +177,7 @@ class MusicPlayer @Inject constructor(
     private val applicationScope: CoroutineScope,
     private val downloadedTrackDao: dagger.Lazy<com.lastwave.app.data.local.db.DownloadedTrackDao>,
     private val usbDacMonitor: UsbDacMonitor,
+    private val songPlayStatsRepository: dagger.Lazy<com.lastwave.app.data.repository.SongPlayStatsRepository>,
 ) {
     private val appContext = context.applicationContext
     private val streamResolutionWakeLock by lazy {
@@ -363,6 +364,41 @@ class MusicPlayer @Inject constructor(
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     }
 
+    /**
+     * Feeds SongPlayStatsRepository — the real "how much did you actually
+     * listen to this" + skip signal that LocalTasteSuggestionEngine scores
+     * on. Called right before onMediaItemTransition overwrites [_state],
+     * since that's the last moment the outgoing track's position is known.
+     * AUTO transition = the track played out naturally; anything else
+     * (SEEK, via next()/previous()/tapping the queue) with < 85% played is
+     * counted as a skip.
+     */
+    private fun recordLocalListenSignal(reason: Int) {
+        val previousTrack = _state.value.current ?: return
+        val previousPositionMs = _state.value.positionMs
+        val previousDurationMs = _state.value.durationMs
+        if (previousPositionMs <= 0L) return
+        val playedRatio = if (previousDurationMs > 0L) {
+            (previousPositionMs.toDouble() / previousDurationMs.toDouble()).coerceIn(0.0, 1.0)
+        } else 1.0
+        val completedNaturally = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || playedRatio >= 0.85
+        val wasSkip = !completedNaturally
+        applicationScope.launch(Dispatchers.IO) {
+            val repo = songPlayStatsRepository.get()
+            repo.recordListenedMs(
+                title = previousTrack.title,
+                artist = previousTrack.artist,
+                videoId = previousTrack.videoId,
+                artworkUrl = previousTrack.artworkUrl,
+                listenedMs = previousPositionMs,
+                completed = completedNaturally,
+            )
+            if (wasSkip) {
+                repo.recordSkip(previousTrack.title, previousTrack.artist, previousTrack.videoId)
+            }
+        }
+    }
+
     private val listener: Player.Listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
             if (player === this@MusicPlayer.player) refresh(player)
@@ -377,6 +413,7 @@ class MusicPlayer @Inject constructor(
         }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             if (isCasting) return
+            recordLocalListenSignal(reason)
             if (mediaItem != null) {
                 losslessBypassMediaIds.retainAll(setOf(mediaItem.mediaId))
                 if (retryMediaId != mediaItem.mediaId) {
