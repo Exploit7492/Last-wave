@@ -33,6 +33,20 @@
   </a>
 </p>
 
+<p align="center">
+  <a href="https://buymeachai.ezee.li/ajisth69" target="_blank">
+    <img src="https://img.shields.io/badge/UPI-Buy%20Me%20A%20Chai-FF813F?style=for-the-badge&logo=googlepay&logoColor=white" alt="UPI (Buy Me A Chai)" height="34" />
+  </a>
+  &nbsp;
+  <a href="https://buymeacoffee.com/ajisth" target="_blank">
+    <img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ajisth-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black" alt="Buy Me A Coffee" height="34" />
+  </a>
+  &nbsp;
+  <a href="https://github.com/sponsors/ajisth69" target="_blank">
+    <img src="https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="GitHub Sponsors" height="34" />
+  </a>
+</p>
+
 </div>
 
 <br/>
