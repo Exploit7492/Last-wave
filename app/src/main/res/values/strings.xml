@@ -48,8 +48,13 @@
     <string name="settings_modules_empty">No modules installed</string>
 
     <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_theme_mode">Theme</string>
+    <string name="settings_theme_mode_sub">Choose system default, light, or dark</string>
+    <string name="theme_mode_system">System</string>
+    <string name="theme_mode_light">Light</string>
+    <string name="theme_mode_dark">Dark</string>
     <string name="settings_amoled">AMOLED Mode</string>
-    <string name="settings_amoled_sub">Pure black background</string>
+    <string name="settings_amoled_sub">Pure black background (Dark mode only)</string>
     <string name="settings_dynamic_color">Dynamic Color</string>
     <string name="settings_dynamic_color_sub">Use your wallpaper\'s colors</string>
     <string name="settings_dynamic_now_playing">Dynamic Now Playing</string>
