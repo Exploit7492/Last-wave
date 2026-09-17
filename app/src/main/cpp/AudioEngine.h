@@ -57,6 +57,10 @@ public:
 
     void setStudioMasterClarity(bool enabled) noexcept;
     void setBitPerfect(bool enabled) noexcept;
+    // Read-back for UI truthfulness: true only when both DSP instances
+    // actually bypass. Lets the signal-path verdict distinguish
+    // bitPerfectRequested from bitPerfectActuallyActive.
+    [[nodiscard]] bool isBitPerfect() const noexcept;
     void setEqualizer(bool enabled, const float* gainsDb, std::size_t gainCount) noexcept;
 
     [[nodiscard]] bool configureMediaProcessor(

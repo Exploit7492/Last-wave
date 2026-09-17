@@ -24,6 +24,11 @@ import java.nio.ByteBuffer
  * Media3 performs only the final Float32-to-PCM16 conversion. If native/JNI
  * processing itself fails, the untouched source buffer is retried through the
  * plain platform PCM path.
+ *
+ * Bit-Perfect clean path: when requested, decoded PCM of ANY depth
+ * (16/24/32-bit integer or Float) is handed to the platform sink untouched —
+ * no Float conversion, no libsoxr resampler, no DSP container, no AudioFX.
+ * The source sample rate therefore drives the opened AudioTrack directly.
  */
 class NativeProcessingAudioSink(
     private val enhancedDelegate: DefaultAudioSink,
@@ -33,11 +38,18 @@ class NativeProcessingAudioSink(
     private val usbOutput: UsbBitPerfectOutput? = null,
 ) : AudioSink {
     private var activeDelegate: DefaultAudioSink = fallbackDelegate
-    private var processingActive = false
+    // Read on the main thread for the signal-path verdict, written on the
+    // renderer thread — volatile so bypass/stale reads never go stale.
+    @Volatile private var processingActive = false
     private var floatOutputDisabled = false
     private var nativePathDisabled = false
     private var playing = false
     @Volatile private var bitPerfectRequested = false
+    // Generation tracking so the verdict can separate bitPerfectRequested
+    // from bitPerfectActuallyActive: the flag only takes effect when the sink
+    // next configures (next track). A mid-track toggle leaves stale config.
+    @Volatile private var bitPerfectAtConfigure = false
+    @Volatile private var hasConfigured = false
 
     private var configuredFormat: Format? = null
     private var configuredBufferSize = 0
@@ -99,10 +111,26 @@ class NativeProcessingAudioSink(
         clearEndOfStream()
         processingActive = false
         processedFormat = null
+        hasConfigured = true
 
-        if (bitPerfectRequested && format.pcmEncoding == C.ENCODING_PCM_16BIT) {
-            configureFallback(format, specifiedBufferSize, outputChannels)
-            return
+        if (bitPerfectRequested) {
+            Log.i(
+                TAG,
+                "BIT-PERFECT REQUEST srcRate=${format.sampleRate} " +
+                    "srcEnc=${format.pcmEncoding} srcCh=${format.channelCount}",
+            )
+            if (tryConfigureBitPerfectDirect(format, specifiedBufferSize, outputChannels)) {
+                bitPerfectAtConfigure = true
+                return
+            }
+            bitPerfectAtConfigure = false
+            Log.w(
+                TAG,
+                "BIT-PERFECT compat path: direct ${format.pcmEncoding}/${format.sampleRate} Hz " +
+                    "unavailable; DSP-bypassed conversion follows (verdict must fail)",
+            )
+        } else {
+            bitPerfectAtConfigure = false
         }
 
         if (!nativePathDisabled && processor.isAvailable && canProcess(format) &&
@@ -111,6 +139,72 @@ class NativeProcessingAudioSink(
             return
         }
         configureFallback(format, specifiedBufferSize, outputChannels)
+    }
+
+    /**
+     * Dedicated Bit-Perfect clean path for every PCM depth: the decoder's
+     * buffer reaches AudioTrack with no Float conversion, no SRC and no DSP.
+     * Returns false when the device cannot open the source format directly —
+     * the caller then falls through to the DSP-bypassed compatibility path,
+     * which the signal-path verdict must NOT report as bit-perfect.
+     */
+    private fun tryConfigureBitPerfectDirect(
+        format: Format,
+        specifiedBufferSize: Int,
+        outputChannels: IntArray?,
+    ): Boolean {
+        if (format.sampleMimeType != MimeTypes.AUDIO_RAW ||
+            format.sampleRate <= 0 ||
+            format.channelCount !in 1..2 ||
+            format.pcmEncoding !in SUPPORTED_ENCODINGS
+        ) {
+            return false
+        }
+        return try {
+            if (format.pcmEncoding == C.ENCODING_PCM_FLOAT) {
+                // Float sources need a Float AudioTrack to stay bit-exact;
+                // the PCM16-only fallback would quantize them.
+                if (floatOutputDisabled ||
+                    enhancedDelegate.getFormatSupport(format) == AudioSink.SINK_FORMAT_UNSUPPORTED
+                ) {
+                    return false
+                }
+                safeResetProcessor()
+                enhancedDelegate.configure(format, specifiedBufferSize, outputChannels)
+                if (activeDelegate !== enhancedDelegate) safeFlush(fallbackDelegate)
+                activeDelegate = enhancedDelegate
+                processingActive = false
+                processedFormat = null
+                configureUsbOutput(format, C.ENCODING_PCM_FLOAT, outputChannels)
+                notifyPlatformEffectsRequired(false)
+                if (playing) enhancedDelegate.play()
+            } else {
+                // 16/24/32-bit integer PCM straight through in its native
+                // packing: the source rate opens the AudioTrack, so no
+                // LastWave resampler runs at any depth.
+                safeResetProcessor()
+                fallbackDelegate.configure(format, specifiedBufferSize, outputChannels)
+                if (activeDelegate !== fallbackDelegate) safeFlush(enhancedDelegate)
+                activeDelegate = fallbackDelegate
+                processingActive = false
+                processedFormat = null
+                configureUsbOutput(format, format.pcmEncoding, outputChannels)
+                notifyPlatformEffectsRequired(false)
+                if (playing) fallbackDelegate.play()
+            }
+            Log.i(
+                TAG,
+                "BIT-PERFECT OUTPUT ACTUAL rate=${format.sampleRate} enc=${format.pcmEncoding} " +
+                    "ch=${format.channelCount} DSP=false SRC=false softwareGain=false active=true",
+            )
+            true
+        } catch (error: Exception) {
+            Log.w(TAG, "Bit-Perfect direct configure failed", error)
+            false
+        } catch (error: LinkageError) {
+            Log.w(TAG, "Bit-Perfect direct configure linkage failed", error)
+            false
+        }
     }
 
     private fun tryConfigureNativePath(format: Format, outputChannels: IntArray?): Boolean {
@@ -202,7 +296,10 @@ class NativeProcessingAudioSink(
         fallbackDelegate.configure(format, specifiedBufferSize, outputChannels)
         if (activeDelegate !== fallbackDelegate) safeFlush(enhancedDelegate)
         activeDelegate = fallbackDelegate
-        configureUsbOutput(format, C.ENCODING_PCM_16BIT, outputChannels)
+        // Request the mixer format actually sent to AudioTrack (the source
+        // encoding here), not a hardcoded PCM16 that can never match a
+        // 24-bit direct stream on read-back.
+        configureUsbOutput(format, format.pcmEncoding, outputChannels)
         notifyPlatformEffectsRequired(true)
         if (playing) fallbackDelegate.play()
     }
@@ -349,8 +446,16 @@ class NativeProcessingAudioSink(
         activeDelegate.getPlaybackParameters()
 
     override fun setSkipSilenceEnabled(skipSilenceEnabled: Boolean) {
-        enhancedDelegate.setSkipSilenceEnabled(skipSilenceEnabled)
-        fallbackDelegate.setSkipSilenceEnabled(skipSilenceEnabled)
+        // Silence-skipping deletes samples — invisible to the signal-path
+        // verdict, so it must be enforced here rather than merely observed.
+        val effective = if (bitPerfectRequested && skipSilenceEnabled) {
+            Log.w(TAG, "BIT-PERFECT: skip-silence ignored (would remove samples)")
+            false
+        } else {
+            skipSilenceEnabled
+        }
+        enhancedDelegate.setSkipSilenceEnabled(effective)
+        fallbackDelegate.setSkipSilenceEnabled(effective)
     }
 
     override fun getSkipSilenceEnabled(): Boolean =
@@ -371,6 +476,10 @@ class NativeProcessingAudioSink(
     }
 
     override fun setAuxEffectInfo(auxEffectInfo: AuxEffectInfo) {
+        // Aux sends (reverb etc.) recolor PCM and are invisible to the
+        // verdict — never attach them while Bit-Perfect is requested. The app
+        // never sets an aux effect, so dropping the call keeps the chain none.
+        if (bitPerfectRequested) return
         enhancedDelegate.setAuxEffectInfo(auxEffectInfo)
         fallbackDelegate.setAuxEffectInfo(auxEffectInfo)
     }
@@ -395,11 +504,36 @@ class NativeProcessingAudioSink(
         if (processingActive) processedFormat?.sampleRate ?: 0 else configuredFormat?.sampleRate ?: 0
 
     fun setBitPerfectRequested(enabled: Boolean) {
+        if (bitPerfectRequested == enabled) return
         bitPerfectRequested = enabled
         usbOutput?.setEnabled(enabled)
+        if (enabled) {
+            // Push the verdict-invisible modifiers to their neutral state
+            // immediately: a mid-track toggle must not leave a previously
+            // enabled skip/aux attached until the next configure. (Aux sends
+            // are additionally dropped in setAuxEffectInfo while requested.)
+            setSkipSilenceEnabled(false)
+        }
+        Log.i(TAG, "BIT-PERFECT requested=$enabled (takes effect on next configure)")
     }
 
     fun isPlatformBitPerfectConfigured(): Boolean = usbOutput?.isConfigured() == true
+
+    /**
+     * True only when the ACTIVE AudioTrack configuration is the untouched
+     * direct path — requested AND configured direct AND still direct (no
+     * runtime recovery rerouted through conversion since).
+     */
+    fun isBitPerfectBypassActive(): Boolean =
+        bitPerfectRequested && hasConfigured && bitPerfectAtConfigure && !processingActive
+
+    /**
+     * True when the toggle changed after the active configuration was built
+     * (mid-track toggle): the verdict must fail until the next track
+     * reconfigures, instead of claiming bypass for pre-toggle audio.
+     */
+    fun isBitPerfectConfigStale(): Boolean =
+        hasConfigured && (bitPerfectRequested != bitPerfectAtConfigure)
 
     private fun configureUsbOutput(format: Format, encoding: Int, channels: IntArray?) {
         if (format.sampleMimeType != MimeTypes.AUDIO_RAW || format.sampleRate <= 0) {
@@ -488,6 +622,8 @@ class NativeProcessingAudioSink(
         processedFormat = null
         processingActive = false
         playing = false
+        hasConfigured = false
+        bitPerfectAtConfigure = false
         notifyPlatformEffectsRequired(false)
         safeResetProcessor()
         safeReset(enhancedDelegate)
@@ -502,6 +638,8 @@ class NativeProcessingAudioSink(
         processedFormat = null
         processingActive = false
         playing = false
+        hasConfigured = false
+        bitPerfectAtConfigure = false
         notifyPlatformEffectsRequired(false)
         safeResetProcessor()
         try {
@@ -569,7 +707,7 @@ class NativeProcessingAudioSink(
             )
             activeDelegate = fallbackDelegate
             notifyPlatformEffectsRequired(true)
-            configureUsbOutput(format, C.ENCODING_PCM_16BIT, configuredOutputChannels)
+            configureUsbOutput(format, format.pcmEncoding, configuredOutputChannels)
             if (playing) fallbackDelegate.play()
             true
         } catch (fallbackError: Exception) {

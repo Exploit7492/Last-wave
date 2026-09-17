@@ -227,6 +227,7 @@
     <string name="signal_bit_perfect">BIT-PERFECT</string>
     <string name="signal_check_path">CHECK PATH</string>
     <string name="signal_shared_track">Shared AudioTrack</string>
+    <string name="signal_direct_track">Direct USB output</string>
     <string name="signal_verdict_ok">Bit-perfect path verified — PCM untouched to the DAC</string>
     <string name="signal_label_source">Source</string>
     <string name="signal_label_resampler">App resampler</string>

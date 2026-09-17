@@ -304,8 +304,6 @@ fun evaluateSignalPath(i: SignalPathInput): SignalPathReport {
         )
     }
 
-    checks += PathCheck(R.string.signal_label_output,
-        R.string.signal_detail_route_unverified, passed = false)
     return SignalPathReport(
         checks = checks,
         bitPerfect = checks.all { it.passed },

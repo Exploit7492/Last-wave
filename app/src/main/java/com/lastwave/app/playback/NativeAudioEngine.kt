@@ -103,6 +103,14 @@ class NativeAudioEngine @Inject constructor(
         withHandle(Unit) { nativeSetBitPerfect(it, enabled) }
     }
 
+    /**
+     * Read-back of the actual native bypass state (both DSP instances).
+     * Lets callers separate bitPerfectRequested from bitPerfectActuallyActive:
+     * false when the engine is unavailable or the flag never landed.
+     */
+    fun isBitPerfectActive(): Boolean =
+        withHandle(false, ::nativeIsBitPerfect)
+
     /** Updates the native 15-band EQ; its gains are smoothed in C++. */
     fun setEqualizer(enabled: Boolean, gainsDb: FloatArray) {
         require(gainsDb.size == EQUALIZER_BAND_COUNT) { "Expected 15 equalizer bands" }
@@ -310,6 +318,7 @@ class NativeAudioEngine @Inject constructor(
     private external fun nativeSetOutputVolume(handle: Long, volume: Float)
     private external fun nativeSetStudioMasterClarity(handle: Long, enabled: Boolean)
     private external fun nativeSetBitPerfect(handle: Long, enabled: Boolean)
+    private external fun nativeIsBitPerfect(handle: Long): Boolean
     private external fun nativeSetEqualizer(handle: Long, enabled: Boolean, gainsDb: FloatArray)
     private external fun nativeConfigureMediaProcessor(
         handle: Long,

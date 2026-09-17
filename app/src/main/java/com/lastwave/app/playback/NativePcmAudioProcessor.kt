@@ -8,13 +8,15 @@ import java.nio.ByteOrder
 
 /**
  * Converts decoded Media3 PCM to Float32 and runs the C++ DSP in place.
- * The platform fallback preserves source rates through 192 kHz. Oboe output
+ * The platform fallback preserves source rates through 384 kHz. Oboe output
  * instead targets its actual device rate through the native libsoxr HQ path.
  */
 class NativePcmAudioProcessor(
     private val engine: NativeAudioEngine,
     private val maxOutputSampleRateHz: Int = MAX_OUTPUT_SAMPLE_RATE_HZ,
 ) : BaseAudioProcessor() {
+    // Written on the main thread (DAC routing), read on the renderer thread.
+    @Volatile
     var nativeOutputSampleRate: Int = DEFAULT_OUTPUT_SAMPLE_RATE_HZ
         private set
 
@@ -29,6 +31,7 @@ class NativePcmAudioProcessor(
     private var configuredEndTrimFrames = 0
     private var startTrimFramesRemaining = 0
     private var retainedEndBytes = 0
+    @Volatile
     private var outputSampleRateOverrideHz: Int? = null
 
     fun setTrimFrameCount(startFrames: Int, endFrames: Int) {
@@ -50,9 +53,14 @@ class NativePcmAudioProcessor(
         retainedEndBuffer.clear()
     }
 
+    /**
+     * Total setter: out-of-range values are coerced into the supported window
+     * (null clears the override) instead of throwing and leaving a stale
+     * override from the previous track behind.
+     */
     fun setOutputSampleRateOverride(sampleRateHz: Int?) {
-        require(sampleRateHz == null || sampleRateHz in MIN_OUTPUT_SAMPLE_RATE_HZ..MAX_OUTPUT_SAMPLE_RATE_HZ)
-        outputSampleRateOverrideHz = sampleRateHz
+        outputSampleRateOverrideHz =
+            sampleRateHz?.coerceIn(MIN_OUTPUT_SAMPLE_RATE_HZ, MAX_OUTPUT_SAMPLE_RATE_HZ)
     }
 
     fun outputSampleRateFor(inputSampleRate: Int): Int =
@@ -246,7 +254,10 @@ class NativePcmAudioProcessor(
 
     private companion object {
         const val MIN_OUTPUT_SAMPLE_RATE_HZ = 8_000
-        const val MAX_OUTPUT_SAMPLE_RATE_HZ = 192_000
+        // Matches the native engine's accepted device-rate window (384 kHz):
+        // 352.8/384 kHz Hi-Res must pass through to a capable DAC instead of
+        // being force-resampled to 192 kHz while calling it Bit-Perfect.
+        const val MAX_OUTPUT_SAMPLE_RATE_HZ = 384_000
         const val DEFAULT_OUTPUT_SAMPLE_RATE_HZ = 48_000
         const val MAX_TRIM_FRAMES = 1_000_000
         const val RESAMPLER_OUTPUT_HEADROOM_FRAMES = 4_096

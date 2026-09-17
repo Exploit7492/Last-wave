@@ -134,13 +134,19 @@ fun SignalPathDialog(
                 } else {
                     stringResource(R.string.signal_idle)
                 }
-                val sharedTrack = stringResource(R.string.signal_shared_track)
+                // Never claim both at once: a passing verdict means the mixer
+                // granted direct output, otherwise the shared mix applies.
+                val routeTrack = if (report.bitPerfect) {
+                    stringResource(R.string.signal_direct_track)
+                } else {
+                    stringResource(R.string.signal_shared_track)
+                }
                 HealthRow(
                     stringResource(R.string.signal_stream),
                     buildString {
                         append(streamState)
                         if (report.appRateHz > 0) append(" • ${report.appRateHz} Hz")
-                        append(" • $sharedTrack")
+                        append(" • $routeTrack")
                     },
                 )
                 HealthRow(stringResource(R.string.signal_glitches), report.glitchCount.toString())

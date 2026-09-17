@@ -326,7 +326,17 @@ class MusicPlayer @Inject constructor(
     private var errorRetryCount = 0
     private var retryMediaId: String? = null
     private val losslessBypassMediaIds = ConcurrentHashMap.newKeySet<String>()
+    // Written by the settings collector, read on the main thread.
+    @Volatile
     private var bitPerfectEnabled = false
+    /**
+     * Whether the native layer actually honors the current Bit-Perfect
+     * request (read back after every [updateBitPerfectState], not just the
+     * DataStore wish). The verdict ANDs this with the sinks' direct-path
+     * state so the badge can never claim Bit-Perfect on a pref alone.
+     */
+    @Volatile
+    private var nativeBitPerfectApplied = false
     /** Previous system level saved when DAC mode auto-maxed it; -1 = untouched. */
     private var savedSystemVolume = -1
     private var dacVolumeManaged = false
@@ -793,7 +803,10 @@ class MusicPlayer @Inject constructor(
                     restoredPlayer.repeatMode = restoredSession.repeatMode.takeIf {
                         it in Player.REPEAT_MODE_OFF..Player.REPEAT_MODE_ALL
                     } ?: Player.REPEAT_MODE_OFF
-                    restoredPlayer.setPlaybackSpeed(restoredSession.speed.coerceIn(0.5f, 2f))
+                    // A persisted tempo stretch resamples by definition — it
+                    // must not survive into a Bit-Perfect session.
+                    val restoredSpeed = restoredSession.speed.coerceIn(0.5f, 2f)
+                    restoredPlayer.setPlaybackSpeed(if (bitPerfectEnabled) 1f else restoredSpeed)
                     restoredPlayer.pause()
                 }
             }
@@ -1474,10 +1487,25 @@ class MusicPlayer @Inject constructor(
         // Bit-Perfect applies to every stream (Lossless, YouTube Music, local downloads)
         // Completely bypassing native DSP and Android AudioFX processing.
         val effectiveBitPerfect = bitPerfectEnabled
-        runCatching { nativeAudioEngine.get().setBitPerfect(effectiveBitPerfect) }
+        val primaryOk = runCatching {
+            val engine = nativeAudioEngine.get()
+            engine.setBitPerfect(effectiveBitPerfect)
+            engine.isAvailable && engine.isBitPerfectActive() == effectiveBitPerfect
+        }.getOrDefault(false)
         audioEffectsEngine.setBitPerfectActive(effectiveBitPerfect)
-        secondaryNativeEngine?.setBitPerfect(effectiveBitPerfect)
+        val secondaryOk = secondaryNativeEngine?.let { engine ->
+            runCatching {
+                engine.setBitPerfect(effectiveBitPerfect)
+                engine.isAvailable && engine.isBitPerfectActive() == effectiveBitPerfect
+            }.getOrDefault(false)
+        } ?: true
         secondaryEffects?.setBitPerfectActive(effectiveBitPerfect)
+        nativeBitPerfectApplied = primaryOk && secondaryOk
+        android.util.Log.i(
+            "MusicPlayer",
+            "BIT-PERFECT REQUEST enabled=$effectiveBitPerfect nativeApplied=$nativeBitPerfectApplied " +
+                "(primary=$primaryOk secondary=$secondaryOk)",
+        )
     }
 
     /** Forwards USB-access permission requests to [UsbDacMonitor]. */
@@ -1499,6 +1527,9 @@ class MusicPlayer @Inject constructor(
      * Routes ExoPlayer output to the USB DAC at the track's native rate.
      * Always active when a DAC is present (it can only improve delivery);
      * the Bit-Perfect toggle decides bypass, volume policy and verdict.
+     * The SOURCE rate always drives the output-stream request (44.1/48/
+     * 88.2/96/176.4/192/352.8/384 kHz) — never a fixed 48 kHz — so no
+     * LastWave resampler runs when the route accepts the source format.
      */
     private fun applyDacRoutingFor(sourceRateHz: Int?) {
         val dac = usbDacMonitor.state.value.dac
@@ -1511,8 +1542,13 @@ class MusicPlayer @Inject constructor(
         audioSinks.forEach { sink ->
             sink.setBitPerfectRequested(bitPerfectEnabled)
             runCatching { sink.setPreferredDevice(device) }
-            runCatching { sink.setOutputSampleRateOverride(sourceRateHz?.takeIf { device != null }) }
+            runCatching { sink.setOutputSampleRateOverride(sourceRateHz) }
         }
+        android.util.Log.i(
+            "MusicPlayer",
+            "BIT-PERFECT OUTPUT REQUEST srcRate=$sourceRateHz " +
+                "dac=${dac?.name} routed=${device != null} bitPerfect=$bitPerfectEnabled",
+        )
         usbDacMonitor.setRouteRequested(device != null)
         manageDacSystemVolume(device != null && bitPerfectEnabled)
     }
@@ -1592,6 +1628,17 @@ class MusicPlayer @Inject constructor(
         val dac = usbDacMonitor.state.value.dac
         val srcLabel = snapshot.audioCodec
             ?: if (snapshot.isLossless) "LOSSLESS" else "Audio"
+        // Truthful bypass: the DataStore wish AND the native read-back AND an
+        // actually-direct sink configuration — never the toggle alone. A
+        // mid-track toggle (stale) or a compatibility reroute fails closed.
+        val sinkDirect = audioSinks.any { sink ->
+            runCatching { sink.isBitPerfectBypassActive() }.getOrDefault(false)
+        }
+        val sinkStale = audioSinks.any { sink ->
+            runCatching { sink.isBitPerfectConfigStale() }.getOrDefault(false)
+        }
+        val dspBypassActuallyActive =
+            bitPerfectEnabled && nativeBitPerfectApplied && sinkDirect && !sinkStale
         _signalPath.value = evaluateSignalPath(
             SignalPathInput(
                 sourceLabel = srcLabel,
@@ -1600,8 +1647,10 @@ class MusicPlayer @Inject constructor(
                 isLossless = snapshot.isLossless,
                 appOutputRateHz = appRateHz,
                 platformMixerRateHz = platformRateHz,
-                platformBitPerfectConfigured = audioSinks.any { it.isPlatformBitPerfectConfigured() },
-                dspBypassEnabled = bitPerfectEnabled,
+                platformBitPerfectConfigured = audioSinks.any {
+                    runCatching { it.isPlatformBitPerfectConfigured() }.getOrDefault(false)
+                },
+                dspBypassEnabled = dspBypassActuallyActive,
                 crossfadeMixing = outgoingPlayer != null,
                 speed = speed,
                 appVolume = appVolume,

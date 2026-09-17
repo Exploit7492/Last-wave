@@ -401,6 +401,10 @@ void AudioEngine::setBitPerfect(bool enabled) noexcept {
     mediaDsp_.setBitPerfect(enabled);
 }
 
+bool AudioEngine::isBitPerfect() const noexcept {
+    return oboeDsp_.isBitPerfectEnabled() && mediaDsp_.isBitPerfectEnabled();
+}
+
 void AudioEngine::setEqualizer(
     bool enabled,
     const float* gainsDb,
@@ -648,9 +652,14 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
             recoveryFadePosition_ = 0;
         }
 
+        // Bit-perfect must not scale valid PCM: recovery fades and the
+        // output-volume ramp are bypassed so the gain stays exactly 1.0.
+        // Starvation fill below only covers missing frames (no valid
+        // samples exist to preserve there).
+        const bool outputBitPerfect = oboeDsp_.isBitPerfectEnabled();
         for (std::size_t frame = 0; frame < validFrames; ++frame) {
             float recoveryGain = 1.0F;
-            if (recoveryFading_) {
+            if (!outputBitPerfect && recoveryFading_) {
                 if (recoveryFadePosition_ < fadeInCurve_.size()) {
                     recoveryGain = fadeInCurve_[recoveryFadePosition_++];
                 } else {
@@ -668,7 +677,9 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
                 volumeDelta,
                 -outputVolumeRampStep_,
                 outputVolumeRampStep_);
-            const float gain = recoveryGain * currentOutputVolume_;
+            const float gain = outputBitPerfect
+                ? 1.0F
+                : recoveryGain * currentOutputVolume_;
             output[offset] *= gain;
             output[offset + 1U] *= gain;
         }

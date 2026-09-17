@@ -133,6 +133,15 @@ Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetBitPerfect(
     }
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeIsBitPerfect(
+    JNIEnv*,
+    jobject,
+    jlong handle) {
+    const auto* engine = fromHandle(handle);
+    return (engine != nullptr && engine->isBitPerfect()) ? JNI_TRUE : JNI_FALSE;
+}
+
 
 
 extern "C" JNIEXPORT void JNICALL

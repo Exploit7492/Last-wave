@@ -41,7 +41,7 @@ class UsbBitPerfectOutput(private val manager: AudioManager?) {
 
     @Synchronized
     fun setFormat(value: AudioFormat?) {
-        if (format == value) return
+        if (sameFormat(format, value)) return
         clear()
         format = value
         apply()
@@ -53,7 +53,7 @@ class UsbBitPerfectOutput(private val manager: AudioManager?) {
         return runCatching {
             val preferred = manager?.getPreferredMixerAttributes(attributes, requestedDevice!!)
             preferred?.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT &&
-                preferred.format == format
+                sameFormat(preferred.format, format)
         }.getOrDefault(false)
     }
 
@@ -68,7 +68,7 @@ class UsbBitPerfectOutput(private val manager: AudioManager?) {
         if (target.type != AudioDeviceInfo.TYPE_USB_DEVICE && target.type != AudioDeviceInfo.TYPE_USB_HEADSET) return
         runCatching {
             val supported = manager?.getSupportedMixerAttributes(target)?.firstOrNull {
-                it.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT && it.format == pcm
+                it.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT && sameFormat(it.format, pcm)
             } ?: return
             if (manager?.setPreferredMixerAttributes(attributes, target, supported) == true) requestedDevice = target
         }
@@ -80,5 +80,21 @@ class UsbBitPerfectOutput(private val manager: AudioManager?) {
         if (Build.VERSION.SDK_INT >= 34 && previous != null) {
             runCatching { manager?.clearPreferredMixerAttributes(attributes, previous) }
         }
+    }
+
+    /**
+     * AudioFormat does not implement value equality, so referential `==`
+     * never matches a platform-returned descriptor against our request —
+     * every USB request silently failed and read-back was always false.
+     * Compare the fields that define the wire format instead.
+     */
+    private fun sameFormat(a: AudioFormat?, b: AudioFormat?): Boolean {
+        if (a == null || b == null) return a == null && b == null
+        if (a === b) return true
+        return runCatching {
+            a.encoding == b.encoding &&
+                a.sampleRate == b.sampleRate &&
+                a.channelMask == b.channelMask
+        }.getOrDefault(false)
     }
 }
