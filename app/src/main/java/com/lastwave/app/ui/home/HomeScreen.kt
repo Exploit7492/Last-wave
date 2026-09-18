@@ -339,8 +339,7 @@ fun HomeScreen(
                                         rank = row.rank,
                                         onClick = {
                                             artistAlbumNavigator.openArtist(
-                                                name = com.lastwave.app.util.ArtistHelper.primaryArtist(row.artist.name),
-                                                browseId = row.artist.browseId ?: "",
+                                                name = com.lastwave.app.util.ArtistHelper.primaryArtist(row.artist.name)
                                             )
                                         }
                                     )
@@ -350,8 +349,7 @@ fun HomeScreen(
                                         onClick = {
                                             artistAlbumNavigator.openAlbum(
                                                 title = row.album.name,
-                                                artist = com.lastwave.app.util.ArtistHelper.primaryArtist(row.album.artist),
-                                                browseId = row.album.browseId ?: "",
+                                                artist = com.lastwave.app.util.ArtistHelper.primaryArtist(row.album.artist)
                                             )
                                         }
                                     )

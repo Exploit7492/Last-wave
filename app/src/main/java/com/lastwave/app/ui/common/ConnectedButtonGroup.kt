@@ -1,5 +1,6 @@
 package com.lastwave.app.ui.common
 
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -102,7 +103,7 @@ fun ConnectedButtonGroup(
             Surface(
                 modifier = Modifier
                     .weight(1f)
-                    .androidx.compose.ui.zIndex(if (isSelected) 1f else 0f)
+                    .zIndex(if (isSelected) 1f else 0f)
                     .scale(scale)
                     .clickable(
                         interactionSource = interactionSource,
