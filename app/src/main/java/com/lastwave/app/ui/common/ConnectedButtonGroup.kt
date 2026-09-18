@@ -59,15 +59,11 @@ fun ConnectedButtonGroup(
     ) {
         items.forEachIndexed { index, item ->
             val isSelected = index == selectedIndex
-            val shape = if (isSelected) {
-                RoundedCornerShape(20.dp)
-            } else {
-                when {
-                    items.size == 1 -> M3ExpressiveShape.GroupSingle
-                    index == 0 -> M3ExpressiveShape.GroupLeft
-                    index == items.lastIndex -> M3ExpressiveShape.GroupRight
-                    else -> M3ExpressiveShape.GroupMiddle
-                }
+            val shape = when {
+                items.size == 1 -> M3ExpressiveShape.GroupSingle
+                index == 0 -> M3ExpressiveShape.GroupLeft
+                index == items.lastIndex -> M3ExpressiveShape.GroupRight
+                else -> M3ExpressiveShape.GroupMiddle
             }
 
             val interactionSource = remember { MutableInteractionSource() }
@@ -116,7 +112,7 @@ fun ConnectedButtonGroup(
                 shape = shape,
                 color = containerColor,
                 contentColor = contentColor,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                border = null,
                 tonalElevation = if (isSelected) 2.dp else 0.dp,
             ) {
                 Box(

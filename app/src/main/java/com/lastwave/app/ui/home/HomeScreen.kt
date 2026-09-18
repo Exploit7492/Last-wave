@@ -996,7 +996,7 @@ private fun SortOption(
         } else {
             Modifier.padding(horizontal = 6.dp)
         },
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 14.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
     )
 }
 
@@ -1180,13 +1180,6 @@ private fun ArtistRow(
             modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(vertical = 6.dp, horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                "#$rank",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.width(36.dp),
-            )
             Box(
                 modifier = Modifier.size(52.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest),
             ) {
@@ -1234,13 +1227,6 @@ private fun AlbumRow(
             modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(vertical = 6.dp, horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                "#$rank",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.width(36.dp),
-            )
             Box(
                 modifier = Modifier.size(52.dp).clip(ArtworkShape).background(MaterialTheme.colorScheme.surfaceContainerHighest),
             ) {
