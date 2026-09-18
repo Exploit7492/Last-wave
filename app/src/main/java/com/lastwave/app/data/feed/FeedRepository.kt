@@ -675,7 +675,7 @@ class FeedRepository @Inject constructor(
             if (isYtConnected) {
                 add(FeedQuickTile(
                     title = "Liked on YouTube",
-
+                    subtitle = "",
                     artworkUrl = ytLikedSongs.firstOrNull()?.artworkUrl,
                     playlistId = "yt_liked",
                     collection = "yt_liked",

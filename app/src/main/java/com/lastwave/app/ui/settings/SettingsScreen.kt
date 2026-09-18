@@ -2258,24 +2258,35 @@ private fun LastFmIntegrationCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         modifier = Modifier.fillMaxWidth().animateContentSize(),
     ) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = if (isConnected) 14.dp else 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
-                    Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        if (isConnected && username.isNotBlank()) username.take(1).uppercase() else "L",
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium,
+                if (isConnected) {
+                    IconBadge(
+                        Icons.Filled.CloudSync,
+                        MaterialTheme.colorScheme.primaryContainer,
+                        MaterialTheme.colorScheme.onPrimaryContainer,
                     )
+                } else {
+                    Box(
+                        Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "L",
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
                 }
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
@@ -2286,47 +2297,55 @@ private fun LastFmIntegrationCard(
                     )
                     Text(
                         if (isConnected && username.isNotBlank()) username else "Not connected",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
-                    Text(
-                        if (isConnected) "Scrobbles sync globally • Stats from Last.fm"
-                        else "Optional • Stats use local listening when disconnected",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            when {
-                isConnected -> {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        OutlinedButton(
-                            onClick = { showDisconnectConfirm = true },
-                            shape = ExpressivePillShape,
-                            modifier = Modifier.weight(1f),
-                        ) { Text("Disconnect") }
+                    if (!isConnected) {
+                        Text(
+                            "Optional • Stats use local listening when disconnected",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
-                awaitingApproval || connecting -> {
-                    com.lastwave.app.ui.common.ExpressiveLoadingIndicator(
-                        message = if (connecting) "Connecting to Last.fm…" else "Waiting for approval in the browser…",
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    TextButton(onClick = onCancel) { Text("Cancel") }
+                if (isConnected) {
+                    Spacer(Modifier.width(8.dp))
+                    FilledTonalIconButton(
+                        onClick = { showDisconnectConfirm = true },
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        ),
+                    ) {
+                        Icon(Icons.Filled.Logout, contentDescription = "Disconnect")
+                    }
                 }
-                else -> {
-                    Button(
-                        onClick = onConnect,
-                        enabled = hasApiKey,
-                        shape = ExpressivePillShape,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Connect Last.fm") }
-                    Text(
-                        if (hasApiKey) "Approve in your browser. You can disconnect anytime — Stats keep working locally."
-                        else "Add your API key below first, then connect.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            }
+            if (!isConnected) {
+                when {
+                    awaitingApproval || connecting -> {
+                        com.lastwave.app.ui.common.ExpressiveLoadingIndicator(
+                            message = if (connecting) "Connecting to Last.fm…" else "Waiting for approval in the browser…",
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        TextButton(onClick = onCancel) { Text("Cancel") }
+                    }
+                    else -> {
+                        Button(
+                            onClick = onConnect,
+                            enabled = hasApiKey,
+                            shape = ExpressivePillShape,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Connect Last.fm") }
+                        Text(
+                            if (hasApiKey) "Approve in your browser. You can disconnect anytime — Stats keep working locally."
+                            else "Add your API key below first, then connect.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 

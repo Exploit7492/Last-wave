@@ -1122,16 +1122,19 @@ private fun QuickTileCard(
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                Text(
-                    text = tile.subtitle ?: if (tile.actionVideoId != null) "Track" else "Playlist",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontSize = 11.sp,
-                        lineHeight = 14.sp,
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                )
+                val finalSubtitle = tile.subtitle ?: if (tile.actionVideoId != null) "Track" else "Playlist"
+                if (finalSubtitle.isNotEmpty()) {
+                    Text(
+                        text = finalSubtitle,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp,
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                    )
+                }
             }
         }
     }
