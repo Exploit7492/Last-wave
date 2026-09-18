@@ -208,6 +208,8 @@ private data class RowsKey(
     val topTracksOverall: List<HomeTrack>,
     val topTracks7Days: List<HomeTrack>,
     val topTracks30Days: List<HomeTrack>,
+    val topArtists: List<com.lastwave.app.data.repository.HomeArtistItem>,
+    val topAlbums: List<com.lastwave.app.data.repository.HomeAlbum>,
 )
 
 
@@ -302,6 +304,8 @@ class HomeViewModel @Inject constructor(
                         topTracksOverall = it.topTracksOverall,
                         topTracks7Days = it.topTracks7Days,
                         topTracks30Days = it.topTracks30Days,
+                        topArtists = it.topArtists,
+                        topAlbums = it.topAlbums,
                     )
                 }
                 .distinctUntilChanged()
@@ -314,6 +318,8 @@ class HomeViewModel @Inject constructor(
                             topTracksOverall = key.topTracksOverall,
                             topTracks7Days = key.topTracks7Days,
                             topTracks30Days = key.topTracks30Days,
+                            topArtists = key.topArtists,
+                            topAlbums = key.topAlbums,
                         ).visibleRows()
                     }
                     _rows.value = computed

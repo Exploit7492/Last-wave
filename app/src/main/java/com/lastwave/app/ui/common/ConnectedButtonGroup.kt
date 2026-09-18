@@ -53,12 +53,21 @@ fun ConnectedButtonGroup(
     val haptic = LocalHapticFeedback.current
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy((-1).dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         items.forEachIndexed { index, item ->
             val isSelected = index == selectedIndex
-            val shape = RoundedCornerShape(20.dp)
+            val shape = if (isSelected) {
+                RoundedCornerShape(20.dp)
+            } else {
+                when {
+                    items.size == 1 -> M3ExpressiveShape.GroupSingle
+                    index == 0 -> M3ExpressiveShape.GroupLeft
+                    index == items.lastIndex -> M3ExpressiveShape.GroupRight
+                    else -> M3ExpressiveShape.GroupMiddle
+                }
+            }
 
             val interactionSource = remember { MutableInteractionSource() }
             val isPressed by interactionSource.collectIsPressedAsState()
@@ -93,6 +102,7 @@ fun ConnectedButtonGroup(
             Surface(
                 modifier = Modifier
                     .weight(1f)
+                    .androidx.compose.ui.zIndex(if (isSelected) 1f else 0f)
                     .scale(scale)
                     .clickable(
                         interactionSource = interactionSource,

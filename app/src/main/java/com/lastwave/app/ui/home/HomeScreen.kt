@@ -164,6 +164,7 @@ fun HomeScreen(
     onOpenGenres: () -> Unit,
     onOpenFriends: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
+    artistAlbumNavigator: com.lastwave.app.ui.navigation.ArtistAlbumNavigator = hiltViewModel<ArtistAlbumNavBridgeHome>().navigator,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -248,29 +249,7 @@ fun HomeScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
-            uiState.nowPlaying?.let { np ->
-                val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
-                HomeNowPlayingBanner(
-                    track = np,
-                    onPlay = {
-                        musicPlayer.play(
-                            com.lastwave.app.playback.PlayableTrack(title = np.name, artist = np.artist, artworkUrl = np.artworkUrl),
-                            sourceLabel = "Now Playing",
-                            startRadio = false
-                        )
-                    },
-                    onStartMix = {
-                        musicPlayer.play(
-                            com.lastwave.app.playback.PlayableTrack(title = np.name, artist = np.artist, artworkUrl = np.artworkUrl),
-                            sourceLabel = "Now Playing",
-                            startRadio = true
-                        )
-                    },
-                    onMenuClick = { menuTrack = np },
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
-                Spacer(Modifier.height(12.dp))
-            }
+
 
 
 
@@ -355,8 +334,27 @@ fun HomeScreen(
                             Box {
                                 when (row) {
                                     is HomeRow.DateHeader -> DateHeaderRow(row.label)
-                                    is HomeRow.Artist -> ArtistRow(row.artist, row.rank)
-                                    is HomeRow.Album -> AlbumRow(row.album, row.rank)
+                                    is HomeRow.Artist -> ArtistRow(
+                                        artist = row.artist, 
+                                        rank = row.rank,
+                                        onClick = {
+                                            artistAlbumNavigator.openArtist(
+                                                name = com.lastwave.app.util.ArtistHelper.primaryArtist(row.artist.name),
+                                                browseId = row.artist.browseId ?: "",
+                                            )
+                                        }
+                                    )
+                                    is HomeRow.Album -> AlbumRow(
+                                        album = row.album, 
+                                        rank = row.rank,
+                                        onClick = {
+                                            artistAlbumNavigator.openAlbum(
+                                                title = row.album.name,
+                                                artist = com.lastwave.app.util.ArtistHelper.primaryArtist(row.album.artist),
+                                                browseId = row.album.browseId ?: "",
+                                            )
+                                        }
+                                    )
                                     is HomeRow.Track -> TrackRow(
                                         track = row.track,
                                         badge = row.badge,
@@ -1172,8 +1170,10 @@ private fun TrackRow(
 private fun ArtistRow(
     artist: com.lastwave.app.data.repository.HomeArtistItem,
     rank: Int,
+    onClick: () -> Unit,
 ) {
     Surface(
+        onClick = onClick,
         shape = TrackRowShape,
         color = Color.Transparent,
         modifier = Modifier.fillMaxWidth(),
@@ -1224,8 +1224,10 @@ private fun ArtistRow(
 private fun AlbumRow(
     album: com.lastwave.app.data.repository.HomeAlbum,
     rank: Int,
+    onClick: () -> Unit,
 ) {
     Surface(
+        onClick = onClick,
         shape = TrackRowShape,
         color = Color.Transparent,
         modifier = Modifier.fillMaxWidth(),
@@ -1407,3 +1409,6 @@ private fun HomeNowPlayingBanner(
         }
     }
 }
+
+@dagger.hilt.android.lifecycle.HiltViewModel
+class ArtistAlbumNavBridgeHome @javax.inject.Inject constructor(val navigator: com.lastwave.app.ui.navigation.ArtistAlbumNavigator) : androidx.lifecycle.ViewModel()

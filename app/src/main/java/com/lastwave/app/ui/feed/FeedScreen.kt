@@ -1064,8 +1064,7 @@ private fun QuickTileCard(
             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
         ),
         modifier = modifier
-            .width(136.dp)
-            .height(148.dp),
+            .width(136.dp),
     ) {
         Column(
             modifier = Modifier

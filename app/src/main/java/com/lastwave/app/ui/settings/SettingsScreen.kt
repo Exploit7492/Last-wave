@@ -845,7 +845,12 @@ fun SettingsScreen(
                         else -> "Max (24-bit / 192 kHz FLAC)"
                     }
 
-                    val totalAudioRows = if (misc.crossfadeEnabled) 7 else 6
+                    val isIgnored = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
+                    val totalAudioRows = if (misc.crossfadeEnabled) {
+                        if (isIgnored) 6 else 7
+                    } else {
+                        if (isIgnored) 5 else 6
+                    }
                     SettingsGroup(rowCount = totalAudioRows) { index, position ->
                         when (index) {
                             0 -> SettingsActionCard(
@@ -933,34 +938,24 @@ fun SettingsScreen(
                                     onCheckedChange = viewModel::setDownloadLyrics,
                                     position = position,
                                 )
-                            } else {
-                                val isIgnored = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
+                            } else if (!isIgnored) {
                                 SettingsActionCard(
                                     icon = Icons.Filled.Bolt,
-                                    iconContainer = if (isIgnored) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
-                                    iconTint = if (isIgnored) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                                    iconContainer = MaterialTheme.colorScheme.errorContainer,
+                                    iconTint = MaterialTheme.colorScheme.onErrorContainer,
                                     title = stringResource(R.string.settings_battery_title),
-                                    subtitle = if (isIgnored) {
-                                        "Unrestricted \u2022 Protected against Samsung & OEM background killing"
-                                    } else {
-                                        "Restricted \u2022 Tap to exempt from Samsung Device Care / sleeping apps"
-                                    },
+                                    subtitle = "Restricted \u2022 Tap to exempt from Samsung Device Care / sleeping apps",
                                     onClick = { BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context) },
                                     position = position,
                                 )
                             }
-                            6 -> {
-                                val isIgnored = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
+                            6 -> if (!isIgnored) {
                                 SettingsActionCard(
                                     icon = Icons.Filled.Bolt,
-                                    iconContainer = if (isIgnored) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
-                                    iconTint = if (isIgnored) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                                    iconContainer = MaterialTheme.colorScheme.errorContainer,
+                                    iconTint = MaterialTheme.colorScheme.onErrorContainer,
                                     title = stringResource(R.string.settings_battery_title),
-                                    subtitle = if (isIgnored) {
-                                        "Unrestricted \u2022 Protected against Samsung & OEM background killing"
-                                    } else {
-                                        "Restricted \u2022 Tap to exempt from Samsung Device Care / sleeping apps"
-                                    },
+                                    subtitle = "Restricted \u2022 Tap to exempt from Samsung Device Care / sleeping apps",
                                     onClick = { BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context) },
                                     position = position,
                                 )
