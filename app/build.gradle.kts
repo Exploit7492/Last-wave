@@ -106,7 +106,7 @@ android {
     }
 
     signingConfigs {
-        create("release") {
+        create("release_config") {
             val base64Key = resolveSecret("SIGNING_KEY")
             val storeFilePath = resolveSecret("RELEASE_STORE_FILE")
             val storePasswordProp = resolveSecret("RELEASE_STORE_PASSWORD", "KEY_STORE_PASSWORD")
@@ -147,7 +147,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName("release_config")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         create("rawRelease") {
@@ -155,7 +155,7 @@ android {
             isMinifyEnabled = false
             isShrinkResources = false
             // Raw variant — no code/resource shrinking, no ProGuard/R8
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName("release_config")
             // proguardFiles from initWith are ignored when minify is off
         }
         debug {
