@@ -80,6 +80,11 @@ import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
@@ -238,6 +243,30 @@ fun HomeScreen(
                     headlineLabel = if (uiState.isLocalStatsMode && !uiState.isViewingFriend) "Plays" else "Scrobbles",
                     onOpenGenres = onOpenGenres,
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 0.dp),
+                )
+                Spacer(Modifier.height(12.dp))
+            }
+
+            uiState.nowPlaying?.let { np ->
+                val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
+                HomeNowPlayingBanner(
+                    track = np,
+                    onPlay = {
+                        musicPlayer.play(
+                            com.lastwave.app.playback.PlayableTrack(title = np.name, artist = np.artist, artworkUrl = np.artworkUrl),
+                            sourceLabel = "Now Playing",
+                            startRadio = false
+                        )
+                    },
+                    onStartMix = {
+                        musicPlayer.play(
+                            com.lastwave.app.playback.PlayableTrack(title = np.name, artist = np.artist, artworkUrl = np.artworkUrl),
+                            sourceLabel = "Now Playing",
+                            startRadio = true
+                        )
+                    },
+                    onMenuClick = { menuTrack = np },
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
                 Spacer(Modifier.height(12.dp))
             }
@@ -1124,6 +1153,140 @@ private fun TrackRow(
             // Item 1 (consistency pass): the same OverflowMenuButton is now
             // used on every screen's song list, not just Home.
             com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenuClick)
+        }
+    }
+}
+
+@Composable
+private fun HomeNowPlayingBanner(
+    track: HomeTrack,
+    onPlay: () -> Unit,
+    onStartMix: () -> Unit,
+    onMenuClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = NowPlayingCardShape,
+        color = Color.Transparent,
+        tonalElevation = 2.dp,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .clip(NowPlayingCardShape)
+            .background(
+                Brush.horizontalGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f),
+                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f),
+                    ),
+                ),
+            ),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Surface(
+                    shape = BadgePillShape,
+                    color = MaterialTheme.colorScheme.primary,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        com.lastwave.app.ui.player.PlayingWaveBars(
+                            modifier = Modifier.size(14.dp, 12.dp),
+                            waveColor = MaterialTheme.colorScheme.onPrimary,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "NOW PLAYING",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
+                }
+                IconButton(onClick = onMenuClick, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        Icons.Filled.MoreVert,
+                        contentDescription = "Menu",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(ArtworkShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                ) {
+                    ArtworkImage(
+                        name = track.name,
+                        artist = track.artist,
+                        embeddedUrl = track.artworkUrl,
+                        fallbackIcon = Icons.Filled.GraphicEq,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = track.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = track.artist,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = onPlay,
+                    modifier = Modifier.weight(1f).height(38.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    shape = BadgePillShape,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Play", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                }
+                androidx.compose.material3.OutlinedButton(
+                    onClick = onStartMix,
+                    modifier = Modifier.weight(1f).height(38.dp),
+                    shape = BadgePillShape,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                    Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Mix", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                }
+            }
         }
     }
 }
