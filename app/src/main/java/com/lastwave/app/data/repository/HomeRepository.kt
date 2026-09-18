@@ -506,7 +506,7 @@ class HomeRepository @Inject constructor(
 
     private suspend fun fetchInitialDataInternal(username: String): Result<HomeInitialData> = try {
         coroutineScope {
-            val recentDeferred = async(Dispatchers.IO) { fetchRecentTracks(username = username) }
+            val recentDeferred = async(Dispatchers.IO) { fetchRecentTracks(limit = 200, username = username) }
             val statsDeferred = async(Dispatchers.IO) { fetchStats(username = username) }
             val topTracksDeferred = async(Dispatchers.IO) { fetchTopTracksOverall(username = username) }
 

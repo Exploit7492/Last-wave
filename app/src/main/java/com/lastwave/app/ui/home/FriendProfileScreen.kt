@@ -224,13 +224,41 @@ fun FriendProfileScreen(
                         // 3. Listening Statistics Card
                         item(key = "friend_stats") {
                             uiState.stats?.let { stats ->
-                                FriendStatsCard(
-                                    scrobbles = stats.scrobbles,
-                                    trackCount = stats.trackCount,
-                                    artistCount = stats.artistCount,
-                                    albumCount = stats.albumCount,
-                                    timerBaseSeconds = stats.timerBaseSeconds,
-                                )
+                                Column {
+                                    if (stats.timerBaseSeconds > 0) {
+                                        Surface(
+                                            shape = BadgePillShape,
+                                            color = MaterialTheme.colorScheme.primaryContainer,
+                                            modifier = Modifier.padding(bottom = 6.dp, start = 4.dp),
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.Headset,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                )
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(
+                                                    "Total Listen Duration: ${formatDuration(stats.timerBaseSeconds)}",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                )
+                                            }
+                                        }
+                                    }
+                                    FriendStatsCard(
+                                        scrobbles = stats.scrobbles,
+                                        trackCount = stats.trackCount,
+                                        artistCount = stats.artistCount,
+                                        albumCount = stats.albumCount,
+                                        timerBaseSeconds = stats.timerBaseSeconds,
+                                    )
+                                }
                             }
                         }
 
@@ -643,32 +671,6 @@ private fun FriendStatsCard(
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
                         )
-                    }
-                    if (timerBaseSeconds > 0) {
-                        Surface(
-                            shape = BadgePillShape,
-                            color = liquidGlassContainerColor(MaterialTheme.colorScheme.surface.copy(alpha = 0.45f)),
-                            modifier = Modifier.align(Alignment.TopEnd).liquidGlassChrome(BadgePillShape, LocalLiquidGlass.current),
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            ) {
-                                Icon(
-                                    Icons.Filled.Headset,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(13.dp),
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Text(
-                                    formatDuration(timerBaseSeconds),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
-                            }
-                        }
                     }
                 }
             }

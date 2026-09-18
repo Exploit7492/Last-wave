@@ -984,12 +984,13 @@ private fun SortOption(
         modifier = if (active) {
             Modifier
                 .padding(horizontal = 6.dp)
+                .height(40.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f))
         } else {
-            Modifier.padding(horizontal = 6.dp)
+            Modifier.padding(horizontal = 6.dp).height(40.dp)
         },
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 14.dp),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
     )
 }
 

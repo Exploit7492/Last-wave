@@ -299,6 +299,7 @@ fun FeedScreen(
                     }
                     if (isSectionVisible(HomeSection.QUICK_TILES) && quickTiles.isNotEmpty()) {
                         item(key = "quick_tiles") {
+                            FeedSectionHeader(title = "Quick access")
                             QuickTilesGrid(
                                 tiles = quickTiles,
                                 onTileClick = { tile ->
@@ -1022,7 +1023,9 @@ private fun QuickTileCard(
     val tileShape = RoundedCornerShape(18.dp)
 
     // Per-type vibrant gradient pairs for the artwork/icon box matching modern expressive designs
-    val isLikedTile = tile.isLiked || tile.collection == "yt_liked" || tile.playlistId == "yt_liked"
+    val isYtLikedTile = tile.collection == "yt_liked" || tile.playlistId == "yt_liked"
+    val isLocalLikedTile = tile.isLiked && !isYtLikedTile
+    val isLikedTile = isYtLikedTile || isLocalLikedTile
     val isMixTile = tile.collection == "radio" || tile.title.contains("Mix", ignoreCase = true)
     val isNewReleasesTile = tile.collection == "new_releases"
 
@@ -1061,8 +1064,7 @@ private fun QuickTileCard(
             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
         ),
         modifier = modifier
-            .width(136.dp)
-            .height(148.dp),
+            .width(136.dp),
     ) {
         Column(
             modifier = Modifier
@@ -1078,18 +1080,18 @@ private fun QuickTileCard(
                     .background(iconGradient),
                 contentAlignment = Alignment.Center,
             ) {
-                if (!tile.artworkUrl.isNullOrBlank() && !isLikedTile && !isMixTile) {
-                    AsyncImage(
-                        model = tile.artworkUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                } else if (isLikedTile) {
+                if (isYtLikedTile) {
                     Icon(
                         Icons.Filled.ThumbUp,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(36.dp),
+                    )
+                } else if (isLocalLikedTile) {
+                    Icon(
+                        Icons.Filled.ThumbUp,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.size(36.dp),
                     )
                 } else if (isMixTile) {
@@ -1107,11 +1109,12 @@ private fun QuickTileCard(
                         modifier = Modifier.size(36.dp),
                     )
                 } else {
-                    Icon(
-                        Icons.Filled.MusicNote,
-                        contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.9f),
-                        modifier = Modifier.size(36.dp),
+                    ArtworkImage(
+                        name = tile.title,
+                        artist = tile.subtitle ?: "",
+                        embeddedUrl = tile.artworkUrl,
+                        fallbackIcon = if (isMixTile) Icons.Filled.AutoAwesome else Icons.Filled.Album,
+                        modifier = Modifier.fillMaxSize(),
                     )
                 }
             }
@@ -1133,16 +1136,19 @@ private fun QuickTileCard(
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                Text(
-                    text = tile.subtitle ?: if (tile.actionVideoId != null) "Track" else "Playlist",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontSize = 11.sp,
-                        lineHeight = 14.sp,
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                )
+                val finalSubtitle = tile.subtitle ?: if (tile.actionVideoId != null) "Track" else "Playlist"
+                if (finalSubtitle.isNotEmpty()) {
+                    Text(
+                        text = finalSubtitle,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp,
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                    )
+                }
             }
         }
     }
