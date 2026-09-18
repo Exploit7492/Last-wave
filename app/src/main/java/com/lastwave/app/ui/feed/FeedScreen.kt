@@ -299,6 +299,7 @@ fun FeedScreen(
                     }
                     if (isSectionVisible(HomeSection.QUICK_TILES) && quickTiles.isNotEmpty()) {
                         item(key = "quick_tiles") {
+                            FeedSectionHeader(title = "Quick access")
                             QuickTilesGrid(
                                 tiles = quickTiles,
                                 onTileClick = { tile ->
@@ -1022,7 +1023,9 @@ private fun QuickTileCard(
     val tileShape = RoundedCornerShape(18.dp)
 
     // Per-type vibrant gradient pairs for the artwork/icon box matching modern expressive designs
-    val isLikedTile = tile.isLiked || tile.collection == "yt_liked" || tile.playlistId == "yt_liked"
+    val isYtLikedTile = tile.collection == "yt_liked" || tile.playlistId == "yt_liked"
+    val isLocalLikedTile = tile.isLiked && !isYtLikedTile
+    val isLikedTile = isYtLikedTile || isLocalLikedTile
     val isMixTile = tile.collection == "radio" || tile.title.contains("Mix", ignoreCase = true)
     val isNewReleasesTile = tile.collection == "new_releases"
 
@@ -1078,40 +1081,27 @@ private fun QuickTileCard(
                     .background(iconGradient),
                 contentAlignment = Alignment.Center,
             ) {
-                if (!tile.artworkUrl.isNullOrBlank() && !isLikedTile && !isMixTile) {
-                    AsyncImage(
-                        model = tile.artworkUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                } else if (isLikedTile) {
+                if (isYtLikedTile) {
                     Icon(
                         Icons.Filled.ThumbUp,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(36.dp),
                     )
-                } else if (isMixTile) {
+                } else if (isLocalLikedTile) {
                     Icon(
-                        Icons.Filled.AutoAwesome,
+                        Icons.Filled.Favorite,
                         contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(36.dp),
-                    )
-                } else if (isNewReleasesTile) {
-                    Icon(
-                        Icons.Filled.NewReleases,
-                        contentDescription = null,
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.size(36.dp),
                     )
                 } else {
-                    Icon(
-                        Icons.Filled.MusicNote,
-                        contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.9f),
-                        modifier = Modifier.size(36.dp),
+                    ArtworkImage(
+                        name = tile.title,
+                        artist = tile.subtitle ?: "",
+                        embeddedUrl = tile.artworkUrl,
+                        fallbackIcon = if (isMixTile) Icons.Filled.AutoAwesome else Icons.Filled.Album,
+                        modifier = Modifier.fillMaxSize(),
                     )
                 }
             }

@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headset
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.automirrored.filled.Sort
@@ -271,15 +272,7 @@ fun HomeScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
-            if (uiState.topArtists.isNotEmpty() || uiState.topAlbums.isNotEmpty() || uiState.topTags.isNotEmpty()) {
-                PodiumSection(
-                    artists = uiState.topArtists,
-                    albums = uiState.topAlbums,
-                    tags = uiState.topTags,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 0.dp),
-                )
-                Spacer(Modifier.height(12.dp))
-            }
+
 
             PullToRefreshBox(
                 isRefreshing = uiState.isRefreshing,
@@ -346,18 +339,24 @@ fun HomeScreen(
                                     } else {
                                         "track_${row.track.key}_${row.track.timestampMillis}"
                                     }
+                                    is HomeRow.Artist -> "artist_${row.artist.name}"
+                                    is HomeRow.Album -> "album_${row.album.name}_${row.album.artist}"
                                 }
                             },
                             contentType = { _, row ->
                                 when (row) {
                                     is HomeRow.DateHeader -> "date"
                                     is HomeRow.Track -> "track"
+                                    is HomeRow.Artist -> "artist"
+                                    is HomeRow.Album -> "album"
                                 }
                             },
                         ) { rowIndex, row ->
                             Box {
                                 when (row) {
                                     is HomeRow.DateHeader -> DateHeaderRow(row.label)
+                                    is HomeRow.Artist -> ArtistRow(row.artist, row.rank)
+                                    is HomeRow.Album -> AlbumRow(row.album, row.rank)
                                     is HomeRow.Track -> TrackRow(
                                         track = row.track,
                                         badge = row.badge,
@@ -923,7 +922,7 @@ private fun MixHeader(sortMode: HomeSortMode, onSortModeChange: (HomeSortMode) -
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSortModeChange(HomeSortMode.RECENT); menuOpen = false
                 }
-                SortOption(Icons.Filled.BarChart, "Most Played", sortMode == HomeSortMode.MOST_PLAYED) {
+                SortOption(Icons.Filled.BarChart, "Top Tracks", sortMode == HomeSortMode.MOST_PLAYED) {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSortModeChange(HomeSortMode.MOST_PLAYED); menuOpen = false
                 }
@@ -935,6 +934,14 @@ private fun MixHeader(sortMode: HomeSortMode, onSortModeChange: (HomeSortMode) -
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSortModeChange(HomeSortMode.LAST_30_DAYS); menuOpen = false
                 }
+                SortOption(Icons.Filled.People, "Top Artists", sortMode == HomeSortMode.TOP_ARTISTS) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSortModeChange(HomeSortMode.TOP_ARTISTS); menuOpen = false
+                }
+                SortOption(Icons.Filled.Album, "Top Albums", sortMode == HomeSortMode.TOP_ALBUMS) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSortModeChange(HomeSortMode.TOP_ALBUMS); menuOpen = false
+                }
             }
         }
     }
@@ -945,13 +952,17 @@ private fun iconForSortMode(mode: HomeSortMode): androidx.compose.ui.graphics.ve
     HomeSortMode.MOST_PLAYED -> Icons.Filled.BarChart
     HomeSortMode.LAST_7_DAYS -> Icons.Filled.DateRange
     HomeSortMode.LAST_30_DAYS -> Icons.Filled.CalendarMonth
+    HomeSortMode.TOP_ARTISTS -> Icons.Filled.People
+    HomeSortMode.TOP_ALBUMS -> Icons.Filled.Album
 }
 
 private fun sortModeLabel(mode: HomeSortMode) = when (mode) {
     HomeSortMode.RECENT -> "Recent"
-    HomeSortMode.MOST_PLAYED -> "Most Played"
+    HomeSortMode.MOST_PLAYED -> "Top Tracks"
     HomeSortMode.LAST_7_DAYS -> "Last 7 Days"
     HomeSortMode.LAST_30_DAYS -> "Last 30 Days"
+    HomeSortMode.TOP_ARTISTS -> "Top Artists"
+    HomeSortMode.TOP_ALBUMS -> "Top Albums"
 }
 
 @Composable
@@ -1153,6 +1164,112 @@ private fun TrackRow(
             // Item 1 (consistency pass): the same OverflowMenuButton is now
             // used on every screen's song list, not just Home.
             com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenuClick)
+        }
+    }
+}
+
+@Composable
+private fun ArtistRow(
+    artist: com.lastwave.app.data.repository.HomeArtistItem,
+    rank: Int,
+) {
+    Surface(
+        shape = TrackRowShape,
+        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(vertical = 6.dp, horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "#$rank",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(36.dp),
+            )
+            Box(
+                modifier = Modifier.size(52.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            ) {
+                ArtworkImage(
+                    name = artist.name,
+                    artist = artist.name,
+                    embeddedUrl = artist.artworkUrl,
+                    fallbackIcon = Icons.Filled.People,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    artist.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "${artist.playCount} plays",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AlbumRow(
+    album: com.lastwave.app.data.repository.HomeAlbum,
+    rank: Int,
+) {
+    Surface(
+        shape = TrackRowShape,
+        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(vertical = 6.dp, horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "#$rank",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(36.dp),
+            )
+            Box(
+                modifier = Modifier.size(52.dp).clip(ArtworkShape).background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            ) {
+                ArtworkImage(
+                    name = album.name,
+                    artist = album.artist,
+                    embeddedUrl = album.artworkUrl,
+                    fallbackIcon = Icons.Filled.Album,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    album.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "${album.artist} • ${album.playCount} plays",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

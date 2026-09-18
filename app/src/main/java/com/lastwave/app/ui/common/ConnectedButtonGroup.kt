@@ -1,3 +1,4 @@
+import androidx.compose.foundation.shape.RoundedCornerShape
 package com.lastwave.app.ui.common
 
 import androidx.compose.animation.animateColorAsState
@@ -52,17 +53,12 @@ fun ConnectedButtonGroup(
     val haptic = LocalHapticFeedback.current
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy((-1).dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         items.forEachIndexed { index, item ->
             val isSelected = index == selectedIndex
-            val shape = when {
-                items.size == 1 -> M3ExpressiveShape.GroupSingle
-                index == 0 -> M3ExpressiveShape.GroupLeft
-                index == items.lastIndex -> M3ExpressiveShape.GroupRight
-                else -> M3ExpressiveShape.GroupMiddle
-            }
+            val shape = RoundedCornerShape(20.dp)
 
             val interactionSource = remember { MutableInteractionSource() }
             val isPressed by interactionSource.collectIsPressedAsState()
@@ -109,7 +105,7 @@ fun ConnectedButtonGroup(
                 shape = shape,
                 color = containerColor,
                 contentColor = contentColor,
-                border = null,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                 tonalElevation = if (isSelected) 2.dp else 0.dp,
             ) {
                 Box(

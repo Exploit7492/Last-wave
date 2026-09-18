@@ -79,6 +79,10 @@ sealed interface HomeRow {
     data class DateHeader(val label: String) : HomeRow
     @Immutable
     data class Track(val track: HomeTrack, val badge: String?) : HomeRow
+    @Immutable
+    data class Artist(val artist: com.lastwave.app.data.repository.HomeArtistItem, val rank: Int) : HomeRow
+    @Immutable
+    data class Album(val album: com.lastwave.app.data.repository.HomeAlbum, val rank: Int) : HomeRow
 }
 
 /** Derives the display list for the current tab — instant, smooth, and accurate. */
@@ -136,6 +140,20 @@ fun HomeUiState.visibleRows(): List<HomeRow> {
             nowPlaying?.let { rows += HomeRow.Track(it, badge = null) }
             candidateList.filter { !it.isNowPlaying }.sortedByDescending { it.playCount }.forEach { t ->
                 rows += HomeRow.Track(t, badge = playCountBadge(t.playCount))
+            }
+            rows
+        }
+        HomeSortMode.TOP_ARTISTS -> {
+            val rows = mutableListOf<HomeRow>()
+            topArtists.forEachIndexed { i, artist ->
+                rows += HomeRow.Artist(artist, rank = i + 1)
+            }
+            rows
+        }
+        HomeSortMode.TOP_ALBUMS -> {
+            val rows = mutableListOf<HomeRow>()
+            topAlbums.forEachIndexed { i, album ->
+                rows += HomeRow.Album(album, rank = i + 1)
             }
             rows
         }
