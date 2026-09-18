@@ -636,7 +636,8 @@ class HomeViewModel @Inject constructor(
         val target = _uiState.value.viewingUsername
         
         val period = when (mode) {
-            HomeSortMode.RECENT, HomeSortMode.MOST_PLAYED -> "overall"
+            HomeSortMode.RECENT, HomeSortMode.MOST_PLAYED, 
+            HomeSortMode.TOP_ARTISTS, HomeSortMode.TOP_ALBUMS -> "overall"
             HomeSortMode.LAST_7_DAYS -> "7day"
             HomeSortMode.LAST_30_DAYS -> "1month"
         }

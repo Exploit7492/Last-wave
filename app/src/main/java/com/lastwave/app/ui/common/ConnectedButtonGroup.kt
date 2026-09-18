@@ -1,6 +1,6 @@
-import androidx.compose.foundation.shape.RoundedCornerShape
 package com.lastwave.app.ui.common
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
