@@ -1082,30 +1082,16 @@ private fun QuickTileCard(
             ) {
                 if (isYtLikedTile) {
                     Icon(
-                        Icons.Filled.ThumbUp,
+                        Icons.Filled.Favorite,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(36.dp),
                     )
                 } else if (isLocalLikedTile) {
                     Icon(
-                        Icons.Filled.ThumbUp,
+                        Icons.Filled.Favorite,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(36.dp),
-                    )
-                } else if (isMixTile) {
-                    Icon(
-                        Icons.Filled.AutoAwesome,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(36.dp),
-                    )
-                } else if (isNewReleasesTile) {
-                    Icon(
-                        Icons.Filled.NewReleases,
-                        contentDescription = null,
-                        tint = Color.White,
                         modifier = Modifier.size(36.dp),
                     )
                 } else {
@@ -1113,7 +1099,7 @@ private fun QuickTileCard(
                         name = tile.title,
                         artist = tile.subtitle ?: "",
                         embeddedUrl = tile.artworkUrl,
-                        fallbackIcon = if (isMixTile) Icons.Filled.AutoAwesome else Icons.Filled.Album,
+                        fallbackIcon = if (isMixTile) Icons.Filled.AutoAwesome else if (isNewReleasesTile) Icons.Filled.NewReleases else Icons.Filled.Album,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

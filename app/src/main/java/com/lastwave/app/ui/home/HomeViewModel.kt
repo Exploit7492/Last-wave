@@ -79,6 +79,10 @@ sealed interface HomeRow {
     data class DateHeader(val label: String) : HomeRow
     @Immutable
     data class Track(val track: HomeTrack, val badge: String?) : HomeRow
+    @Immutable
+    data class Album(val album: HomeAlbum, val badge: String?) : HomeRow
+    @Immutable
+    data class Artist(val artist: HomeArtistItem, val badge: String?) : HomeRow
 }
 
 /** Derives the display list for the current tab — instant, smooth, and accurate. */
@@ -136,6 +140,20 @@ fun HomeUiState.visibleRows(): List<HomeRow> {
             nowPlaying?.let { rows += HomeRow.Track(it, badge = null) }
             candidateList.filter { !it.isNowPlaying }.sortedByDescending { it.playCount }.forEach { t ->
                 rows += HomeRow.Track(t, badge = playCountBadge(t.playCount))
+            }
+            rows
+        }
+        HomeSortMode.TOP_ALBUMS -> {
+            val rows = mutableListOf<HomeRow>()
+            topAlbums.forEach { a ->
+                rows += HomeRow.Album(a, badge = null)
+            }
+            rows
+        }
+        HomeSortMode.TOP_ARTISTS -> {
+            val rows = mutableListOf<HomeRow>()
+            topArtists.forEach { a ->
+                rows += HomeRow.Artist(a, badge = null)
             }
             rows
         }
@@ -618,7 +636,7 @@ class HomeViewModel @Inject constructor(
         val target = _uiState.value.viewingUsername
         
         val period = when (mode) {
-            HomeSortMode.RECENT, HomeSortMode.MOST_PLAYED -> "overall"
+            HomeSortMode.RECENT, HomeSortMode.MOST_PLAYED, HomeSortMode.TOP_ALBUMS, HomeSortMode.TOP_ARTISTS -> "overall"
             HomeSortMode.LAST_7_DAYS -> "7day"
             HomeSortMode.LAST_30_DAYS -> "1month"
         }

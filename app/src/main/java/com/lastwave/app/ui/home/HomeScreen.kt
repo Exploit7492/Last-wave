@@ -163,6 +163,7 @@ fun HomeScreen(
     onOpenGenres: () -> Unit,
     onOpenFriends: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
+    artistAlbumNavigator: com.lastwave.app.ui.navigation.ArtistAlbumNavigator = hiltViewModel<ArtistAlbumNavBridgeHome>().navigator,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -247,39 +248,6 @@ fun HomeScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
-            uiState.nowPlaying?.let { np ->
-                val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
-                HomeNowPlayingBanner(
-                    track = np,
-                    onPlay = {
-                        musicPlayer.play(
-                            com.lastwave.app.playback.PlayableTrack(title = np.name, artist = np.artist, artworkUrl = np.artworkUrl),
-                            sourceLabel = "Now Playing",
-                            startRadio = false
-                        )
-                    },
-                    onStartMix = {
-                        musicPlayer.play(
-                            com.lastwave.app.playback.PlayableTrack(title = np.name, artist = np.artist, artworkUrl = np.artworkUrl),
-                            sourceLabel = "Now Playing",
-                            startRadio = true
-                        )
-                    },
-                    onMenuClick = { menuTrack = np },
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
-                Spacer(Modifier.height(12.dp))
-            }
-
-            if (uiState.topArtists.isNotEmpty() || uiState.topAlbums.isNotEmpty() || uiState.topTags.isNotEmpty()) {
-                PodiumSection(
-                    artists = uiState.topArtists,
-                    albums = uiState.topAlbums,
-                    tags = uiState.topTags,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 0.dp),
-                )
-                Spacer(Modifier.height(12.dp))
-            }
 
             PullToRefreshBox(
                 isRefreshing = uiState.isRefreshing,
@@ -378,6 +346,27 @@ fun HomeScreen(
                                             )
                                         },
                                         onMenuClick = { menuTrack = row.track },
+                                    )
+                                    is HomeRow.Album -> AlbumRow(
+                                        album = row.album,
+                                        badge = row.badge,
+                                        onClick = {
+                                            artistAlbumNavigator.openAlbum(
+                                                title = row.album.name,
+                                                artist = row.album.artist,
+                                                browseId = "", // The room DB doesn't have browseId for HomeAlbum easily accessible here unless we added it, but HomeAlbum has no browseId field. It will search.
+                                            )
+                                        }
+                                    )
+                                    is HomeRow.Artist -> ArtistRow(
+                                        artist = row.artist,
+                                        badge = row.badge,
+                                        onClick = {
+                                            artistAlbumNavigator.openArtist(
+                                                name = row.artist.name,
+                                                browseId = "", // Will search by name
+                                            )
+                                        }
                                     )
                                 }
                             }
@@ -927,6 +916,14 @@ private fun MixHeader(sortMode: HomeSortMode, onSortModeChange: (HomeSortMode) -
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSortModeChange(HomeSortMode.MOST_PLAYED); menuOpen = false
                 }
+                SortOption(androidx.compose.material.icons.filled.Album, "Top Albums", sortMode == HomeSortMode.TOP_ALBUMS) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSortModeChange(HomeSortMode.TOP_ALBUMS); menuOpen = false
+                }
+                SortOption(Icons.Filled.People, "Top Artists", sortMode == HomeSortMode.TOP_ARTISTS) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSortModeChange(HomeSortMode.TOP_ARTISTS); menuOpen = false
+                }
                 SortOption(Icons.Filled.DateRange, "Last 7 Days", sortMode == HomeSortMode.LAST_7_DAYS) {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSortModeChange(HomeSortMode.LAST_7_DAYS); menuOpen = false
@@ -943,6 +940,8 @@ private fun MixHeader(sortMode: HomeSortMode, onSortModeChange: (HomeSortMode) -
 private fun iconForSortMode(mode: HomeSortMode): androidx.compose.ui.graphics.vector.ImageVector = when (mode) {
     HomeSortMode.RECENT -> Icons.Filled.Schedule
     HomeSortMode.MOST_PLAYED -> Icons.Filled.BarChart
+    HomeSortMode.TOP_ALBUMS -> androidx.compose.material.icons.filled.Album
+    HomeSortMode.TOP_ARTISTS -> Icons.Filled.People
     HomeSortMode.LAST_7_DAYS -> Icons.Filled.DateRange
     HomeSortMode.LAST_30_DAYS -> Icons.Filled.CalendarMonth
 }
@@ -950,6 +949,8 @@ private fun iconForSortMode(mode: HomeSortMode): androidx.compose.ui.graphics.ve
 private fun sortModeLabel(mode: HomeSortMode) = when (mode) {
     HomeSortMode.RECENT -> "Recent"
     HomeSortMode.MOST_PLAYED -> "Most Played"
+    HomeSortMode.TOP_ALBUMS -> "Top Albums"
+    HomeSortMode.TOP_ARTISTS -> "Top Artists"
     HomeSortMode.LAST_7_DAYS -> "Last 7 Days"
     HomeSortMode.LAST_30_DAYS -> "Last 30 Days"
 }
@@ -1291,3 +1292,98 @@ private fun HomeNowPlayingBanner(
         }
     }
 }
+
+@Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun AlbumRow(
+    album: HomeAlbum,
+    badge: String?,
+    onClick: () -> Unit,
+) {
+    Surface(
+        shape = TrackRowShape,
+        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(vertical = 6.dp, horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier.size(52.dp).clip(ArtworkShape).background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            ) {
+                ArtworkImage(
+                    name = album.name,
+                    artist = album.artist,
+                    embeddedUrl = album.artworkUrl,
+                    fallbackIcon = androidx.compose.material.icons.filled.Album,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    album.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    com.lastwave.app.util.ArtistHelper.primaryArtist(album.artist),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun ArtistRow(
+    artist: HomeArtistItem,
+    badge: String?,
+    onClick: () -> Unit,
+) {
+    Surface(
+        shape = TrackRowShape,
+        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(vertical = 6.dp, horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier.size(52.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            ) {
+                ArtworkImage(
+                    name = artist.name,
+                    artist = artist.name,
+                    embeddedUrl = artist.artworkUrl,
+                    fallbackIcon = Icons.Filled.People,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    artist.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@dagger.hilt.android.lifecycle.HiltViewModel
+class ArtistAlbumNavBridgeHome @javax.inject.Inject constructor(
+    val navigator: com.lastwave.app.ui.navigation.ArtistAlbumNavigator
+) : androidx.lifecycle.ViewModel()

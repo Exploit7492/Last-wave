@@ -20,7 +20,7 @@ data class HomeTrack(
     val key: String get() = "${name.lowercase()}|${artist.lowercase()}"
 }
 
-enum class HomeSortMode { RECENT, MOST_PLAYED, LAST_7_DAYS, LAST_30_DAYS }
+enum class HomeSortMode { RECENT, MOST_PLAYED, LAST_7_DAYS, LAST_30_DAYS, TOP_ALBUMS, TOP_ARTISTS }
  
 @Immutable
 data class HomeArtistItem(
