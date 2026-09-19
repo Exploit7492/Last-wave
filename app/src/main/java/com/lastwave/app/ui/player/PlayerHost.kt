@@ -2968,6 +2968,7 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                                         },
                                     )
                                 },
+                        )
                     }
                 }
                 }

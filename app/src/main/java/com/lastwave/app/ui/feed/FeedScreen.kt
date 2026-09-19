@@ -1974,7 +1974,7 @@ private fun FeedSectionHeader(
                 ) {
                     actionIcon?.let { icon ->
                         Icon(
-                            if (icon == Icons.Filled.PlayArrow) androidx.compose.material.icons.filled.PlayCircle else icon,
+                            if (icon == Icons.Filled.PlayArrow) Icons.Filled.PlayCircle else icon,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(15.dp),
