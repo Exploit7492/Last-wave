@@ -46,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -105,9 +106,11 @@ fun ModernLyricsPanel(
         initialValue = PlaybackProgressState(positionMs = state.positionMs, durationMs = state.durationMs),
     )
 
-    var smoothedPositionMs by remember(track.videoId) { mutableLongStateOf(progress.positionMs) }
-    var basePositionMs by remember(track.videoId) { mutableLongStateOf(progress.positionMs) }
-    var lastSyncTime by remember(track.videoId) { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    // Keyed on the whole track: videoId is null for local/search tracks,
+    // and a null key would leak the previous song's smoothing state.
+    var smoothedPositionMs by remember(track) { mutableLongStateOf(progress.positionMs) }
+    var basePositionMs by remember(track) { mutableLongStateOf(progress.positionMs) }
+    var lastSyncTime by remember(track) { mutableLongStateOf(SystemClock.elapsedRealtime()) }
 
     LaunchedEffect(progress.positionMs, state.isPlaying) {
         basePositionMs = progress.positionMs
@@ -198,7 +201,13 @@ fun ModernLyricsPanel(
                             val idx = syncedLyrics.lines.indexOfFirst { time in it.start..it.end }
                             if (idx != -1) idx else syncedLyrics.lines.indexOfFirst { it.start > time }.takeIf { it != -1 } ?: 0
                         }
-                        val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialLineIndex)
+                        // Reset scroll state whenever the lyrics themselves
+                        // change (new track or provider upgrade); otherwise
+                        // the previous song's scroll offset leaks into this
+                        // one until auto-scroll corrects it.
+                        val listState = key(syncedLyrics) {
+                            rememberLazyListState(initialFirstVisibleItemIndex = initialLineIndex)
+                        }
 
                         val layoutDirection = if (isOverallRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
                         // Short provider badge: makes it visible why words
@@ -308,12 +317,13 @@ private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine 
     val isLineRtl = isRtl || (isOverallRtl && (text.isBlank() || text == "♪"))
 
     return if (hasSyllables) {
-        // Word-sync providers (BetterLyrics TTML spans, LyricsPlus syllabus)
-        // store each word trimmed, so concatenating contents directly would
-        // render "Allthatglittersisgold". The trailing space carries no
-        // timing — it is purely visual and keeps sync exact. Only insert
-        // when the line itself contains spaces so CJK lines without spaces
-        // and already-spaced providers (Kugou KRC) are untouched.
+        // Word-sync providers store each word trimmed, so concatenating
+        // contents directly would render "Allthatglittersisgold". The
+        // trailing space carries no timing — it is purely visual and keeps
+        // sync exact. Only insert when the line itself contains spaces so
+        // CJK lines without spaces and already-spaced providers (Kugou KRC)
+        // are untouched — and never before a continuation fragment
+        // (Apple Music `part` words like "with"+"drawals").
         val needsSpacing = text.contains(' ') || text.contains('\u00A0')
         KaraokeLine.MainKaraokeLine(
             syllables = syllables.mapIndexed { index, syl ->
@@ -324,6 +334,7 @@ private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine 
                     index < syllables.lastIndex &&
                     !syl.text.endsWith(' ') &&
                     !syl.text.endsWith('\u00A0') &&
+                    next?.appendToPrevious != true &&
                     (next == null || (!next.text.startsWith(' ') && !next.text.startsWith('\u00A0')))
                 ) " " else ""
                 KaraokeSyllable(

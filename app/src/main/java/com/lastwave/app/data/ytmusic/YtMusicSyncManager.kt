@@ -42,9 +42,10 @@ sealed interface YtSyncState {
 
 /**
  * Keeps every LastWave playlist mirrored to the user's YouTube Music account
- * ("sync here → there, 24/7"). Importing FROM YT Music stays selective — the
- * user picks which playlists to import — but everything saved in LastWave is
- * pushed up automatically.
+ * ("sync here → there, 24/7") — including the built-in Liked Songs, which
+ * syncs as its own private "Liked Songs" mirror. Importing FROM YT Music
+ * stays selective — the user picks which playlists to import — but everything
+ * saved in LastWave is pushed up automatically.
  *
  * Reconcile model (idempotent full-diff per playlist — safe to run any number
  * of times, on any trigger):
@@ -117,8 +118,9 @@ class YtMusicSyncManager @Inject constructor(
         }
 
         try {
+            // Liked Songs included: it mirrors as a private "Liked Songs"
+            // playlist. Selective-sync users opt in via the sync picker.
             val allPlaylists = playlistRepository.getAll()
-                .filterNot { it.mode == com.lastwave.app.data.playlist.LIKED_SONGS_MODE }
             val syncedIds = preferences.syncedPlaylistIds.first()
             val playlists = if (syncedIds != null) allPlaylists.filter { it.id in syncedIds } else allPlaylists
 

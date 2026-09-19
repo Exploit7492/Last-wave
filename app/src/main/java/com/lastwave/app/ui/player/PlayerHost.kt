@@ -107,6 +107,7 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -292,6 +293,12 @@ class PlayerViewModel @Inject constructor(
     private var currentTrackLyricsKey: String? = null
     private var lyricsJob: Job? = null
 
+    private companion object {
+        /** Spinner only appears when loading actually takes time; cache
+         *  hits resolve well inside this window with no flash. */
+        const val LOADING_SPINNER_DELAY_MS = 250L
+    }
+
     init {
         viewModelScope.launch {
             playlistRepository.changes.collect {
@@ -345,30 +352,40 @@ class PlayerViewModel @Inject constructor(
     fun loadLyrics(track: PlayableTrack, forceRefresh: Boolean = false) {
         lyricsJob?.cancel()
         lyricsJob = viewModelScope.launch {
-            _lyricsState.value = LyricsUiState.Loading
-            val durationSeconds = if (player.state.value.durationMs > 0) {
-                (player.state.value.durationMs / 1000).toInt()
-            } else null
-
-            val result = try {
-                lyricsRepository.getLyrics(
-                    track.title, track.artist, track.album, durationSeconds, forceRefresh,
-                    wordByWord = settingsPreferences.settings.first().wordByWordLyrics,
-                    onPartialResult = { partial ->
-                        withContext(Dispatchers.Main.immediate) {
-                            coroutineContext.ensureActive()
-                            publishLyrics(partial)
-                        }
-                    },
-                )
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                LyricsResult.Error(error.message ?: "Couldn't load lyrics")
+            // Hold the previous track's lyrics instead of flashing the
+            // spinner on every change: cache hits resolve in milliseconds,
+            // so the indicator only appears when loading actually takes time.
+            val loadingIndicator = launch {
+                delay(LOADING_SPINNER_DELAY_MS)
+                _lyricsState.value = LyricsUiState.Loading
             }
-            coroutineContext.ensureActive()
-            if (result is LyricsResult.Success || _lyricsState.value !is LyricsUiState.Success) {
-                publishLyrics(result)
+            try {
+                val durationSeconds = if (player.state.value.durationMs > 0) {
+                    (player.state.value.durationMs / 1000).toInt()
+                } else null
+
+                val result = try {
+                    lyricsRepository.getLyrics(
+                        track.title, track.artist, track.album, durationSeconds, forceRefresh,
+                        wordByWord = settingsPreferences.settings.first().wordByWordLyrics,
+                        onPartialResult = { partial ->
+                            withContext(Dispatchers.Main.immediate) {
+                                coroutineContext.ensureActive()
+                                publishLyrics(partial)
+                            }
+                        },
+                    )
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    LyricsResult.Error(error.message ?: "Couldn't load lyrics")
+                }
+                coroutineContext.ensureActive()
+                if (result is LyricsResult.Success || _lyricsState.value !is LyricsUiState.Success) {
+                    publishLyrics(result)
+                }
+            } finally {
+                loadingIndicator.cancel()
             }
         }
     }
@@ -571,14 +588,8 @@ fun PlayerHost(
                 ) + fadeOut(tween(150)),
             ) {
                 PredictiveBackScreen(
-                    enabled = expanded && state.current != null,
-                    onBack = {
-                        if (currentTab != FullPlayerTab.NOW_PLAYING) {
-                            currentTab = FullPlayerTab.NOW_PLAYING
-                        } else {
-                            expanded = false
-                        }
-                    },
+                    enabled = expanded && state.current != null && currentTab == FullPlayerTab.NOW_PLAYING,
+                    onBack = { expanded = false },
                 ) {
                     ExpandedPlayer(
                         viewModel = viewModel,
@@ -1412,7 +1423,6 @@ private fun FullPlayer(
 ) {
     val track = state.current ?: return
     var lyricsFullscreen by remember(currentTab) { mutableStateOf(false) }
-    BackHandler(enabled = lyricsFullscreen) { lyricsFullscreen = false }
     val view = LocalView.current
     DisposableEffect(view, lyricsFullscreen) {
         val fullscreenActive = lyricsFullscreen
@@ -1752,47 +1762,63 @@ private fun FullPlayer(
                 ) { tab ->
                     when (tab) {
                         FullPlayerTab.LYRICS -> {
-                            if (lyricsUiVersion == LyricsUiVersion.MODERN) {
-                                ModernLyricsPanel(
-                                    state = state,
-                                    player = player,
-                                    lyricsState = lyricsState,
-                                    progressState = progressState,
-                                    wavySeekbarEnabled = wavySeekbarEnabled,
-                                    onRetry = onRetryLyrics,
-                                    onToggleFullscreen = { lyricsFullscreen = !lyricsFullscreen },
-                                    isFullscreen = lyricsFullscreen,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .adaptiveContentWidth(maxWidth = 720.dp),
-                                )
-                            } else {
-                                LyricsPanel(
-                                    state = state,
-                                    progressState = progressState,
-                                    player = player,
-                                    lyricsState = lyricsState,
-                                    lyricsAnimation = lyricsAnimation,
-                                    wavySeekbarEnabled = wavySeekbarEnabled,
-                                    onRetry = onRetryLyrics,
-                                    onToggleFullscreen = { lyricsFullscreen = !lyricsFullscreen },
-                                    isFullscreen = lyricsFullscreen,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .adaptiveContentWidth(maxWidth = 720.dp),
-                                )
+                            PredictiveBackScreen(
+                                enabled = currentTab == FullPlayerTab.LYRICS,
+                                onBack = {
+                                    if (lyricsFullscreen) {
+                                        lyricsFullscreen = false
+                                    } else {
+                                        onTabChange(FullPlayerTab.NOW_PLAYING)
+                                    }
+                                },
+                            ) {
+                                if (lyricsUiVersion == LyricsUiVersion.MODERN) {
+                                    ModernLyricsPanel(
+                                        state = state,
+                                        player = player,
+                                        lyricsState = lyricsState,
+                                        progressState = progressState,
+                                        wavySeekbarEnabled = wavySeekbarEnabled,
+                                        onRetry = onRetryLyrics,
+                                        onToggleFullscreen = { lyricsFullscreen = !lyricsFullscreen },
+                                        isFullscreen = lyricsFullscreen,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .adaptiveContentWidth(maxWidth = 720.dp),
+                                    )
+                                } else {
+                                    LyricsPanel(
+                                        state = state,
+                                        progressState = progressState,
+                                        player = player,
+                                        lyricsState = lyricsState,
+                                        lyricsAnimation = lyricsAnimation,
+                                        wavySeekbarEnabled = wavySeekbarEnabled,
+                                        onRetry = onRetryLyrics,
+                                        onToggleFullscreen = { lyricsFullscreen = !lyricsFullscreen },
+                                        isFullscreen = lyricsFullscreen,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .adaptiveContentWidth(maxWidth = 720.dp),
+                                    )
+                                }
                             }
                         }
 
                         FullPlayerTab.QUEUE -> {
-                            QueuePanel(
-                                state,
-                                player,
-                                Modifier
-                                    .fillMaxSize()
-                                    .adaptiveContentWidth(maxWidth = 720.dp)
-                                    .padding(horizontal = 20.dp),
-                            )
+                            PredictiveBackScreen(
+                                enabled = currentTab == FullPlayerTab.QUEUE,
+                                onBack = { onTabChange(FullPlayerTab.NOW_PLAYING) },
+                            ) {
+                                QueuePanel(
+                                    state,
+                                    player,
+                                    Modifier
+                                        .fillMaxSize()
+                                        .adaptiveContentWidth(maxWidth = 720.dp)
+                                        .padding(horizontal = 20.dp),
+                                )
+                            }
                         }
 
                         FullPlayerTab.NOW_PLAYING -> {
@@ -2970,7 +2996,8 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                         )
                     }
                 }
-                }
+                },
+                )
             }
             item { Spacer(Modifier.height(12.dp)) }
         }

@@ -1069,8 +1069,10 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 .setColor(notificationPalette.primary)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setStyle(mediaStyle)
-                .addAction(Notification.Action.Builder(R.drawable.ic_widget_shuffle, if (state.shuffleEnabled) "Shuffle on" else "Shuffle off", serviceAction(ACTION_SHUFFLE, 5)).build())
+                .addAction(Notification.Action.Builder(R.drawable.ic_widget_skip_previous, "Previous", serviceAction(ACTION_PREVIOUS, 1)).build())
                 .addAction(Notification.Action.Builder(if (state.isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play, "Play or pause", serviceAction(ACTION_TOGGLE, 2)).build())
+                .addAction(Notification.Action.Builder(R.drawable.ic_widget_skip_next, "Next", serviceAction(ACTION_NEXT, 3)).build())
+                .addAction(Notification.Action.Builder(R.drawable.ic_widget_shuffle, if (state.shuffleEnabled) "Shuffle on" else "Shuffle off", serviceAction(ACTION_SHUFFLE, 5)).build())
                 .addAction(Notification.Action.Builder(repeatIcon, repeatLabel, serviceAction(ACTION_REPEAT, 6)).build())
                 .addAction(Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "Stop", serviceAction(ACTION_STOP, 4)).build())
                 .setColorized(true)
@@ -1134,8 +1136,10 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             .setCustomContentView(compact)
             .setCustomBigContentView(expanded)
             .setCustomHeadsUpContentView(compact)
-            .addAction(Notification.Action.Builder(R.drawable.ic_widget_shuffle, "Shuffle", serviceAction(ACTION_SHUFFLE, 5)).build())
+            .addAction(Notification.Action.Builder(R.drawable.ic_widget_skip_previous, "Previous", serviceAction(ACTION_PREVIOUS, 1)).build())
             .addAction(Notification.Action.Builder(if (state.isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play, "Play or pause", serviceAction(ACTION_TOGGLE, 2)).build())
+            .addAction(Notification.Action.Builder(R.drawable.ic_widget_skip_next, "Next", serviceAction(ACTION_NEXT, 3)).build())
+            .addAction(Notification.Action.Builder(R.drawable.ic_widget_shuffle, "Shuffle", serviceAction(ACTION_SHUFFLE, 5)).build())
             .addAction(
                 Notification.Action.Builder(
                     when (state.repeatMode) {
@@ -1177,29 +1181,45 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             if (state.isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play,
         )
         setImageViewResource(
-            R.id.notification_shuffle,
-            R.drawable.ic_widget_shuffle,
+            R.id.notification_previous,
+            R.drawable.ic_widget_skip_previous,
         )
         setImageViewResource(
-            R.id.notification_repeat,
-            if (state.repeatMode == androidx.media3.common.Player.REPEAT_MODE_ONE) R.drawable.ic_widget_repeat_one else R.drawable.ic_widget_repeat,
+            R.id.notification_next,
+            R.drawable.ic_widget_skip_next,
         )
-        setInt(
-            R.id.notification_shuffle,
-            "setColorFilter",
-            if (state.shuffleEnabled) palette.primary else palette.onSurface,
-        )
-        setInt(
-            R.id.notification_repeat,
-            "setColorFilter",
-            if (state.repeatMode != androidx.media3.common.Player.REPEAT_MODE_OFF) palette.primary else palette.onSurface,
-        )
+        // Shuffle/repeat only exist in the expanded layout; the compact row
+        // is the prev/play/next transport cluster.
+        if (expanded) {
+            setImageViewResource(
+                R.id.notification_shuffle,
+                R.drawable.ic_widget_shuffle,
+            )
+            setImageViewResource(
+                R.id.notification_repeat,
+                if (state.repeatMode == androidx.media3.common.Player.REPEAT_MODE_ONE) R.drawable.ic_widget_repeat_one else R.drawable.ic_widget_repeat,
+            )
+            setInt(
+                R.id.notification_shuffle,
+                "setColorFilter",
+                if (state.shuffleEnabled) palette.primary else palette.onSurface,
+            )
+            setInt(
+                R.id.notification_repeat,
+                "setColorFilter",
+                if (state.repeatMode != androidx.media3.common.Player.REPEAT_MODE_OFF) palette.primary else palette.onSurface,
+            )
+            setOnClickPendingIntent(R.id.notification_shuffle, serviceAction(ACTION_SHUFFLE, 5))
+            setOnClickPendingIntent(R.id.notification_repeat, serviceAction(ACTION_REPEAT, 6))
+        }
+        setInt(R.id.notification_previous, "setColorFilter", palette.onSurface)
+        setInt(R.id.notification_next, "setColorFilter", palette.onSurface)
         setInt(R.id.notification_play_surface, "setColorFilter", palette.primary)
         setInt(R.id.notification_play_pause, "setColorFilter", palette.onPrimary)
         setOnClickPendingIntent(R.id.notification_root, openAppPendingIntent())
-        setOnClickPendingIntent(R.id.notification_shuffle, serviceAction(ACTION_SHUFFLE, 5))
+        setOnClickPendingIntent(R.id.notification_previous, serviceAction(ACTION_PREVIOUS, 1))
         setOnClickPendingIntent(R.id.notification_play_pause, serviceAction(ACTION_TOGGLE, 2))
-        setOnClickPendingIntent(R.id.notification_repeat, serviceAction(ACTION_REPEAT, 6))
+        setOnClickPendingIntent(R.id.notification_next, serviceAction(ACTION_NEXT, 3))
         if (expanded) {
             setTextColor(R.id.notification_brand, palette.primary)
             setTextViewText(R.id.notification_album, state.current?.album.orEmpty())

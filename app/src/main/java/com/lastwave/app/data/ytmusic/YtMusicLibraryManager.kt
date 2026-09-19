@@ -182,8 +182,24 @@ class YtMusicLibraryManager @Inject constructor(
     private fun publish(account: List<YouTubePlaylistSummary>): List<YouTubePlaylistSummary> {
         // Keep the complete account snapshot. Visibility is a separate,
         // persisted projection, so refresh/import/sync cannot reset it.
+        // The account's Liked Music (LM) is not returned by
+        // FEmusic_liked_playlists, so inject it as a synthetic head entry —
+        // importing it merges into the local Liked Songs playlist.
+        val withLiked = if (account.any { it.id.removePrefix("VL") == "LM" }) {
+            account
+        } else {
+            listOf(
+                YouTubePlaylistSummary(
+                    id = LIKED_MUSIC_REMOTE_ID,
+                    title = "Liked Music",
+                    author = "YouTube Music",
+                    trackCountText = null,
+                    artworkUrl = null,
+                ),
+            ) + account
+        }
         val previous = _accountPlaylists.value.associateBy(YouTubePlaylistSummary::id)
-        val stableAccount = account.map { summary ->
+        val stableAccount = withLiked.map { summary ->
             val previousSummary = previous[summary.id]
             val localId = stableRemoteId(summary.id)
             val diskArtwork = readFromDiskCache(localId)?.remoteArtworkUrl
@@ -572,7 +588,13 @@ class YtMusicLibraryManager @Inject constructor(
         val remote = loadDetail(localId) ?: return@withContext null
         val remoteId = remote.remotePlaylistId ?: return@withContext null
         val result = innerTube.fetchPlaylist(remoteId) ?: return@withContext null
-        val saved = importManager.importOwnedYouTubePlaylist(result)
+        // Liked Music merges into the built-in Liked Songs — never a mapped
+        // `custom` copy, since LM is not editable via the playlist-edit API.
+        val saved = if (PlaylistImportManager.isYtLikedId(result.id)) {
+            importManager.importYtLikedIntoLikedSongs(result)
+        } else {
+            importManager.importOwnedYouTubePlaylist(result)
+        }
         details.remove(localId)
         File(cacheDir, "$localId.json").delete()
         refresh()
@@ -650,6 +672,7 @@ class YtMusicLibraryManager @Inject constructor(
     )
 
     private companion object {
+        const val LIKED_MUSIC_REMOTE_ID = "LM"
         const val PLAYLIST_CONTENT_VERSION = 2
         const val REALTIME_REFRESH_MS = 8_000L
         const val ARTWORK_RETRY_DELAY_MS = 5 * 60 * 1000L

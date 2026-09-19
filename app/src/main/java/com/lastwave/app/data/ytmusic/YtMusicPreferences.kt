@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.lastwave.app.data.local.readSafely
@@ -48,6 +49,17 @@ data class YtConnection(
     val channelHandle: String? = null,
     val photoUrl: String? = null,
     val connectedAtMillis: Long = 0L,
+    /**
+     * Selected YouTube channel within the signed-in session. Cookies alone
+     * always resolve to the default (first) channel — switching channels is
+     * a per-request flag, never a cookie change:
+     * [onBehalfOfUser] (brand-channel delegation token / UC channel id) goes
+     * into the InnerTube context `user` block, [authUserIndex] (multi-login
+     * session index) goes out as the `X-Goog-AuthUser` header. Both null
+     * means "YouTube's default channel", exactly as before this feature.
+     */
+    val onBehalfOfUser: String? = null,
+    val authUserIndex: Int? = null,
 ) {
     val isConnected: Boolean
         get() = cookies.isNotEmpty() && accountName.isNotBlank()
@@ -88,6 +100,8 @@ class YtMusicPreferences @Inject constructor(
                     channelHandle = prefs.readSafely(CHANNEL_HANDLE_KEY),
                     photoUrl = prefs.readSafely(PHOTO_URL_KEY),
                     connectedAtMillis = prefs.safeLong(CONNECTED_AT_KEY),
+                    onBehalfOfUser = prefs.readSafely(ON_BEHALF_OF_USER_KEY)?.takeIf { it.isNotBlank() },
+                    authUserIndex = prefs.readSafely(AUTH_USER_INDEX_KEY),
                 )
             }
         }
@@ -127,29 +141,60 @@ class YtMusicPreferences @Inject constructor(
         .recoverPreferences("YtMusicPreferences")
         .map { it.safeLong(LAST_SYNC_KEY) }
 
+    /**
+     * Local→remote sync mirrors, scoped per selected YouTube channel. Remote
+     * playlist ids only exist under the channel that created them, so each
+     * channel gets its own bucket — switching channels never reconciles one
+     * channel's mirrors against another's library (which would fail every
+     * playlist or, worse, duplicate mirrors). Legacy installs stored a flat
+     * table; it is adopted verbatim as the default channel's bucket.
+     */
     val playlistMappings: Flow<Map<Long, YtPlaylistMapping>> = dataStore.data
         .recoverPreferences("YtMusicPreferences")
-        .map { prefs ->
-            runCatching {
-                prefs.readSafely(MAPPINGS_KEY)?.let { raw ->
-                    json.decodeFromString<Map<String, YtPlaylistMapping>>(raw)
-                        .mapNotNull { (key, mapping) -> key.toLongOrNull()?.let { it to mapping } }
-                        .toMap()
-                } ?: emptyMap()
-            }.getOrDefault(emptyMap())
-        }
+        .map { prefs -> readBucketMappings(prefs) }
 
     suspend fun mappings(): Map<Long, YtPlaylistMapping> = playlistMappings.first()
 
     suspend fun setMappings(mappings: Map<Long, YtPlaylistMapping>) {
         withContext(Dispatchers.IO) {
             dataStore.edit { prefs ->
+                val buckets = readAllBuckets(prefs).toMutableMap()
+                buckets[channelBucket(prefs)] =
+                    mappings.mapKeys { (k, _) -> k.toString() }
                 prefs[MAPPINGS_KEY] = json.encodeToString(
-                    YtPlaylistMappingStringMapSerializer,
-                    mappings.mapKeys { (k, _) -> k.toString() },
+                    YtPlaylistMappingBucketSerializer,
+                    buckets,
                 )
             }
         }
+    }
+
+    private fun readBucketMappings(prefs: Preferences): Map<Long, YtPlaylistMapping> =
+        readAllBuckets(prefs)[channelBucket(prefs)]
+            ?.mapNotNull { (key, mapping) -> key.toLongOrNull()?.let { it to mapping } }
+            ?.toMap()
+            .orEmpty()
+
+    private fun channelBucket(prefs: Preferences): String {
+        val user = prefs.readSafely(ON_BEHALF_OF_USER_KEY)?.takeIf { it.isNotBlank() }.orEmpty()
+        val auth = prefs.readSafely(AUTH_USER_INDEX_KEY)?.toString().orEmpty()
+        return "$auth|$user"
+    }
+
+    private fun readAllBuckets(prefs: Preferences): Map<String, Map<String, YtPlaylistMapping>> {
+        val raw = prefs.readSafely(MAPPINGS_KEY) ?: return emptyMap()
+        // Current nested schema first — a successful decode is authoritative,
+        // even when the active bucket is simply empty.
+        runCatching {
+            json.decodeFromString<Map<String, Map<String, YtPlaylistMapping>>>(raw)
+        }.getOrNull()?.let { return it }
+        // Pre-channel flat table: it belongs to the default channel bucket.
+        runCatching {
+            json.decodeFromString<Map<String, YtPlaylistMapping>>(raw)
+        }.getOrNull()?.let { flat ->
+            return mapOf(DEFAULT_CHANNEL_BUCKET to flat)
+        }
+        return emptyMap()
     }
 
     suspend fun cachedLibraryPlaylists(): List<YtCachedLibraryPlaylist> =
@@ -173,6 +218,8 @@ class YtMusicPreferences @Inject constructor(
         accountName: String,
         channelHandle: String?,
         photoUrl: String?,
+        onBehalfOfUser: String? = null,
+        authUserIndex: Int? = null,
     ) {
         dataStore.edit { prefs ->
             prefs[COOKIES_KEY] = json.encodeToString(cookies)
@@ -182,6 +229,45 @@ class YtMusicPreferences @Inject constructor(
             prefs[CONNECTED_AT_KEY] = System.currentTimeMillis()
             // A newly connected account is live by default; no separate auto-sync setup step.
             prefs[SYNC_ENABLED_KEY] = true
+            // A fresh login starts on YouTube's default channel; an explicit
+            // identity refresh passes the current selection back through.
+            if (onBehalfOfUser.isNullOrBlank()) prefs.remove(ON_BEHALF_OF_USER_KEY)
+            else prefs[ON_BEHALF_OF_USER_KEY] = onBehalfOfUser
+            if (authUserIndex == null) prefs.remove(AUTH_USER_INDEX_KEY)
+            else prefs[AUTH_USER_INDEX_KEY] = authUserIndex
+        }
+    }
+
+    /** Switches the active YouTube channel inside the current session. */
+    suspend fun setSelectedChannel(onBehalfOfUser: String?, authUserIndex: Int?) {
+        dataStore.edit { prefs ->
+            if (onBehalfOfUser.isNullOrBlank()) prefs.remove(ON_BEHALF_OF_USER_KEY)
+            else prefs[ON_BEHALF_OF_USER_KEY] = onBehalfOfUser
+            if (authUserIndex == null) prefs.remove(AUTH_USER_INDEX_KEY)
+            else prefs[AUTH_USER_INDEX_KEY] = authUserIndex
+        }
+    }
+
+    /**
+     * Atomic channel switch + display-identity update. A single edit avoids
+     * the race where a follow-up identity write would restore the previous
+     * channel selection. Cookies, timestamps and sync settings are untouched.
+     */
+    suspend fun saveChannelSelection(
+        onBehalfOfUser: String?,
+        authUserIndex: Int?,
+        accountName: String,
+        channelHandle: String?,
+        photoUrl: String?,
+    ) {
+        dataStore.edit { prefs ->
+            if (onBehalfOfUser.isNullOrBlank()) prefs.remove(ON_BEHALF_OF_USER_KEY)
+            else prefs[ON_BEHALF_OF_USER_KEY] = onBehalfOfUser
+            if (authUserIndex == null) prefs.remove(AUTH_USER_INDEX_KEY)
+            else prefs[AUTH_USER_INDEX_KEY] = authUserIndex
+            prefs[ACCOUNT_NAME_KEY] = accountName
+            if (channelHandle != null) prefs[CHANNEL_HANDLE_KEY] = channelHandle else prefs.remove(CHANNEL_HANDLE_KEY)
+            if (photoUrl != null) prefs[PHOTO_URL_KEY] = photoUrl else prefs.remove(PHOTO_URL_KEY)
         }
     }
 
@@ -195,6 +281,8 @@ class YtMusicPreferences @Inject constructor(
             prefs.remove(MAPPINGS_KEY)
             prefs.remove(LIBRARY_CACHE_KEY)
             prefs.remove(HIDDEN_LIBRARY_PLAYLIST_IDS_KEY)
+            prefs.remove(ON_BEHALF_OF_USER_KEY)
+            prefs.remove(AUTH_USER_INDEX_KEY)
             prefs[SYNC_ENABLED_KEY] = false
         }
     }
@@ -301,6 +389,8 @@ class YtMusicPreferences @Inject constructor(
 
     private companion object {
         const val TAG = "YtMusicPreferences"
+        /** Bucket key for YouTube's default channel (no delegation flags). */
+        const val DEFAULT_CHANNEL_BUCKET = "|"
         val COOKIES_KEY = stringPreferencesKey("ytm_cookies")
         val ACCOUNT_NAME_KEY = stringPreferencesKey("ytm_account_name")
         val CHANNEL_HANDLE_KEY = stringPreferencesKey("ytm_channel_handle")
@@ -310,6 +400,8 @@ class YtMusicPreferences @Inject constructor(
         val HISTORY_SYNC_ENABLED_KEY = booleanPreferencesKey("ytm_history_sync_enabled")
         val SYNCED_PLAYLIST_IDS_KEY = stringPreferencesKey("ytm_synced_playlist_ids")
         val MAPPINGS_KEY = stringPreferencesKey("ytm_playlist_mappings")
+        val ON_BEHALF_OF_USER_KEY = stringPreferencesKey("ytm_on_behalf_of_user")
+        val AUTH_USER_INDEX_KEY = intPreferencesKey("ytm_auth_user_index")
         val LIBRARY_CACHE_KEY = stringPreferencesKey("ytm_library_playlist_cache")
         val HIDDEN_LIBRARY_PLAYLIST_IDS_KEY = stringPreferencesKey("ytm_hidden_library_playlist_ids")
         val PINNED_LIBRARY_PLAYLIST_IDS_KEY = stringPreferencesKey("ytm_pinned_library_playlist_ids")
@@ -322,5 +414,5 @@ class YtMusicPreferences @Inject constructor(
 private fun Preferences.safeLong(key: Preferences.Key<Long>): Long =
     readSafely(key) ?: 0L
 
-private val YtPlaylistMappingStringMapSerializer =
-    MapSerializer(String.serializer(), YtPlaylistMapping.serializer())
+private val YtPlaylistMappingBucketSerializer =
+    MapSerializer(String.serializer(), MapSerializer(String.serializer(), YtPlaylistMapping.serializer()))

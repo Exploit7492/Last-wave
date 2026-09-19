@@ -47,32 +47,50 @@ class CsvPlaylistImporter @Inject constructor(
             else -> Charsets.UTF_8
         }
         val rawTracks = parseTracks(String(bytes, charset).removePrefix("\uFEFF"), filename)
-        val limiter = Semaphore(4)
+        val limiter = Semaphore(6)
         val tracks = coroutineScope {
             rawTracks.map { raw ->
                 async {
                     limiter.withPermit {
                         try {
-                            val match = if (raw.videoId != null) {
-                                innerTube.fetchSongDetails(raw.videoId)?.takeIf { it.videoId == raw.videoId }
-                                    ?.takeIf { isExactMatch(raw, it) }
-                            } else if (raw.title.isNotBlank() && raw.artist.isNotBlank()) {
-                                val candidates = innerTube.searchSongs(
-                                    query = "${raw.title} ${raw.artist}",
-                                    limit = 30,
-                                    prefetchStreams = false,
-                                ).filter { isExactMatch(raw, it) }
-                                candidates.singleOrNull()
-                            } else null
-                            match?.let {
+                            if (raw.videoId != null) {
+                                val details = runCatching { innerTube.fetchSongDetails(raw.videoId) }.getOrNull()
                                 GeneratedTrack(
-                                    name = raw.title.ifBlank { it.title },
-                                    artist = raw.artist.ifBlank { it.artist },
-                                    album = raw.album ?: it.album,
-                                    artworkUrl = it.artworkUrl,
-                                    url = "https://music.youtube.com/watch?v=${it.videoId}",
+                                    name = raw.title.ifBlank { details?.title ?: "Track" },
+                                    artist = raw.artist.ifBlank { details?.artist ?: "Unknown artist" },
+                                    album = raw.album ?: details?.album,
+                                    artworkUrl = details?.artworkUrl ?: "https://i.ytimg.com/vi/${raw.videoId}/hqdefault.jpg",
+                                    url = "https://music.youtube.com/watch?v=${raw.videoId}",
                                 )
-                            }
+                            } else if (raw.title.isNotBlank()) {
+                                val cleanArtist = raw.artist.takeUnless { it.equals("Unknown artist", ignoreCase = true) }.orEmpty()
+                                val query = if (cleanArtist.isNotBlank()) "${raw.title} $cleanArtist" else raw.title
+                                val candidates = runCatching {
+                                    innerTube.searchSongs(
+                                        query = query,
+                                        limit = 30,
+                                        prefetchStreams = false,
+                                    )
+                                }.getOrDefault(emptyList())
+
+                                val exactMatch = candidates.firstOrNull { isExactMatch(raw, it) }
+                                    ?: (if (raw.album != null) candidates.firstOrNull { isExactMatch(raw.copy(album = null), it) } else null)
+
+                                val bestMatch = exactMatch
+                                    ?: (if (cleanArtist.isNotBlank()) innerTube.findBestMatchOrNull(raw.title, cleanArtist, prefetchStreams = false) else null)
+                                    ?: (if (cleanArtist.isNotBlank()) innerTube.findBestMatchOrNull(cleanArtist, raw.title, prefetchStreams = false) else null)
+                                    ?: innerTube.findBestMatchOrNull(raw.title, "", prefetchStreams = false)
+
+                                bestMatch?.let {
+                                    GeneratedTrack(
+                                        name = raw.title.ifBlank { it.title },
+                                        artist = cleanArtist.ifBlank { it.artist },
+                                        album = raw.album ?: it.album,
+                                        artworkUrl = it.artworkUrl,
+                                        url = "https://music.youtube.com/watch?v=${it.videoId}",
+                                    )
+                                }
+                            } else null
                         } catch (error: CancellationException) {
                             throw error
                         } catch (_: Exception) {
@@ -151,27 +169,51 @@ class CsvPlaylistImporter @Inject constructor(
         val urlIndex = headers.indexOfFirst { it in URL_HEADERS }
         val hasHeader = titleIndex >= 0 || artistIndex >= 0 || albumIndex >= 0 || urlIndex >= 0
         if (first.size == 1 && !hasHeader) return lines.filterNot { it.startsWith('#') }.map(::parseTextTrack)
-        val titleColumn = if (hasHeader) titleIndex else 0
-        val artistColumn = if (hasHeader) artistIndex else 1
+        val titleColumn = if (titleIndex >= 0) {
+            titleIndex
+        } else if (hasHeader) {
+            (0 until first.size).firstOrNull { it != artistIndex && it != albumIndex && it != urlIndex } ?: 0
+        } else 0
+        val artistColumn = if (artistIndex >= 0) {
+            artistIndex
+        } else if (hasHeader) {
+            (0 until first.size).firstOrNull { it != titleColumn && it != albumIndex && it != urlIndex } ?: 1
+        } else 1
         return records.drop(if (hasHeader) 1 else 0).mapNotNull { row ->
             if (hasHeader && row.map(::normalize) == headers) return@mapNotNull null
             val title = row.getOrNull(titleColumn).orEmpty().trim()
             val artist = row.getOrNull(artistColumn).orEmpty().trim()
-            val videoId = youtubeId(row.getOrNull(urlIndex).orEmpty())
+            val rawVideoId = if (urlIndex >= 0) row.getOrNull(urlIndex)?.let(::youtubeId) else null
+            val videoId = rawVideoId ?: row.firstNotNullOfOrNull(::youtubeId)
             if (title.isBlank() && videoId == null) return@mapNotNull null
             CsvRawTrack(title, artist, row.getOrNull(albumIndex)?.trim()?.takeIf(String::isNotBlank), videoId)
         }
     }
 
     private fun parseTextTrack(line: String): CsvRawTrack {
-        if (line.startsWith("https://", true) || line.startsWith("http://", true)) {
-            return CsvRawTrack("", "", videoId = youtubeId(line))
+        val trimmed = line.trim()
+        if (trimmed.isBlank()) return CsvRawTrack("", "")
+        val videoId = youtubeId(trimmed)
+        if (videoId != null) {
+            return CsvRawTrack("", "", videoId = videoId)
         }
-        val separator = Regex("\\s+[-–—]\\s+").find(line)
-            ?: return CsvRawTrack(line, "")
+        // Strip leading track numbering: "1. ", "01. ", "1) ", "[1] ", "1 - "
+        val cleaned = trimmed.replace(Regex("^\\s*(?:\\[?\\d+[.)\\]]|\\d+\\s*[-–—])\\s*"), "").trim()
+        if (cleaned.isBlank()) return CsvRawTrack("", "")
+
+        // Check for " by " separator
+        val byMatch = Regex("(?i)\\s+by\\s+").find(cleaned)
+        if (byMatch != null) {
+            val title = cleaned.substring(0, byMatch.range.first).trim()
+            val artist = cleaned.substring(byMatch.range.last + 1).trim()
+            if (title.isNotBlank()) return CsvRawTrack(title = title, artist = artist)
+        }
+
+        val separator = Regex("\\s+[-–—|:]\\s+").find(cleaned)
+            ?: return CsvRawTrack(cleaned, "")
         return CsvRawTrack(
-            title = line.substring(separator.range.last + 1).trim(),
-            artist = line.substring(0, separator.range.first).trim(),
+            title = cleaned.substring(separator.range.last + 1).trim(),
+            artist = cleaned.substring(0, separator.range.first).trim(),
         )
     }
 
@@ -247,9 +289,21 @@ class CsvPlaylistImporter @Inject constructor(
 
     private companion object {
         val VIDEO_ID = Regex("[A-Za-z0-9_-]{11}")
-        val TITLE_HEADERS = setOf("track name", "trackname", "title", "song", "name", "track", "song name", "songname", "song title", "track title")
-        val ARTIST_HEADERS = setOf("artist name s", "artist names", "artist s", "artist", "artists", "artist name", "artistname", "track artist", "track artists", "performer", "author", "creator")
-        val ALBUM_HEADERS = setOf("album name", "albumname", "album", "release")
-        val URL_HEADERS = setOf("url", "uri", "track url", "track uri", "youtube url", "video id")
+        val TITLE_HEADERS = setOf(
+            "track name", "trackname", "title", "song", "name", "track", "song name", "songname",
+            "song title", "track title", "video title", "item", "item name", "headline", "music",
+        )
+        val ARTIST_HEADERS = setOf(
+            "artist name s", "artist names", "artist s", "artist", "artists", "artist name",
+            "artistname", "track artist", "track artists", "performer", "performers", "author",
+            "creator", "singer", "band", "by", "channel", "uploader",
+        )
+        val ALBUM_HEADERS = setOf(
+            "album name", "albumname", "album", "albums", "release", "collection", "record",
+        )
+        val URL_HEADERS = setOf(
+            "url", "uri", "track url", "track uri", "youtube url", "video id", "videoid",
+            "link", "track link", "spotify uri", "spotify url", "youtube link", "video url",
+        )
     }
 }

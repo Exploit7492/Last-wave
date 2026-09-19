@@ -222,9 +222,16 @@ class InnerTubeXStreamExtractor @Inject constructor(
     }
 
     private fun companionCall(className: String, methodName: String): Any {
-        val companion = Class.forName("$className\$Companion")
-            .getField("INSTANCE")
-            .get(null)
+        val companion = runCatching {
+            Class.forName(className).getField("Companion").get(null)
+        }.recoverCatching {
+            val companionClass = Class.forName("$className\$Companion")
+            val field = companionClass.declaredFields.firstOrNull {
+                it.name == "INSTANCE" || it.name == "\$\$INSTANCE" || it.name == "Companion"
+            } ?: companionClass.getField("INSTANCE")
+            field.isAccessible = true
+            field.get(null)
+        }.getOrThrow()
         return companion.javaClass.getMethod(methodName).invoke(companion)
     }
 

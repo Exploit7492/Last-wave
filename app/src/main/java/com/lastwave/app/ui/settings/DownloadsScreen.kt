@@ -2,7 +2,7 @@
 
 package com.lastwave.app.ui.settings
 
-import androidx.activity.compose.BackHandler
+import com.lastwave.app.ui.common.PredictiveBackScreen
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -78,6 +78,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -92,6 +94,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -163,6 +166,18 @@ enum class AlbumSortOption(val label: String) {
     RECENT("Recently Added"),
 }
 
+/** OpenDocumentTree that also requests a persistable grant, so the chosen
+ *  download folder survives reboots (takePersistableUriPermission in the
+ *  result callback completes the handshake). */
+private class PersistableOpenDocumentTree : ActivityResultContracts.OpenDocumentTree() {
+    override fun createIntent(context: android.content.Context, input: android.net.Uri?): android.content.Intent =
+        super.createIntent(context, input).addFlags(
+            android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+        )
+}
+
 sealed interface DownloadSubView {
     data object Root : DownloadSubView
     data class ArtistDetail(val artistName: String) : DownloadSubView
@@ -209,6 +224,26 @@ fun DownloadsScreen(
     var showOptionsMenu by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
     var showOrganizationDialog by remember { mutableStateOf(false) }
+    var showLocationDialog by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val downloadTreeUri by viewModel.downloadTreeUri.collectAsStateWithLifecycle()
+    val hasCustomLocation = downloadTreeUri.isNotBlank()
+    // Human-readable custom label; null when on the default location or the
+    // grant was lost (SD card removed / permission revoked).
+    val customLocationLabel = remember(context, downloadTreeUri) {
+        com.lastwave.app.data.download.SafTreeFiles.describeLocation(context, downloadTreeUri)
+    }
+    val customLocationStale = hasCustomLocation && customLocationLabel == null
+    val storageNoun = customLocationLabel ?: "Music/$downloadFolder"
+    val locationPicker =
+        rememberLauncherForActivityResult(PersistableOpenDocumentTree()) { uri: android.net.Uri? ->
+            if (uri != null) {
+                if (com.lastwave.app.data.download.SafTreeFiles.takePersistedAccess(context, uri)) {
+                    viewModel.setDownloadTreeUri(uri.toString())
+                }
+            }
+        }
 
     fun navigateTo(subView: DownloadSubView) {
         subViewStack = subViewStack + subView
@@ -223,14 +258,13 @@ fun DownloadsScreen(
         }
     }
 
-    // Intercept hardware back button when inside subviews
-    BackHandler(enabled = subViewStack.size > 1) {
-        popSubView()
-    }
-
     val totalSizeText = formatBytes(totalBytes ?: 0L)
 
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+    PredictiveBackScreen(
+        enabled = subViewStack.size > 1,
+        onBack = { popSubView() },
+    ) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -331,6 +365,35 @@ fun DownloadsScreen(
                                 onClick = {
                                     showOptionsMenu = false
                                     showFolderDialog = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(stringResource(com.lastwave.app.R.string.dl_location))
+                                        Text(
+                                            customLocationLabel
+                                                ?: if (customLocationStale) {
+                                                    stringResource(com.lastwave.app.R.string.dl_location_unavailable_short)
+                                                } else {
+                                                    stringResource(
+                                                        com.lastwave.app.R.string.dl_location_default,
+                                                        downloadFolder,
+                                                    )
+                                                },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (customLocationStale) {
+                                                MaterialTheme.colorScheme.error
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                        )
+                                    }
+                                },
+                                leadingIcon = { Icon(Icons.Filled.Folder, contentDescription = null) },
+                                onClick = {
+                                    showOptionsMenu = false
+                                    showLocationDialog = true
                                 },
                             )
                             DropdownMenuItem(
@@ -475,6 +538,7 @@ fun DownloadsScreen(
                                     playbackState = playbackState,
                                     totalSizeText = totalSizeText,
                                     downloadFolder = downloadFolder,
+                                    downloadLocationLabel = customLocationLabel,
                                     downloadStructure = downloadStructure,
                                     onPlayTrack = { track -> viewModel.playTrack(track, filteredTracks) },
                                     onPlayNext = { viewModel.playNext(it) },
@@ -651,7 +715,7 @@ fun DownloadsScreen(
         AlertDialog(
             onDismissRequest = { showClearHistoryConfirm = false },
             title = { Text(stringResource(com.lastwave.app.R.string.dl_clear_history_title)) },
-            text = { Text(stringResource(com.lastwave.app.R.string.dl_clear_history, downloadFolder)) },
+            text = { Text(stringResource(com.lastwave.app.R.string.dl_clear_history, storageNoun)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -673,7 +737,7 @@ fun DownloadsScreen(
         AlertDialog(
             onDismissRequest = { showClearAllConfirm = false },
             title = { Text(stringResource(com.lastwave.app.R.string.dl_delete_all_title)) },
-            text = { Text(stringResource(com.lastwave.app.R.string.dl_delete_all, tracks.size, downloadFolder, totalSizeText)) },
+            text = { Text(stringResource(com.lastwave.app.R.string.dl_delete_all, tracks.size, storageNoun, totalSizeText)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -701,6 +765,29 @@ fun DownloadsScreen(
         )
     }
 
+    if (showLocationDialog) {
+        DownloadLocationDialog(
+            currentDescription = customLocationLabel
+                ?: stringResource(
+                    com.lastwave.app.R.string.dl_location_default,
+                    downloadFolder,
+                ),
+            isCustom = hasCustomLocation,
+            isUsable = !customLocationStale,
+            onChoose = {
+                showLocationDialog = false
+                locationPicker.launch(
+                    runCatching { android.net.Uri.parse(downloadTreeUri) }.getOrNull(),
+                )
+            },
+            onReset = {
+                viewModel.clearDownloadTreeUri()
+                showLocationDialog = false
+            },
+            onDismiss = { showLocationDialog = false },
+        )
+    }
+
     if (showOrganizationDialog) {
         FolderOrganizationDialog(
             currentStructure = downloadStructure,
@@ -713,6 +800,63 @@ fun DownloadsScreen(
             onPrimaryOnlyChange = { viewModel.setPrimaryArtistOnly(it) },
         )
     }
+}
+}
+
+@Composable
+private fun DownloadLocationDialog(
+    currentDescription: String,
+    isCustom: Boolean,
+    isUsable: Boolean,
+    onChoose: () -> Unit,
+    onReset: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(com.lastwave.app.R.string.dl_location)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    stringResource(com.lastwave.app.R.string.dl_location_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    currentDescription,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isCustom && !isUsable) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                )
+                if (isCustom && !isUsable) {
+                    Text(
+                        stringResource(com.lastwave.app.R.string.dl_location_unavailable),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onChoose) {
+                Text(stringResource(com.lastwave.app.R.string.dl_location_choose))
+            }
+        },
+        dismissButton = {
+            Row {
+                if (isCustom) {
+                    TextButton(onClick = onReset) {
+                        Text(stringResource(com.lastwave.app.R.string.dl_location_reset))
+                    }
+                }
+                TextButton(onClick = onDismiss) { Text(stringResource(com.lastwave.app.R.string.common_cancel)) }
+            }
+        },
+    )
 }
 
 @Composable
@@ -1107,6 +1251,7 @@ private fun DownloadedSongsList(
     playbackState: com.lastwave.app.playback.PlaybackChromeState,
     totalSizeText: String,
     downloadFolder: String,
+    downloadLocationLabel: String? = null,
     downloadStructure: com.lastwave.app.data.local.DownloadFolderStructure,
     onPlayTrack: (DownloadedTrackEntity) -> Unit,
     onPlayNext: (DownloadedTrackEntity) -> Unit,
@@ -1153,7 +1298,13 @@ private fun DownloadedSongsList(
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            if (downloadStructure == com.lastwave.app.data.local.DownloadFolderStructure.FLAT) {
+                            if (downloadLocationLabel != null) {
+                                stringResource(
+                                    com.lastwave.app.R.string.dl_saved_custom,
+                                    downloadLocationLabel,
+                                    tracks.size,
+                                )
+                            } else if (downloadStructure == com.lastwave.app.data.local.DownloadFolderStructure.FLAT) {
                                 stringResource(
                                     com.lastwave.app.R.string.dl_saved_flat,
                                     downloadFolder,

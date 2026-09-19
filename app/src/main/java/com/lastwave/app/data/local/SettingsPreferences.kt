@@ -42,6 +42,28 @@ enum class LyricsAnimation(val id: String, val title: String, val description: S
     }
 }
 
+/** Preferred lyrics source. Apple Music (syllable-synced) is the default:
+ *  it is tried first and the app falls through to the rest automatically
+ *  when it returns nothing. AUTO keeps the legacy behavior (race the
+ *  word-sync providers, LRCLIB line-sync fallback). Provider names are
+ *  proper nouns — no localization needed. */
+enum class LyricsProvider(val id: String, val title: String, val subtitle: String) {
+    AUTO("auto", "Auto", "Fastest word-sync wins, LRCLIB fallback"),
+    APPLE_MUSIC("apple_music", "Apple Music", "Syllable-synced Apple Music lyrics first"),
+    LYRICS_PLUS("lyrics_plus", "LyricsPlus", "Word-synced lyrics first"),
+    BETTER_LYRICS("better_lyrics", "BetterLyrics", "Word-synced lyrics first"),
+    KUGOU("kugou", "Kugou", "KRC word-synced lyrics first"),
+    LRCLIB("lrclib", "LRCLIB", "Line-synced community lyrics first");
+
+    val isWordProvider: Boolean get() =
+        this == APPLE_MUSIC || this == LYRICS_PLUS || this == BETTER_LYRICS || this == KUGOU
+
+    companion object {
+        fun fromId(id: String?): LyricsProvider =
+            entries.firstOrNull { it.id == id } ?: APPLE_MUSIC
+    }
+}
+
 data class MiscSettings(
     /** When on, the app's accent color follows the dominant color of the
      *  currently-scrobbling track's artwork (Home's "now playing" track),
@@ -78,6 +100,9 @@ data class MiscSettings(
     val wordByWordLyrics: Boolean = true,
     /** Experimental lyrics animation style (Settings -> Experimental -> Lyrics Animation). */
     val lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
+    /** Preferred lyrics source (Settings -> Experimental -> Lyrics Provider).
+     *  Apple Music syllable-sync is the default; AUTO races all providers. */
+    val lyricsProvider: LyricsProvider = LyricsProvider.APPLE_MUSIC,
     /** Blend the end of one queued track into the beginning of the next. */
     val crossfadeEnabled: Boolean = false,
     /** Crossfade length in seconds; kept within the native settings slider range. */
@@ -93,6 +118,10 @@ data class MiscSettings(
      *  Default "LastWave" -> Music/LastWave. Scoped storage (API 29+)
      *  forbids arbitrary paths, so only the leaf folder name is configurable. */
     val downloadFolder: String = DEFAULT_DOWNLOAD_FOLDER,
+    /** User-chosen SAF tree Uri (ACTION_OPEN_DOCUMENT_TREE) for downloads,
+     *  e.g. a folder on the SD card. Blank = default Music/<downloadFolder>.
+     *  Persisted via takePersistableUriPermission so it survives reboots. */
+    val downloadTreeUri: String = "",
     /** Subfolder layout under Music/<downloadFolder>/ (flat by default). */
     val downloadStructure: DownloadFolderStructure = DownloadFolderStructure.FLAT,
     /** When true, folder names use the album-artist tag when available (falls back to track artist). */
@@ -182,12 +211,14 @@ class SettingsPreferences @Inject constructor(
         val LYRICS_UI_VERSION = stringPreferencesKey("lw_lyrics_ui_version")
         val WORD_BY_WORD_LYRICS = booleanPreferencesKey("lw_word_by_word_lyrics")
         val LYRICS_ANIMATION = stringPreferencesKey("lw_lyrics_animation")
+        val LYRICS_PROVIDER = stringPreferencesKey("lw_lyrics_provider")
         val CROSSFADE_ENABLED = booleanPreferencesKey("lw_crossfade_enabled")
         val CROSSFADE_SECONDS = intPreferencesKey("lw_crossfade_seconds")
         val WAVY_SEEKBAR_ENABLED = booleanPreferencesKey("lw_wavy_seekbar_enabled")
         val DOWNLOAD_LYRICS = booleanPreferencesKey("lw_download_lyrics")
         val APP_LANGUAGE = stringPreferencesKey("lw_app_language")
         val DOWNLOAD_FOLDER = stringPreferencesKey("lw_download_folder")
+        val DOWNLOAD_TREE_URI = stringPreferencesKey("lw_download_tree_uri")
         val DOWNLOAD_STRUCTURE = stringPreferencesKey("lw_download_structure")
         val USE_ALBUM_ARTIST_FOLDERS = booleanPreferencesKey("lw_use_album_artist_folders")
         val PRIMARY_ARTIST_ONLY = booleanPreferencesKey("lw_primary_artist_only")
@@ -210,12 +241,14 @@ class SettingsPreferences @Inject constructor(
                 lyricsUiVersion = LyricsUiVersion.fromId(p.readSafely(Keys.LYRICS_UI_VERSION)),
                 wordByWordLyrics = p.readSafely(Keys.WORD_BY_WORD_LYRICS) ?: true,
                 lyricsAnimation = LyricsAnimation.fromId(p.readSafely(Keys.LYRICS_ANIMATION)),
+                lyricsProvider = LyricsProvider.fromId(p.readSafely(Keys.LYRICS_PROVIDER)),
                 crossfadeEnabled = p.readSafely(Keys.CROSSFADE_ENABLED) ?: false,
                 crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 12),
                 wavySeekbarEnabled = p.readSafely(Keys.WAVY_SEEKBAR_ENABLED) ?: true,
                 downloadLyrics = p.readSafely(Keys.DOWNLOAD_LYRICS) ?: true,
                 appLanguageTag = AppLanguage.fromTag(p.readSafely(Keys.APP_LANGUAGE)).tag,
                 downloadFolder = sanitizeDownloadFolderName(p.readSafely(Keys.DOWNLOAD_FOLDER)),
+                downloadTreeUri = p.readSafely(Keys.DOWNLOAD_TREE_URI)?.takeIf { it.isNotBlank() }.orEmpty(),
                 downloadStructure = DownloadFolderStructure.fromId(p.readSafely(Keys.DOWNLOAD_STRUCTURE)),
                 useAlbumArtistForFolders = p.readSafely(Keys.USE_ALBUM_ARTIST_FOLDERS) ?: true,
                 primaryArtistOnly = p.readSafely(Keys.PRIMARY_ARTIST_ONLY) ?: true,
@@ -279,6 +312,10 @@ class SettingsPreferences @Inject constructor(
         dataStore.edit { it[Keys.LYRICS_ANIMATION] = animation.id }
     }
 
+    suspend fun setLyricsProvider(provider: LyricsProvider) {
+        dataStore.edit { it[Keys.LYRICS_PROVIDER] = provider.id }
+    }
+
     suspend fun setCrossfadeEnabled(enabled: Boolean) {
         dataStore.edit { it[Keys.CROSSFADE_ENABLED] = enabled }
     }
@@ -297,6 +334,15 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setDownloadFolder(name: String) {
         dataStore.edit { it[Keys.DOWNLOAD_FOLDER] = sanitizeDownloadFolderName(name) }
+    }
+
+    /** Persists the user-chosen SAF download folder. Blank clears the
+     *  custom location (back to the default Music/<downloadFolder>). */
+    suspend fun setDownloadTreeUri(uriString: String) {
+        dataStore.edit { prefs ->
+            if (uriString.isBlank()) prefs.remove(Keys.DOWNLOAD_TREE_URI)
+            else prefs[Keys.DOWNLOAD_TREE_URI] = uriString.trim()
+        }
     }
 
     suspend fun setDownloadStructure(structure: DownloadFolderStructure) {

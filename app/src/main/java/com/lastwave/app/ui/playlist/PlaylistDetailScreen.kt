@@ -827,7 +827,7 @@ fun PlaylistDetailScreen(
                                     overflowMenuOpen = false
                                 },
                             )
-                            if (!playlist.isYouTubeOnly && playlist.mode != LIKED_SONGS_MODE) {
+                            if (!playlist.isYouTubeOnly) {
                                 val isSyncedToYt = syncedPlaylistIds == null || playlistId in (syncedPlaylistIds ?: emptySet())
                                 DropdownMenuItem(
                                     text = { Text(if (isSyncedToYt) "Syncing to YouTube Music" else "Sync to YouTube Music") },

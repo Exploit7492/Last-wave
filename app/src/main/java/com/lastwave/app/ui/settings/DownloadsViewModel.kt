@@ -189,6 +189,49 @@ class DownloadsViewModel @Inject constructor(
         }
     }
 
+    /** Persisted SAF tree Uri for the custom download location
+     *  (e.g. a folder on the SD card). Blank = default Music/<folder>. */
+    val downloadTreeUri: StateFlow<String> =
+        settingsPreferences.settings
+            .map { it.downloadTreeUri }
+            .withDownloadsFallback("")
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                "",
+            )
+
+    fun setDownloadTreeUri(uriString: String) {
+        launchDownloadAction("update download location") {
+            settingsPreferences.setDownloadTreeUri(uriString)
+        }
+    }
+
+    fun clearDownloadTreeUri() {
+        launchDownloadAction("reset download location") {
+            com.lastwave.app.data.download.SafTreeFiles.releasePersistedAccess(
+                context,
+                downloadTreeUri.value,
+            )
+            settingsPreferences.setDownloadTreeUri("")
+        }
+    }
+
+    /** Synchronous persisted-grant check for the custom location. */
+    fun isCustomLocationUsableNow(): Boolean =
+        com.lastwave.app.data.download.SafTreeFiles.hasPersistedAccess(
+            context,
+            downloadTreeUri.value,
+        )
+
+    /** Human-readable label ("SD card › Music/LastWave"), or null when the
+     *  default location is active or the grant was lost. */
+    fun describeCustomLocation(): String? =
+        com.lastwave.app.data.download.SafTreeFiles.describeLocation(
+            context,
+            downloadTreeUri.value,
+        )
+
     val downloadStructure: StateFlow<com.lastwave.app.data.local.DownloadFolderStructure> =
         settingsPreferences.settings
             .map { it.downloadStructure }
@@ -360,6 +403,32 @@ class DownloadsViewModel @Inject constructor(
     }
 
     fun openInFileManager() {
+        // Custom SAF location: hand its tree Uri to a file manager instead
+        // of the default Music/<folder> path.
+        val tree = downloadTreeUri.value
+        if (tree.isNotBlank() &&
+            com.lastwave.app.data.download.SafTreeFiles.hasPersistedAccess(context, tree)
+        ) {
+            try {
+                val treeUri = Uri.parse(tree)
+                val label = describeCustomLocation() ?: tree
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(treeUri, android.provider.DocumentsContract.Document.MIME_TYPE_DIR)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(
+                    Intent.createChooser(intent, context.getString(com.lastwave.app.R.string.dl_open_location, label))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            } catch (e: Exception) {
+                // No handler installed — stay put rather than opening the
+                // wrong (default) folder.
+            } catch (error: LinkageError) {
+                // Some custom ROMs omit the expected storage activity.
+            }
+            return
+        }
         try {
             val folder = com.lastwave.app.data.local.sanitizeDownloadFolderName(downloadFolder.value)
             val intent = Intent(Intent.ACTION_VIEW).apply {

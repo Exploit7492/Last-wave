@@ -90,17 +90,28 @@ class FeedPlaylistDetailViewModel @Inject constructor(
                     }
                 } else {
                     innerTube.fetchPlaylist(if (liked) "LM" else playlistId, progressive = true, onPageLoaded = ::showTracks)
-                } ?: throw java.io.IOException("Couldn't finish loading this playlist. Tap Retry.")
+                }
                 coroutineContext.ensureActive()
-                _uiState.value = FeedPlaylistDetailUiState.Success(
-                    result.copy(id = playlistId, title = if (liked || recent) title else result.title.ifBlank { title },
-                        author = result.author?.takeIf(String::isNotBlank) ?: author),
-                    // Truncated continuation pages still show what loaded, with
-                    // an inline retry for the remainder (fixes logged-out
-                    // playlists that previously collapsed to a dead Error).
-                    isLoadingMore = false,
-                    loadError = if (result.isComplete) null else "Some tracks couldn't load. Retry.",
-                )
+                val current = _uiState.value as? FeedPlaylistDetailUiState.Success
+                if (result == null && current == null) {
+                    throw java.io.IOException("Couldn't finish loading this playlist. Tap Retry.")
+                }
+                if (result != null) {
+                    _uiState.value = FeedPlaylistDetailUiState.Success(
+                        result.copy(id = playlistId, title = if (liked || recent) title else result.title.ifBlank { title },
+                            author = result.author?.takeIf(String::isNotBlank) ?: author),
+                        // Truncated continuation pages still show what loaded, with
+                        // an inline retry for the remainder (fixes logged-out
+                        // playlists that previously collapsed to a dead Error).
+                        isLoadingMore = false,
+                        loadError = if (result.isComplete) null else "Some tracks couldn't load. Retry.",
+                    )
+                } else {
+                    _uiState.value = current?.copy(
+                        isLoadingMore = false,
+                        loadError = "Couldn't refresh playlist. Tap Retry.",
+                    ) ?: FeedPlaylistDetailUiState.Error("Couldn't finish loading this playlist. Tap Retry.")
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {

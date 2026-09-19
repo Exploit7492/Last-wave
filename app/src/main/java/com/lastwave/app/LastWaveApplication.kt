@@ -57,9 +57,17 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
             // files so cleanup cannot race a newly started download.
             runCatching {
                 val orphanCutoff = System.currentTimeMillis() - ORPHAN_TEMP_MAX_AGE_MS
+                // Every temp prefix the download/tag/transcode pipeline can
+                // leave behind: raw payloads, remuxes, tagged copies,
+                // rename backups and transcoder intermediates. Stranded
+                // multi-MB files otherwise accumulate with every download.
+                val orphanPrefixes = setOf(
+                    "dl_raw_", "dl_remux_", "tagged_",
+                    "untagged_", "trans_pcm_", "trans_flac_",
+                )
                 cacheDir.listFiles { file ->
                     file.isFile &&
-                        file.name.startsWith("dl_raw_") &&
+                        orphanPrefixes.any { prefix -> file.name.startsWith(prefix) } &&
                         file.lastModified() < orphanCutoff
                 }?.forEach { file -> runCatching { file.delete() } }
             }
