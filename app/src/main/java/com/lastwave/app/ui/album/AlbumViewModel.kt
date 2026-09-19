@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.model.AlbumPageData
 import com.lastwave.app.data.playlist.PlaylistRepository
+import com.lastwave.app.data.playlist.SavedPlaylist
 import com.lastwave.app.data.repository.AlbumRepository
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.PlayableTrack
@@ -74,9 +75,11 @@ class AlbumViewModel @Inject constructor(
                 val data = repository.getAlbumDetails(albumTitle, artistName, browseId) { initialData ->
                     coroutineContext.ensureActive()
                     _uiState.value = AlbumUiState.Success(initialData)
+                    viewModelScope.launch { refreshSavedState(initialData) }
                 }
                 coroutineContext.ensureActive()
                 _uiState.value = AlbumUiState.Success(data)
+                refreshSavedState(data)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -112,20 +115,51 @@ class AlbumViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Whether [playlist] already holds this album: an exact track-identity
+     * match, or any track overlap (a partial save from a progressive load).
+     * Zero overlap means an unrelated user playlist that merely shares the
+     * title — saving proceeds and may create a same-title sibling, exactly
+     * like [PlaylistRepository.save]'s own title+mode dedupe philosophy.
+     */
+    private fun isAlbumCopy(playlist: SavedPlaylist, albumTracks: List<GeneratedTrack>): Boolean {
+        if (albumTracks.isEmpty()) return false
+        val albumKeys = albumTracks.mapTo(mutableSetOf()) { it.key }
+        return playlist.tracks.any { it.key in albumKeys }
+    }
+
+    /** Reconciles the save button with the library on every load emission —
+     *  a previously saved album must reopen as saved, never offer a
+     *  duplicate. Yields while a save is in flight (that flow owns state). */
+    private suspend fun refreshSavedState(data: AlbumPageData) {
+        if (_saveUiState.value.isSaving || _saveUiState.value.savedToLibrary) return
+        val title = data.title.ifBlank { return }
+        val copy = runCatching { playlistRepository.findByTitle(title) }.getOrNull()
+        if (copy != null && isAlbumCopy(copy, data.tracks.map { it.toGeneratedTrack() })) {
+            _saveUiState.value = AlbumSaveUiState(savedToLibrary = true)
+        }
+    }
+
     /** One-tap save of the whole album to the library (issue #79) — the
-     *  album equivalent of the feed playlist detail's "Save to library". */
+     *  album equivalent of the feed playlist detail's "Save to library".
+     *  Idempotent: an already-saved album just flips to saved, so a
+     *  progressive tracklist can never stack same-title duplicates. */
     fun saveToLibrary() {
         val data = (_uiState.value as? AlbumUiState.Success)?.data ?: return
         if (data.tracks.isEmpty() || _saveUiState.value.isSaving || _saveUiState.value.savedToLibrary) return
         _saveUiState.value = AlbumSaveUiState(isSaving = true)
         viewModelScope.launch {
             try {
-                playlistRepository.save(
-                    title = data.title.ifBlank { "Album" },
-                    subtitle = "${data.artist.ifBlank { "YouTube Music" }} • ${data.tracks.size} tracks",
-                    mode = "custom",
-                    tracks = data.tracks.map { it.toGeneratedTrack() },
-                )
+                val tracks = data.tracks.map { it.toGeneratedTrack() }
+                val existing = runCatching { playlistRepository.findByTitle(data.title) }.getOrNull()
+                if (existing == null || !isAlbumCopy(existing, tracks)) {
+                    playlistRepository.save(
+                        title = data.title.ifBlank { "Album" },
+                        subtitle = "${data.artist.ifBlank { "YouTube Music" }} • ${tracks.size} tracks",
+                        mode = "custom",
+                        tracks = tracks,
+                    )
+                }
                 _saveUiState.value = AlbumSaveUiState(savedToLibrary = true)
             } catch (cancellation: CancellationException) {
                 throw cancellation

@@ -55,6 +55,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
@@ -149,8 +150,15 @@ class TrackDownloadManager @Inject constructor(
         private const val PUBLIC_DIR_NAME = "LastWave"
         /** Legacy default kept for reading files downloaded before a custom folder was chosen. */
         private const val LEGACY_PUBLIC_DIR_NAME = "LastWave"
-        private const val DOWNLOAD_BUFFER_SIZE = 512 * 1024 // 512 KB
+        // 128 KB keeps per-connection buffers out of the large-object heap:
+        // 512 KB chunks fragmented ART heaps on low-RAM devices and a burst
+        // of parallel ranges could OOM the process after a few downloads.
+        private const val DOWNLOAD_BUFFER_SIZE = 128 * 1024 // 128 KB
         private const val PARALLEL_YOUTUBE_PARTS = 4
+        // At most 2 full-track downloads run at once; extra taps queue behind
+        // the semaphore instead of stacking sockets, buffers and bitmap
+        // decodes until the process dies (the 5-to-6-download crash).
+        private const val MAX_CONCURRENT_DOWNLOADS = 2
         private const val MIN_PARALLEL_DOWNLOAD_BYTES = 2L * 1024 * 1024
         private const val MIN_VALID_AUDIO_BYTES = 1_024L
         private const val RECONNECT_POLL_INTERVAL_MS = 500L
@@ -164,13 +172,16 @@ class TrackDownloadManager @Inject constructor(
             "${artist.trim().lowercase()}_${title.trim().lowercase()}"
     }
 
-    // Dedicated HTTP client with extended timeouts and high-throughput connection pooling
+    // Dedicated HTTP client with extended timeouts and bounded pooling.
+    // Caps are deliberately low: each parallel range holds a socket plus a
+    // read buffer, and unbounded pooling kept idle connections (and their
+    // buffers) alive for minutes across successive downloads.
     private val downloadClient = okHttpClient.newBuilder()
         .dispatcher(Dispatcher().apply {
-            maxRequests = 64
-            maxRequestsPerHost = 24
+            maxRequests = 24
+            maxRequestsPerHost = 8
         })
-        .connectionPool(ConnectionPool(32, 5, TimeUnit.MINUTES))
+        .connectionPool(ConnectionPool(10, 5, TimeUnit.MINUTES))
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(2, TimeUnit.MINUTES)
         .callTimeout(10, TimeUnit.MINUTES)
@@ -190,6 +201,7 @@ class TrackDownloadManager @Inject constructor(
     private val activeUris = ConcurrentHashMap<String, Uri>()
     private val activeFiles = ConcurrentHashMap<String, File>()
     private val reconnectGenerations = ConcurrentHashMap<String, AtomicLong>()
+    private val downloadSlots = Semaphore(MAX_CONCURRENT_DOWNLOADS)
 
     private val _downloads = MutableStateFlow<Map<String, DownloadProgress>>(emptyMap())
     val downloads: StateFlow<Map<String, DownloadProgress>> = _downloads.asStateFlow()
@@ -316,18 +328,23 @@ class TrackDownloadManager @Inject constructor(
             if (fileStillPresent) return@withContext true
         }
 
-        // Check if file already exists in the download directories (active folder + legacy default, incl. subfolders)
+        // Check if file already exists in the download directories (active folder + legacy default, incl. subfolders).
+        // The walk is guarded: on scoped-storage devices the public Music dir
+        // can throw (or a concurrent download can churn it), and that must
+        // degrade to "not found" rather than crashing the caller.
         val dirName = currentDownloadDirName()
         val candidateExtensions = listOf("flac", "m4a", "opus", "mp3", "webm")
         val sanitizedBase = sanitizeFilename("${artist.trim()} - ${title.trim()}")
         val candidateNames = candidateExtensions.map { "$sanitizedBase.$it" }.toSet()
-        if (downloadSearchDirs(dirName).any { publicDir ->
+        val foundOnDisk = runCatching {
+            downloadSearchDirs(dirName).any { publicDir ->
                 publicDir.exists() && publicDir.isDirectory &&
                     publicDir.walkTopDown().maxDepth(6).any { f ->
                         f.isFile && f.name in candidateNames && f.length() > 0
                     }
             }
-        ) {
+        }.getOrDefault(false)
+        if (foundOnDisk) {
             return@withContext true
         }
 
@@ -370,6 +387,20 @@ class TrackDownloadManager @Inject constructor(
         reconnectGenerations[key] = AtomicLong()
 
         val job = applicationScope.launch(Dispatchers.IO) {
+            // Bound the number of simultaneous downloads: each one holds
+            // sockets, buffers and (during tagging) a decoded cover bitmap,
+            // and unbounded overlap OOMed low-RAM devices after a few songs.
+            // acquire() is cancellable; a cancel while queued must still
+            // release the key so the slot never strands.
+            try {
+                downloadSlots.acquire()
+            } catch (cancelled: CancellationException) {
+                activeKeys.remove(key)
+                activeJobs.remove(key)
+                reconnectGenerations.remove(key)
+                _downloads.update { it - key }
+                return@launch
+            }
             // Already downloaded? Skip re-downloading entirely rather than
             // re-fetching the file and inserting a duplicate DB row or (1).flac file.
             val existing = runCatching {
@@ -388,6 +419,7 @@ class TrackDownloadManager @Inject constructor(
                     }.getOrDefault(false)
                 }
                 if (fileStillPresent) {
+                    downloadSlots.release()
                     activeKeys.remove(key)
                     return@launch
                 }
@@ -398,20 +430,29 @@ class TrackDownloadManager @Inject constructor(
                 val dirName = currentDownloadDirName()
                 val sanitizedBase = sanitizeFilename("${artist.trim()} - ${title.trim()}")
                 val candidateNames = setOf("flac", "m4a", "opus", "mp3", "webm").map { "$sanitizedBase.$it" }.toSet()
-                val found = downloadSearchDirs(dirName).any { publicDir ->
-                    publicDir.exists() && publicDir.isDirectory &&
-                        publicDir.walkTopDown().maxDepth(6).any { f ->
-                            f.isFile && f.name in candidateNames && f.length() > 0
-                        }
-                }
+                // Guarded: this ran outside any try/catch, so a filesystem
+                // hiccup here used to escape the coroutine and kill the app.
+                val found = runCatching {
+                    downloadSearchDirs(dirName).any { publicDir ->
+                        publicDir.exists() && publicDir.isDirectory &&
+                            publicDir.walkTopDown().maxDepth(6).any { f ->
+                                f.isFile && f.name in candidateNames && f.length() > 0
+                            }
+                    }
+                }.getOrDefault(false)
                 if (found) {
+                    downloadSlots.release()
                     activeKeys.remove(key)
                     return@launch
                 }
             }
             val notifId = key.hashCode()
             updateProgress(DownloadProgress(key = key, title = title, artist = artist, progressPercent = 0))
-            showDownloadNotification(notifId, key, title, artist, 0, false, "Preparing high-res stream...")
+            // Notifications are best-effort: a PendingIntent/Notification
+            // failure must never escape the coroutine and kill the app.
+            runCatching {
+                showDownloadNotification(notifId, key, title, artist, 0, false, "Preparing high-res stream...")
+            }
 
             var destinationUri: Uri? = null
             var destinationFile: File? = null
@@ -452,6 +493,19 @@ class TrackDownloadManager @Inject constructor(
 
                 // 1. Resolve source — respect user's download quality preference (Lossless tiers or YouTube Music)
                 val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
+                // Custom SAF folder (e.g. SD card): resolve once per download.
+                // A stale grant (revoked permission / removed card) fails fast
+                // with an actionable message instead of silently filling
+                // internal storage the user explicitly moved away from.
+                val customTreeUri = SafTreeFiles.parseTreeUri(misc.downloadTreeUri)
+                if (customTreeUri != null && !SafTreeFiles.hasPersistedAccess(context, misc.downloadTreeUri)) {
+                    val staleMsg = "Download folder unavailable — reselect it in Downloads → Download location"
+                    updateProgress(
+                        DownloadProgress(key = key, title = title, artist = artist, error = staleMsg),
+                    )
+                    runCatching { showErrorNotification(notifId, key, title, artist, staleMsg) }
+                    return@launch
+                }
                 var resolvedUrl: String? = null
                 var mimeType = "audio/flac"
                 var extension = "flac"
@@ -599,16 +653,18 @@ class TrackDownloadManager @Inject constructor(
                             _downloads.value[key]?.let { current ->
                                 val updated = current.copy(isWaitingForConnection = isWaiting)
                                 updateProgress(updated)
-                                showDownloadNotification(
-                                    notificationId = notifId,
-                                    downloadKey = key,
-                                    title = title,
-                                    artist = artist,
-                                    progress = updated.progressPercent,
-                                    isIndeterminate = updated.totalBytes <= 0L,
-                                    badgeText = updated.formatBadge,
-                                    isWaitingForConnection = isWaiting,
-                                )
+                                runCatching {
+                                    showDownloadNotification(
+                                        notificationId = notifId,
+                                        downloadKey = key,
+                                        title = title,
+                                        artist = artist,
+                                        progress = updated.progressPercent,
+                                        isIndeterminate = updated.totalBytes <= 0L,
+                                        badgeText = updated.formatBadge,
+                                        isWaitingForConnection = isWaiting,
+                                    )
+                                }
                             }
                         },
                     ) { downloadedBytes, totalBytes ->
@@ -630,7 +686,9 @@ class TrackDownloadManager @Inject constructor(
                                     // Throttle notification IPC to avoid Binder lock contention during rapid downloading
                                     if (progress == 100 || now - lastNotifTime >= 250L) {
                                         lastNotifTime = now
-                                        showDownloadNotification(notifId, key, title, artist, progress, false, formatBadge)
+                                        runCatching {
+                                            showDownloadNotification(notifId, key, title, artist, progress, false, formatBadge)
+                                        }
                                     }
                                 }
                             } else if (downloadedBytes - lastUnknownProgressBytes >= 1024 * 1024) {
@@ -647,7 +705,9 @@ class TrackDownloadManager @Inject constructor(
                                 )
                                 if (now - lastNotifTime >= 500L) {
                                     lastNotifTime = now
-                                    showDownloadNotification(notifId, key, title, artist, 0, true, formatBadge)
+                                    runCatching {
+                                        showDownloadNotification(notifId, key, title, artist, 0, true, formatBadge)
+                                    }
                                 }
                             }
                         }
@@ -838,6 +898,7 @@ class TrackDownloadManager @Inject constructor(
                         durationMs = durationMs,
                         dirName = dirName,
                         subpath = subpath,
+                        treeUri = customTreeUri,
                     )
                     destinationUri = uri
                     destinationFile = file
@@ -882,7 +943,7 @@ class TrackDownloadManager @Inject constructor(
                     val lyricsText = syncedLyrics ?: plainLyrics
                     if (!lyricsText.isNullOrBlank()) {
                         val lrcFilename = sanitizeFilename("$artist - $title") + ".lrc"
-                        lrcPath = writePublicCompanionFile(lrcFilename, lyricsText, "text/plain", dirName, subpath)
+                        lrcPath = writePublicCompanionFile(lrcFilename, lyricsText, "text/plain", dirName, subpath, customTreeUri)
                     }
                 }
 
@@ -946,13 +1007,31 @@ class TrackDownloadManager @Inject constructor(
                     ),
                 )
 
-                showCompletedNotification(notifId, title, artist, formatBadge)
+                runCatching { showCompletedNotification(notifId, title, artist, formatBadge) }
             } catch (cancelled: CancellationException) {
                 // Cancelled by user — clean up partial file
                 destinationUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
                 destinationFile?.let { runCatching { if (it.exists()) it.delete() } }
                 notificationManager?.cancel(notifId)
                 _downloads.update { it - key }
+            } catch (oom: OutOfMemoryError) {
+                // Memory pressure (parallel ranges + decoded cover art) used
+                // to escape as an uncaught Error and kill the whole process.
+                // Fail just this download instead so the app survives.
+                android.util.Log.e("TrackDownloadManager", "Out of memory downloading $title", oom)
+                destinationUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+                destinationFile?.let { runCatching { if (it.exists()) it.delete() } }
+                updateProgress(
+                    DownloadProgress(
+                        key = key,
+                        title = title,
+                        artist = artist,
+                        error = "Not enough memory — close other apps and download one song at a time",
+                    ),
+                )
+                runCatching {
+                    showErrorNotification(notifId, key, title, artist, "Not enough memory — retry one song at a time")
+                }
             } catch (error: Exception) {
                 destinationUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
                 destinationFile?.let { runCatching { if (it.exists()) it.delete() } }
@@ -964,8 +1043,11 @@ class TrackDownloadManager @Inject constructor(
                         error = error.localizedMessage ?: error.message ?: "Download failed",
                     ),
                 )
-                showErrorNotification(notifId, key, title, artist, error.localizedMessage ?: "Failed")
+                runCatching {
+                    showErrorNotification(notifId, key, title, artist, error.localizedMessage ?: "Failed")
+                }
             } finally {
+                runCatching { downloadSlots.release() }
                 activeKeys.remove(key)
                 activeJobs.remove(key)
                 activeUris.remove(key)
@@ -1427,6 +1509,7 @@ class TrackDownloadManager @Inject constructor(
         durationMs: Long = 0L,
         dirName: String = PUBLIC_DIR_NAME,
         subpath: String = "",
+        treeUri: Uri? = null,
     ): Triple<java.io.OutputStream, Uri?, File?> {
         val resolver = context.contentResolver
         val safeDir = sanitizeDownloadFolderName(dirName)
@@ -1436,6 +1519,28 @@ class TrackDownloadManager @Inject constructor(
             "${Environment.DIRECTORY_MUSIC}/$safeDir/$safeSubpath"
         } else {
             "${Environment.DIRECTORY_MUSIC}/$safeDir"
+        }
+
+        // Custom SAF folder (SD card etc.): write straight into the user's
+        // chosen tree, honoring the same artist/album subfolders. Any failure
+        // throws so the download surfaces an error instead of silently
+        // landing in internal storage.
+        if (treeUri != null) {
+            val segments = safeSubpath.split('/').filter { it.isNotBlank() }
+            val audioMime = when {
+                mimeType.contains("mp4") || mimeType.contains("m4a") || mimeType.contains("aac") -> "audio/mp4"
+                mimeType.contains("flac") -> "audio/flac"
+                mimeType.contains("mp3") || mimeType.contains("mpeg") -> "audio/mpeg"
+                mimeType.contains("webm") -> "audio/webm"
+                mimeType.contains("ogg") || mimeType.contains("opus") -> "audio/ogg"
+                mimeType.contains("wav") -> "audio/x-wav"
+                else -> "audio/mp4"
+            }
+            val safUri = SafTreeFiles.createFile(context, treeUri, segments, filename, audioMime)
+                ?: throw IOException("Custom download folder unavailable — reselect it in Downloads → Download location")
+            val stream = SafTreeFiles.openWriteStream(context, safUri)
+                ?: throw IOException("Could not write to the custom download folder")
+            return Triple(stream, safUri, null)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -1534,7 +1639,9 @@ class TrackDownloadManager @Inject constructor(
 
 
     private fun finalizePublicFile(uri: Uri?) {
-        if (uri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        // IS_PENDING only exists on MediaStore Uris — SAF document Uris are
+        // already visible once the stream closes.
+        if (uri != null && uri.authority == MediaStore.AUTHORITY && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val contentValues = ContentValues().apply {
                 put(MediaStore.MediaColumns.IS_PENDING, 0)
             }
@@ -1671,10 +1778,27 @@ class TrackDownloadManager @Inject constructor(
         mimeType: String,
         dirName: String = PUBLIC_DIR_NAME,
         subpath: String = "",
+        treeUri: Uri? = null,
     ): String? {
         val safeDir = sanitizeDownloadFolderName(dirName)
         val safeSubpath = subpath.split('/').map { sanitizeFilename(it.trim()) }
             .filter { it.isNotBlank() }.joinToString("/")
+        // Custom SAF folder: keep the .lrc next to its track in the same
+        // tree. Lyrics are optional, so failures degrade to null.
+        if (treeUri != null) {
+            return runCatching {
+                val segments = safeSubpath.split('/').filter { it.isNotBlank() }
+                val fileUri = SafTreeFiles.createFile(context, treeUri, segments, filename, mimeType)
+                    ?: return@runCatching null
+                val stream = context.contentResolver.openOutputStream(fileUri, "wt")
+                    ?: return@runCatching null
+                stream.use { os ->
+                    os.write(content.toByteArray(Charsets.UTF_8))
+                    os.flush()
+                }
+                fileUri.toString()
+            }.getOrNull()
+        }
         // Mirror the audio subfolder so .lrc sits next to its track. Note the
         // audio lives under Music/ while companions live under Downloads/.
         val lrcRelativePath = if (safeSubpath.isNotBlank()) {
@@ -1861,6 +1985,12 @@ class TrackDownloadManager @Inject constructor(
                     downloadedTrackDao.insert(entity)
                     existingPaths.add(file.absolutePath)
                     existingKeys.add(trackKey)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (oom: OutOfMemoryError) {
+                    // One corrupt/huge file's metadata must not abort the
+                    // whole sync or kill the process — skip it.
+                    android.util.Log.e("TrackDownloadManager", "Skipping file after OOM: ${file.name}", oom)
                 } catch (e: Exception) {
                     android.util.Log.e("TrackDownloadManager", "Failed to import file: ${file.name}", e)
                 } finally {

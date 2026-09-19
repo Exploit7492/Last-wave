@@ -241,11 +241,14 @@ class YouTubePlaylistImportViewModel @Inject constructor(
             _uiState.update { it.copy(isImporting = true, importProgress = "Starting import...") }
             val savedList = mutableListOf<SavedPlaylist>()
             val ownedIds = _uiState.value.libraryPlaylists.mapTo(mutableSetOf()) { it.id }
+                .filterNotTo(mutableSetOf()) { PlaylistImportManager.isYtLikedId(it) }
 
             try {
                 val preview = _uiState.value.previewPlaylist
                 if (preview != null && selectedIds.contains(preview.id) && selectedIds.size == 1) {
-                    val saved = if (preview.id in ownedIds) {
+                    val saved = if (PlaylistImportManager.isYtLikedId(preview.id)) {
+                        importManager.importYtLikedIntoLikedSongs(preview)
+                    } else if (preview.id in ownedIds) {
                         importManager.importOwnedYouTubePlaylist(preview)
                     } else {
                         importManager.importYouTubePlaylist(preview)
@@ -258,7 +261,11 @@ class YouTubePlaylistImportViewModel @Inject constructor(
                         _uiState.update { it.copy(importProgress = "Importing playlist $count of ${selectedIds.size}...") }
                         val playlistResult = innerTube.fetchPlaylist(id)
                         if (playlistResult != null && playlistResult.tracks.isNotEmpty()) {
-                            val saved = if (playlistResult.id in ownedIds) {
+                            val saved = if (PlaylistImportManager.isYtLikedId(playlistResult.id) ||
+                                PlaylistImportManager.isYtLikedId(id)
+                            ) {
+                                importManager.importYtLikedIntoLikedSongs(playlistResult)
+                            } else if (playlistResult.id in ownedIds) {
                                 importManager.importOwnedYouTubePlaylist(playlistResult)
                             } else {
                                 importManager.importYouTubePlaylist(playlistResult)

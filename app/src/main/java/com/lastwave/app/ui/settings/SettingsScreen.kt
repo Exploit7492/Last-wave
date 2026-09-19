@@ -63,6 +63,7 @@ import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Waves
 import com.lastwave.app.data.local.LyricsAnimation
+import com.lastwave.app.data.local.LyricsProvider
 import com.lastwave.app.data.local.LyricsUiVersion
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Logout
@@ -75,6 +76,7 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.SwitchAccount
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.FileDownload
@@ -85,6 +87,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
@@ -273,6 +276,8 @@ fun SettingsScreen(
     val allPlaylists by viewModel.allPlaylists.collectAsStateWithLifecycle()
     val ytAccountPlaylists by viewModel.ytAccountPlaylists.collectAsStateWithLifecycle()
     val hiddenYtLibraryPlaylistIds by viewModel.hiddenYtLibraryPlaylistIds.collectAsStateWithLifecycle()
+    val ytChannels by viewModel.ytChannels.collectAsStateWithLifecycle()
+    val ytChannelsLoading by viewModel.ytChannelsLoading.collectAsStateWithLifecycle()
     val eq by viewModel.equalizer.collectAsStateWithLifecycle()
     val updateInfo by viewModel.updateInfo.collectAsStateWithLifecycle()
     val isLastFmConnected by viewModel.isLastFmConnected.collectAsStateWithLifecycle()
@@ -298,8 +303,10 @@ fun SettingsScreen(
     var showDownloadQualityDialog by remember { mutableStateOf(false) }
     var showEqSheet by remember { mutableStateOf(false) }
     var showLyricsAnimationSheet by remember { mutableStateOf(false) }
+    var showLyricsProviderDialog by remember { mutableStateOf(false) }
     var showSyncPlaylistsSheet by remember { mutableStateOf(false) }
     var showYtLibraryVisibilitySheet by remember { mutableStateOf(false) }
+    var showYtChannelSheet by remember { mutableStateOf(false) }
     var showYtDisconnectConfirm by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
     val currentLanguage = remember(misc.appLanguageTag) { AppLanguage.fromTag(misc.appLanguageTag) }
@@ -428,7 +435,13 @@ fun SettingsScreen(
                             else if (ytSyncEnabled) "Selected playlists mirror to your account, 24/7" + lastSyncSuffix(ytLastSyncAt)
                             else "Keep your YT Music library in sync with LastWave"
                     }
-                    val ytRowCount = if (ytConnected) 6 else 2
+                    // Display name of the active channel: the picked entry when
+                    // the channel list was loaded, otherwise the stored name.
+                    val currentChannelName = ytChannels.firstOrNull {
+                        it.channelId == ytConnection.onBehalfOfUser &&
+                            it.authUserIndex == ytConnection.authUserIndex
+                    }?.accountName ?: ytConnection.accountName
+                    val ytRowCount = if (ytConnected) 7 else 2
                     SettingsGroup(rowCount = ytRowCount) { index, position ->
                         when (index) {
                             0 -> if (ytConnected) {
@@ -460,6 +473,20 @@ fun SettingsScreen(
                                 position = position,
                             )
                             2 -> if (ytConnected) {
+                                SettingsActionCard(
+                                    icon = Icons.Filled.SwitchAccount,
+                                    iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                    iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    title = "YouTube channel",
+                                    subtitle = currentChannelName.ifBlank { "Default channel" },
+                                    onClick = {
+                                        viewModel.loadYtChannels()
+                                        showYtChannelSheet = true
+                                    },
+                                    position = position,
+                                )
+                            }
+                            3 -> if (ytConnected) {
                                 val selectedCount = syncedPlaylistIds?.size ?: allPlaylists.size
                                 val syncCountText = if (syncedPlaylistIds == null || selectedCount == allPlaylists.size) {
                                     "All (${allPlaylists.size}) playlists syncing"
@@ -486,7 +513,7 @@ fun SettingsScreen(
                                     position = position,
                                 )
                             }
-                            3 -> if (ytConnected) {
+                            4 -> if (ytConnected) {
                                 val shownCount = ytAccountPlaylists.count { it.id !in hiddenYtLibraryPlaylistIds }
                                 val visibilitySubtitle = if (shownCount == ytAccountPlaylists.size) {
                                     "All (${ytAccountPlaylists.size}) account playlists shown"
@@ -503,7 +530,7 @@ fun SettingsScreen(
                                     position = position,
                                 )
                             }
-                            4 -> SettingsActionCard(
+                            5 -> SettingsActionCard(
                                 icon = Icons.Filled.QueueMusic,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -512,7 +539,7 @@ fun SettingsScreen(
                                 onClick = onOpenYouTubeImport,
                                 position = position,
                             )
-                            5 -> if (ytConnected) {
+                            6 -> if (ytConnected) {
                                 SettingsToggleCard(
                                     icon = Icons.Filled.History,
                                     iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
@@ -536,22 +563,52 @@ fun SettingsScreen(
             item {
                 val mb = (downloadTotalBytes ?: 0L).toDouble() / (1024 * 1024)
                 val formattedStorage = if (mb >= 1000) "%.1f GB".format(mb / 1024) else "%.1f MB".format(mb)
+                // Custom SAF location (SD card) replaces the Music/<folder>
+                // noun; a lost grant shows as unavailable until reselected.
+                val customDownloadLabel = androidx.compose.runtime.remember(context, misc.downloadTreeUri) {
+                    com.lastwave.app.data.download.SafTreeFiles.describeLocation(context, misc.downloadTreeUri)
+                }
+                val downloadLocationNoun = customDownloadLabel
+                    ?: if (misc.downloadTreeUri.isNotBlank()) {
+                        "Unavailable — reselect in Downloads"
+                    } else {
+                        "Music/${misc.downloadFolder}"
+                    }
                 val downloadsSubtitle = if (downloadCount > 0) {
                     if (misc.downloadStructure == com.lastwave.app.data.local.DownloadFolderStructure.FLAT) {
-                        stringResource(
-                            R.string.settings_downloads_sub,
-                            downloadCount,
-                            formattedStorage,
-                            misc.downloadFolder,
-                        )
+                        if (customDownloadLabel != null || misc.downloadTreeUri.isNotBlank()) {
+                            stringResource(
+                                R.string.settings_downloads_sub_custom,
+                                downloadCount,
+                                formattedStorage,
+                                downloadLocationNoun,
+                            )
+                        } else {
+                            stringResource(
+                                R.string.settings_downloads_sub,
+                                downloadCount,
+                                formattedStorage,
+                                misc.downloadFolder,
+                            )
+                        }
                     } else {
-                        stringResource(
-                            R.string.settings_downloads_sub_structured,
-                            downloadCount,
-                            formattedStorage,
-                            misc.downloadFolder,
-                            stringResource(misc.downloadStructure.shortLabelRes),
-                        )
+                        if (customDownloadLabel != null || misc.downloadTreeUri.isNotBlank()) {
+                            stringResource(
+                                R.string.settings_downloads_sub_structured_custom,
+                                downloadCount,
+                                formattedStorage,
+                                downloadLocationNoun,
+                                stringResource(misc.downloadStructure.shortLabelRes),
+                            )
+                        } else {
+                            stringResource(
+                                R.string.settings_downloads_sub_structured,
+                                downloadCount,
+                                formattedStorage,
+                                misc.downloadFolder,
+                                stringResource(misc.downloadStructure.shortLabelRes),
+                            )
+                        }
                     }
                 } else {
                     stringResource(R.string.settings_downloads_empty)
@@ -753,7 +810,7 @@ fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel(stringResource(R.string.settings_section_experimental))
-                    SettingsGroup(rowCount = 5) { index, position ->
+                    SettingsGroup(rowCount = 6) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.BubbleChart,
@@ -819,6 +876,15 @@ fun SettingsScreen(
                                 },
                                 checked = misc.isStudioMasterClarityEnabled,
                                 onCheckedChange = viewModel::setStudioMasterClarity,
+                                position = position,
+                            )
+                            5 -> SettingsActionCard(
+                                icon = Icons.Filled.Lyrics,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = stringResource(R.string.settings_lyrics_provider),
+                                subtitle = "${misc.lyricsProvider.title} \u2022 ${misc.lyricsProvider.subtitle}",
+                                onClick = { showLyricsProviderDialog = true },
                                 position = position,
                             )
                                                     }
@@ -1431,6 +1497,19 @@ fun SettingsScreen(
         )
     }
 
+    // -- Lyrics provider picker: preferred source first, automatic
+    // fallback to the rest when it returns nothing --
+    if (showLyricsProviderDialog) {
+        LyricsProviderDialog(
+            current = misc.lyricsProvider,
+            onSelect = {
+                viewModel.setLyricsProvider(it)
+                showLyricsProviderDialog = false
+            },
+            onDismiss = { showLyricsProviderDialog = false },
+        )
+    }
+
     // -- Selective Playlist Sync sheet --
     if (showSyncPlaylistsSheet) {
         SyncPlaylistsSheet(
@@ -1449,6 +1528,21 @@ fun SettingsScreen(
             onSetVisible = viewModel::setYtLibraryPlaylistVisible,
             onSetAllVisible = viewModel::setAllYtLibraryPlaylistsVisible,
             onDismiss = { showYtLibraryVisibilitySheet = false },
+        )
+    }
+
+    if (showYtChannelSheet) {
+        YouTubeChannelSheet(
+            channels = ytChannels,
+            isLoading = ytChannelsLoading,
+            selectedChannelId = ytConnection.onBehalfOfUser,
+            selectedAuthUser = ytConnection.authUserIndex,
+            onReload = viewModel::loadYtChannels,
+            onSelect = {
+                viewModel.selectYtChannel(it)
+                showYtChannelSheet = false
+            },
+            onDismiss = { showYtChannelSheet = false },
         )
     }
 
@@ -3414,6 +3508,174 @@ private fun EqNativeSlider(
 
 /** Controls which connected-account playlists appear in LastWave. This is
  * intentionally independent from importing and two-way sync. */
+/**
+ * Lets the user pick which YouTube channel/profile answers inside the
+ * current session. Cookies are identical for every channel (which is why a
+ * cookie-only client always lands on the first one) — the choice is sent
+ * per-request as the InnerTube delegation flag instead.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun YouTubeChannelSheet(
+    channels: List<com.lastwave.app.data.music.YtChannelOption>,
+    isLoading: Boolean,
+    selectedChannelId: String?,
+    selectedAuthUser: Int?,
+    onReload: () -> Unit,
+    onSelect: (com.lastwave.app.data.music.YtChannelOption) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .adaptiveContentWidth(maxWidth = 640.dp)
+                .align(Alignment.CenterHorizontally)
+                .statusBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp + safeDrawingBottomPadding()),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("YouTube Channel", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Pick which channel's library, likes & history LastWave uses",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            when {
+                isLoading -> Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            "Loading channels...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                channels.isEmpty() -> {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text(
+                                "No channels found",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                "Check your connection, then try again.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            FilledTonalButton(onClick = onReload) {
+                                Text("Retry")
+                            }
+                        }
+                    }
+                }
+
+                else -> {
+                    Text(
+                        "Each channel keeps its own sync mirrors — switching re-mirrors cleanly instead of mixing libraries.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 440.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(channels.size, key = { index ->
+                            val c = channels[index]
+                            "${c.channelId}|${c.authUserIndex}|${c.accountName}"
+                        }) { index ->
+                            val channel = channels[index]
+                            val isSelected = channel.channelId == selectedChannelId &&
+                                channel.authUserIndex == selectedAuthUser
+                            Surface(
+                                onClick = {
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                    if (!isSelected) onSelect(channel)
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    RadioButton(
+                                        selected = isSelected,
+                                        onClick = { if (!isSelected) onSelect(channel) },
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            channel.accountName,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                            maxLines = 1,
+                                        )
+                                        val detail = channel.channelHandle
+                                            ?: if (channel.channelId != null) "Channel" else "Default channel"
+                                        Text(
+                                            detail,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                    if (isSelected) {
+                                        Text(
+                                            "Active",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = onDismiss, shape = CircleShape, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                Text("Done", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun YouTubeLibraryVisibilitySheet(
@@ -3695,6 +3957,61 @@ private fun SyncPlaylistsSheet(
 /**
  * Bottom sheet to pick from 8 experimental lyrics animation physics profiles.
  */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LyricsProviderDialog(
+    current: LyricsProvider,
+    onSelect: (LyricsProvider) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_lyrics_provider)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    stringResource(R.string.settings_lyrics_provider_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                LyricsProvider.entries.forEach { provider ->
+                    val selected = provider == current
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onSelect(provider) }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = selected, onClick = { onSelect(provider) })
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                provider.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                            )
+                            Text(
+                                provider.subtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_done)) }
+        },
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LyricsAnimationSheet(

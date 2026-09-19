@@ -37,6 +37,8 @@
     <string name="settings_downloads_title">Downloads &amp; Offline Music</string>
     <string name="settings_downloads_sub">%1$d song(s) • %2$s • Music/%3$s</string>
     <string name="settings_downloads_sub_structured">%1$d song(s) • %2$s • Music/%3$s • %4$s</string>
+    <string name="settings_downloads_sub_custom">%1$d song(s) • %2$s • %3$s</string>
+    <string name="settings_downloads_sub_structured_custom">%1$d song(s) • %2$s • %3$s • %4$s</string>
     <string name="settings_downloads_empty">No offline songs downloaded</string>
 
     <string name="settings_modules_title">Provider Modules</string>
@@ -67,6 +69,8 @@
     <string name="settings_liquid_glass">Liquid Glass</string>
     <string name="settings_liquid_glass_sub">iOS-style translucent materials across the app</string>
     <string name="settings_lyrics_animation">Lyrics Animation</string>
+    <string name="settings_lyrics_provider">Lyrics provider</string>
+    <string name="settings_lyrics_provider_desc">Tried first for every song. If it returns nothing, the app automatically falls through to the other providers.</string>
     <string name="settings_equalizer">Equalizer</string>
     <string name="settings_equalizer_sub">Shape your sound across 15 frequencies</string>
     <string name="settings_wavy_seekbar">Wavy Seekbar</string>
@@ -182,6 +186,15 @@
     <string name="dl_primary_only">Primary artist only</string>
     <string name="dl_primary_only_sub">Strip feat. &amp; collaborators from folder names</string>
     <string name="dl_change_folder">Change folder</string>
+    <string name="dl_location">Download location</string>
+    <string name="dl_location_desc">New downloads are saved straight into this folder — including folders on your SD card. Existing files stay where they are and keep playing.</string>
+    <string name="dl_location_default">Music/%1$s • internal storage</string>
+    <string name="dl_location_choose">Choose folder…</string>
+    <string name="dl_location_reset">Reset to default</string>
+    <string name="dl_location_unavailable">Previously selected folder is unavailable (SD card removed or permission revoked). Downloads pause until you choose a folder again.</string>
+    <string name="dl_location_unavailable_short">Unavailable — tap to reselect</string>
+    <string name="dl_saved_custom">Saved in %1$s • %2$d song(s)</string>
+    <string name="dl_open_location">Open %1$s</string>
     <string name="dl_saved_flat">Saved in Music/%1$s/ • %2$d song(s)</string>
     <string name="dl_saved_structured">Music/%1$s/ • %2$s • %3$d song(s)</string>
     <string name="dl_clear_history">This will clear the history list in the app. Your audio files in Music/%1$s will stay safely on your device.</string>
@@ -276,6 +289,8 @@
     <string name="desc_shuffle">Shuffle</string>
     <string name="desc_repeat">Repeat</string>
     <string name="desc_play_pause">Play or pause</string>
+    <string name="desc_previous">Previous</string>
+    <string name="desc_next">Next</string>
 
     <string name="dialog_clear_all_title">Clear all data?</string>
     <string name="dialog_clear_all_text">This removes your credentials, playlists, and cached data. This can\'t be undone.</string>

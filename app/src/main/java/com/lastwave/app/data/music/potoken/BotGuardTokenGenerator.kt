@@ -58,6 +58,18 @@ object BotGuardTokenGenerator {
     private const val COLD_START_TIMEOUT_MS = 10_000L
     private const val WARM_TIMEOUT_MS = 3_000L
 
+    // Consecutive full-bootstrap failures (WebView + Create + JS + GenerateIT)
+    // mean the flow is systematically broken — e.g. YouTube changed a
+    // challenge format — not one unlucky song. Past the threshold, minting
+    // pauses and playback continues on the fallback resolvers instead of
+    // rebuilding a doomed WebView engine (network + memory churn) per song.
+    // Any success resets; expiry retries once and re-arms only on failure.
+    private const val BOOTSTRAP_FAILURE_THRESHOLD = 3
+    private const val BOOTSTRAP_COOLDOWN_MS = 15 * 60 * 1000L
+    @Volatile private var bootstrapCooldownUntilMs = 0L
+    private var consecutiveBootstrapFailures = 0
+    private var cooldownNotified = false
+
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
@@ -83,6 +95,7 @@ object BotGuardTokenGenerator {
     suspend fun preWarm(sessionId: String = "lastwave_session") {
         val ctx = appContext ?: return
         if (permanentlyBroken || sessionId.isBlank() || !hasUsableWebView()) return
+        if (System.currentTimeMillis() < bootstrapCooldownUntilMs) return
         runCatching {
             withTimeoutOrNull(COLD_START_TIMEOUT_MS) {
                 ensureEngineReady(ctx, sessionId)
@@ -96,6 +109,7 @@ object BotGuardTokenGenerator {
     ): PoTokenResult? {
         val ctx = appContext ?: return null
         if (permanentlyBroken || !hasUsableWebView()) return null
+        if (System.currentTimeMillis() < bootstrapCooldownUntilMs) return null
 
         mutex.withLock {
             if (isEngineReadyForSession(sessionId)) {
@@ -162,23 +176,52 @@ object BotGuardTokenGenerator {
             engineReady = false
             playerTokenCache.evictAll()
 
-            val newEngine = BotGuardEngine.create(ctx)
-            val newSessionToken = try {
-                newEngine.mint(sessionId)
-            } catch (error: Throwable) {
-                withContext(Dispatchers.Main) {
-                    newEngine.close()
+            try {
+                val newEngine = BotGuardEngine.create(ctx)
+                val newSessionToken = try {
+                    newEngine.mint(sessionId)
+                } catch (error: Throwable) {
+                    withContext(Dispatchers.Main) {
+                        newEngine.close()
+                    }
+                    throw error
                 }
+
+                engine = newEngine
+                engineSessionId = sessionId
+                cachedSessionToken = newSessionToken
+                engineReady = true
+                consecutiveBootstrapFailures = 0
+                bootstrapCooldownUntilMs = 0L
+                cooldownNotified = false
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                recordBootstrapFailure()
                 throw error
             }
-
-            engine = newEngine
-            engineSessionId = sessionId
-            cachedSessionToken = newSessionToken
-            engineReady = true
         }
 
         Triple(requireNotNull(engine), requireNotNull(cachedSessionToken), needsNew)
+    }
+
+    /** Mutex-guarded: only called from [getOrCreateEngine]'s locked section. */
+    private fun recordBootstrapFailure() {
+        consecutiveBootstrapFailures++
+        if (consecutiveBootstrapFailures >= BOOTSTRAP_FAILURE_THRESHOLD &&
+            System.currentTimeMillis() >= bootstrapCooldownUntilMs
+        ) {
+            bootstrapCooldownUntilMs = System.currentTimeMillis() + BOOTSTRAP_COOLDOWN_MS
+            if (!cooldownNotified) {
+                cooldownNotified = true
+                Log.w(
+                    TAG,
+                    "BotGuard bootstrap failed ${consecutiveBootstrapFailures}x in a row; " +
+                        "pausing PO-token minting for ${BOOTSTRAP_COOLDOWN_MS / 60_000} min " +
+                        "(playback continues via fallback resolvers)",
+                )
+            }
+        }
     }
 
     private fun isEngineReadyForSession(sessionId: String): Boolean =
@@ -316,8 +359,15 @@ object BotGuardTokenGenerator {
 
         @JavascriptInterface
         fun onMintOk(identifier: String, csvBytes: String) {
-            val base64 = commaSeparatedBytesToBase64(csvBytes)
-            pendingMints.remove(identifier)?.complete(base64)
+            // A malformed bridge payload must fail this mint, never the
+            // bridge thread (an orphaned deferred would hang until timeout).
+            val base64 = runCatching { commaSeparatedBytesToBase64(csvBytes) }.getOrNull()
+            if (base64 == null) {
+                pendingMints.remove(identifier)
+                    ?.completeExceptionally(IllegalStateException("Mint payload was not numeric CSV"))
+            } else {
+                pendingMints.remove(identifier)?.complete(base64)
+            }
         }
 
         @JavascriptInterface

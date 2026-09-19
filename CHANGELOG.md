@@ -10,9 +10,15 @@
   save flow (saving / saved / error states). Shared-playlist pages already
   had this via the feed detail screen.
 
+  Follow-up: the button now detects an already-saved album on every load
+  (reopening shows "Saved to library") and saving is idempotent — a
+  same-title library copy with overlapping tracks is reused instead of
+  stacking duplicates when the tracklist loads progressively.
+
   Files changed:
   `app/src/main/java/com/lastwave/app/ui/album/AlbumViewModel.kt`
   `app/src/main/java/com/lastwave/app/ui/album/AlbumDetailScreen.kt`
+  `app/src/main/java/com/lastwave/app/data/playlist/PlaylistRepository.kt` (`findByTitle`)
 
 ### Fixed
 - **Search returning no results for Cyrillic / non-Latin queries (#102).**

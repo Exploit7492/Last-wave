@@ -86,6 +86,15 @@
                     android:padding="9dp"
                     android:src="@drawable/ic_widget_shuffle" />
 
+                <ImageButton
+                    android:id="@+id/notification_previous"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@android:color/transparent"
+                    android:contentDescription="@string/desc_previous"
+                    android:padding="9dp"
+                    android:src="@drawable/ic_widget_skip_previous" />
+
                 <FrameLayout
                     android:layout_width="44dp"
                     android:layout_height="44dp"
@@ -108,6 +117,15 @@
                         android:padding="11dp"
                         android:src="@drawable/ic_widget_play" />
                 </FrameLayout>
+
+                <ImageButton
+                    android:id="@+id/notification_next"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@android:color/transparent"
+                    android:contentDescription="@string/desc_next"
+                    android:padding="9dp"
+                    android:src="@drawable/ic_widget_skip_next" />
 
                 <ImageButton
                     android:id="@+id/notification_repeat"

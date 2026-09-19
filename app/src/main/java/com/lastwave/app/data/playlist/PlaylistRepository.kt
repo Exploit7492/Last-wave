@@ -198,6 +198,18 @@ class PlaylistRepository @Inject constructor(
         leftVideoId == null || rightVideoId == null || leftVideoId == rightVideoId
     }
 
+    /**
+     * Newest playlist with this title in the given mode (custom album saves
+     * included), or null. Lets callers detect an already-saved album without
+     * creating a same-title duplicate.
+     */
+    suspend fun findByTitle(title: String, mode: String = "custom"): SavedPlaylist? {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isBlank() || cleanTitle.equals(LIKED_SONGS_TITLE, ignoreCase = true)) return null
+        return runCatching { getAll() }.getOrDefault(emptyList())
+            .firstOrNull { it.mode == mode && it.title.equals(cleanTitle, ignoreCase = true) }
+    }
+
     suspend fun createCustom(title: String): SavedPlaylist {
         val cleanTitle = title.trim()
         if (cleanTitle.equals(LIKED_SONGS_TITLE, ignoreCase = true)) return ensureLikedSongs()

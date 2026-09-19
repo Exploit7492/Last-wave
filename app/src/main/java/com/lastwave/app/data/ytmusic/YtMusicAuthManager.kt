@@ -77,7 +77,15 @@ class YtMusicAuthManager @Inject constructor(
     suspend fun updateAccountIdentity(accountName: String, channelHandle: String?, photoUrl: String?) {
         val current = connection.value
         if (!current.isConnected) return
-        preferences.saveConnection(current.cookies, accountName, channelHandle, photoUrl)
+        // A display-identity refresh must never reset the selected channel.
+        preferences.saveConnection(
+            current.cookies,
+            accountName,
+            channelHandle,
+            photoUrl,
+            onBehalfOfUser = current.onBehalfOfUser,
+            authUserIndex = current.authUserIndex,
+        )
     }
 
     /** Clears cookies + identity AND the local→remote mapping table, so a

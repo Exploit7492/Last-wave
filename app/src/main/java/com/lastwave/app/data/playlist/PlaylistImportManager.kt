@@ -2,6 +2,7 @@ package com.lastwave.app.data.playlist
 
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.music.InnerTubeMusicApi
+import com.lastwave.app.data.music.YouTubeMusicTrack
 import com.lastwave.app.data.music.YouTubePlaylistResult
 import com.lastwave.app.data.ytmusic.YtMusicPreferences
 import com.lastwave.app.data.ytmusic.YtPlaylistMapping
@@ -23,9 +24,17 @@ class PlaylistImportManager @Inject constructor(
     private val appleMusicPlaylistImporter: AppleMusicPlaylistImporter,
 ) {
 
+    companion object {
+        /** True for the account's special Liked Music playlist (LM / VLLM). */
+        fun isYtLikedId(id: String): Boolean {
+            val clean = id.trim()
+            return clean == "LM" || clean == "VLLM" || clean.removePrefix("VL") == "LM"
+        }
+    }
+
     suspend fun importYouTubePlaylist(
         playlist: YouTubePlaylistResult,
-        selectedTracks: List<com.lastwave.app.data.music.YouTubeMusicTrack> = playlist.tracks,
+        selectedTracks: List<YouTubeMusicTrack> = playlist.tracks,
     ): SavedPlaylist = withContext(Dispatchers.IO) {
         val tracks = selectedTracks.map { yt ->
             GeneratedTrack(
@@ -43,6 +52,34 @@ class PlaylistImportManager @Inject constructor(
             mode = "custom",
             tracks = tracks,
         )
+    }
+
+    /**
+     * Merges the account's YouTube Liked Music (LM) into the built-in local
+     * Liked Songs playlist (deduped by track key). Unlike normal imports this
+     * never creates a separate `custom` playlist and never creates a remote
+     * mapping — LM is not editable via the playlist-edit API, so the local
+     * Liked Songs copy syncs as its own private "Liked Songs" mirror instead.
+     */
+    suspend fun importYtLikedIntoLikedSongs(
+        playlist: YouTubePlaylistResult,
+        selectedTracks: List<YouTubeMusicTrack> = playlist.tracks,
+    ): SavedPlaylist = withContext(Dispatchers.IO) {
+        val tracks = selectedTracks.map { yt ->
+            GeneratedTrack(
+                name = yt.title,
+                artist = yt.artist,
+                album = yt.album,
+                artworkUrl = yt.artworkUrl,
+                url = "https://music.youtube.com/watch?v=${yt.videoId}",
+            )
+        }
+        val liked = playlistRepository.ensureLikedSongs()
+        if (tracks.isEmpty()) return@withContext liked
+        val seenKeys = liked.tracks.mapTo(mutableSetOf()) { it.key }
+        val fresh = tracks.filter { seenKeys.add(it.key) }
+        if (fresh.isEmpty()) return@withContext liked
+        playlistRepository.replaceTracksForSync(liked.id, liked.tracks + fresh) ?: liked
     }
 
     /** Makes an owned account playlist local while retaining its live two-way mapping. */

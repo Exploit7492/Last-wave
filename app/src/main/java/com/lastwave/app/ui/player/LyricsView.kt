@@ -636,8 +636,9 @@ private fun WordByWordLyricLine(
                 // Providers store each word trimmed — without a visual
                 // separator FlowRow renders "Allthatglittersisgold". The
                 // space is display-only (no timing change). Skip it for
-                // spaceless (CJK) lines and when a provider already kept
-                // spacing (e.g. Kugou KRC trailing spaces).
+                // spaceless (CJK) lines, when a provider already kept
+                // spacing (e.g. Kugou KRC trailing spaces), and before
+                // continuation fragments (Apple Music `part` words).
                 val needsSpacing = line.text.contains(' ') || line.text.contains('\u00A0')
                 line.syllables.forEachIndexed { sIndex, syllable ->
                     val sylStart = syllable.timeMs
@@ -649,6 +650,7 @@ private fun WordByWordLyricLine(
                         sIndex < line.syllables.lastIndex &&
                         !syllable.text.endsWith(' ') &&
                         !syllable.text.endsWith('\u00A0') &&
+                        nextSyllable?.appendToPrevious != true &&
                         (nextSyllable == null || (!nextSyllable.text.startsWith(' ') && !nextSyllable.text.startsWith('\u00A0')))
                     ) " " else ""
                     val displayText = syllable.text + separator
