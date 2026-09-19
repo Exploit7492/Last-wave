@@ -9,6 +9,8 @@ import com.lastwave.app.data.repository.HomeSortMode
 import com.lastwave.app.data.repository.HomeStats
 import com.lastwave.app.data.model.RecentTrack
 import com.lastwave.app.data.repository.HomeTrack
+import com.lastwave.app.data.repository.HomeAlbum
+import com.lastwave.app.data.repository.HomeArtistItem
 import com.lastwave.app.data.repository.ThemeRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.coroutineScope

@@ -10,6 +10,9 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.clickable
+import com.lastwave.app.data.repository.HomeAlbum
+import com.lastwave.app.data.repository.HomeArtistItem
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,6 +50,7 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -314,12 +318,16 @@ fun HomeScreen(
                                     } else {
                                         "track_${row.track.key}_${row.track.timestampMillis}"
                                     }
+                                    is HomeRow.Album -> "album_${row.album.artist}_${row.album.name}"
+                                    is HomeRow.Artist -> "artist_${row.artist.name}"
                                 }
                             },
                             contentType = { _, row ->
                                 when (row) {
                                     is HomeRow.DateHeader -> "date"
                                     is HomeRow.Track -> "track"
+                                    is HomeRow.Album -> "album"
+                                    is HomeRow.Artist -> "artist"
                                 }
                             },
                         ) { rowIndex, row ->
@@ -916,7 +924,7 @@ private fun MixHeader(sortMode: HomeSortMode, onSortModeChange: (HomeSortMode) -
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSortModeChange(HomeSortMode.MOST_PLAYED); menuOpen = false
                 }
-                SortOption(androidx.compose.material.icons.filled.Album, "Top Albums", sortMode == HomeSortMode.TOP_ALBUMS) {
+                SortOption(Icons.Filled.Album, "Top Albums", sortMode == HomeSortMode.TOP_ALBUMS) {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSortModeChange(HomeSortMode.TOP_ALBUMS); menuOpen = false
                 }
@@ -940,7 +948,7 @@ private fun MixHeader(sortMode: HomeSortMode, onSortModeChange: (HomeSortMode) -
 private fun iconForSortMode(mode: HomeSortMode): androidx.compose.ui.graphics.vector.ImageVector = when (mode) {
     HomeSortMode.RECENT -> Icons.Filled.Schedule
     HomeSortMode.MOST_PLAYED -> Icons.Filled.BarChart
-    HomeSortMode.TOP_ALBUMS -> androidx.compose.material.icons.filled.Album
+    HomeSortMode.TOP_ALBUMS -> Icons.Filled.Album
     HomeSortMode.TOP_ARTISTS -> Icons.Filled.People
     HomeSortMode.LAST_7_DAYS -> Icons.Filled.DateRange
     HomeSortMode.LAST_30_DAYS -> Icons.Filled.CalendarMonth
@@ -1316,7 +1324,7 @@ private fun AlbumRow(
                     name = album.name,
                     artist = album.artist,
                     embeddedUrl = album.artworkUrl,
-                    fallbackIcon = androidx.compose.material.icons.filled.Album,
+                    fallbackIcon = Icons.Filled.Album,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
