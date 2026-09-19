@@ -112,7 +112,10 @@ fun ConnectedButtonGroup(
                 shape = shape,
                 color = containerColor,
                 contentColor = contentColor,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                border = BorderStroke(
+                    width = if (isSelected) 2.dp else 1.dp,
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                ),
                 tonalElevation = if (isSelected) 2.dp else 0.dp,
             ) {
                 Box(

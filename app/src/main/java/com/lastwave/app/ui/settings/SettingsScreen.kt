@@ -74,6 +74,7 @@ import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.FileDownload
@@ -2174,9 +2175,9 @@ private fun YouTubeAccountRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconBadge(
-                Icons.Filled.CloudSync,
-                MaterialTheme.colorScheme.primaryContainer,
-                MaterialTheme.colorScheme.onPrimaryContainer,
+                Icons.Filled.PlayCircle,
+                MaterialTheme.colorScheme.errorContainer,
+                MaterialTheme.colorScheme.onErrorContainer,
             )
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
@@ -2281,7 +2282,7 @@ private fun LastFmIntegrationCard(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            "L",
+                            if (isConnected && username.isNotBlank()) username.take(1).uppercase() else "L",
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.titleMedium,

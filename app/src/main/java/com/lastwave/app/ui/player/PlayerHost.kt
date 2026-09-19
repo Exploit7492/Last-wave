@@ -2803,15 +2803,18 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                 }
             }
             IconButton(
-                onClick = player::clearUpcoming,
-                enabled = state.currentIndex >= 0 && state.currentIndex + 1 < state.queue.size,
+                onClick = {
+                    scope.launch { listState.animateScrollToItem(state.currentIndex.coerceAtLeast(0)) }
+                },
+                enabled = state.currentIndex >= 0 && state.currentIndex < state.queue.size,
                 modifier = Modifier
                     .size(44.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerHigh),
             ) {
-                Icon(Icons.Filled.ClearAll, "Clear upcoming songs")
+                Icon(Icons.Filled.Visibility, "Scroll to current song")
             }
+
         }
         LazyColumn(
             state = listState,
@@ -2822,6 +2825,29 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                 val isCurrent = index == state.currentIndex
                 val isDragging = index == draggingIndex
                 val stableKey = queueKeys.getOrNull(index) ?: index.toString()
+                val dismissState = androidx.compose.material3.rememberSwipeToDismissBoxState(
+                    confirmValueChange = { dismissValue ->
+                        if (dismissValue != androidx.compose.material3.SwipeToDismissBoxValue.Settled) {
+                            player.removeQueueItem(index)
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                )
+                androidx.compose.material3.SwipeToDismissBox(
+                    state = dismissState,
+                    modifier = Modifier.animateItem(),
+                    backgroundContent = {
+                        val alignment = if (dismissState.dismissDirection == androidx.compose.material3.SwipeToDismissBoxValue.StartToEnd) Alignment.CenterStart else Alignment.CenterEnd
+                        Box(
+                            Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 24.dp),
+                            contentAlignment = alignment
+                        ) {
+                            Icon(Icons.Filled.DeleteOutline, contentDescription = "Delete", tint = MaterialTheme.colorScheme.onErrorContainer)
+                        }
+                    },
+                    content = {
                 LiquidGlassSurface(
                     glassModifier = Modifier.liquidGlassChrome(RoundedCornerShape(20.dp), LocalLiquidGlass.current),
                     onClick = { player.seekToQueueItem(index) },
@@ -2833,7 +2859,6 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                     contentColor = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer
                     else MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
-                        .animateItem()
                         .zIndex(if (isDragging) 1f else 0f)
                         .graphicsLayer {
                             translationY = if (isDragging) dragOffsetY else 0f
@@ -2943,20 +2968,8 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                                     )
                                 },
                         )
-                        IconButton(
-                            onClick = { player.removeQueueItem(index) },
-                            modifier = Modifier
-                                .padding(start = 4.dp)
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(
-                                    if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.08f)
-                                    else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                ),
-                        ) {
-                            Icon(Icons.Filled.DeleteOutline, "Remove from queue", modifier = Modifier.size(20.dp))
-                        }
                     }
+                }
                 }
             }
             item { Spacer(Modifier.height(12.dp)) }

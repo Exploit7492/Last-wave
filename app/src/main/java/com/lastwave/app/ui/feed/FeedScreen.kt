@@ -386,29 +386,38 @@ fun FeedScreen(
 
                     if (isSectionVisible(HomeSection.FRESH_FINDS) && state.feedData.freshFinds.isNotEmpty()) {
                         item(key = "fresh_finds") {
-                            FeedSectionHeader(
-                                title = "Fresh finds",
-                                subtitle = "New tracks beyond your usual rotation",
-                                actionText = "Play all",
-                                actionIcon = Icons.Filled.PlayArrow,
-                                onActionClick = { viewModel.playTracksQueue(state.feedData.freshFinds, 0, "Fresh Finds") },
-                                onShuffleClick = { viewModel.shuffleTracksQueue(state.feedData.freshFinds, "Fresh Finds") },
-                            )
-                            FeedMediaRow(
-                                content = {
-                                    itemsIndexed(state.feedData.freshFinds) { index, track ->
-                                        FeedMediaCard(
-                                            title = track.title,
-                                            subtitle = ArtistHelper.primaryArtist(track.artist),
-                                            artworkUrl = track.artworkUrl,
-                                            fallbackIcon = Icons.Filled.Whatshot,
-                                            badgeText = "NEW",
-                                            onClick = { viewModel.playTracksQueue(state.feedData.freshFinds, index, "Fresh Finds") },
-                                            onPlayClick = { viewModel.playTracksQueue(state.feedData.freshFinds, index, "Fresh Finds") },
-                                        )
-                                    }
-                                },
-                            )
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                                    FeedSectionHeader(
+                                        title = "Fresh finds",
+                                        subtitle = "New tracks beyond your usual rotation",
+                                        actionText = "Play all",
+                                        actionIcon = Icons.Filled.PlayArrow,
+                                        onActionClick = { viewModel.playTracksQueue(state.feedData.freshFinds, 0, "Fresh Finds") },
+                                        onShuffleClick = { viewModel.shuffleTracksQueue(state.feedData.freshFinds, "Fresh Finds") },
+                                    )
+                                    FeedMediaRow(
+                                        content = {
+                                            itemsIndexed(state.feedData.freshFinds) { index, track ->
+                                                FeedMediaCard(
+                                                    title = track.title,
+                                                    subtitle = ArtistHelper.primaryArtist(track.artist),
+                                                    artworkUrl = track.artworkUrl,
+                                                    fallbackIcon = Icons.Filled.Whatshot,
+                                                    badgeText = "NEW",
+                                                    onLongClick = { menuTrack = track },
+                                                    onClick = { viewModel.playTracksQueue(state.feedData.freshFinds, index, "Fresh Finds") },
+                                                    onPlayClick = { viewModel.playTracksQueue(state.feedData.freshFinds, index, "Fresh Finds") },
+                                                )
+                                            }
+                                        },
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -1082,7 +1091,7 @@ private fun QuickTileCard(
             ) {
                 if (isYtLikedTile) {
                     Icon(
-                        Icons.Filled.Favorite,
+                        Icons.Filled.ThumbUp,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(36.dp),
@@ -1257,6 +1266,7 @@ private fun FeedMediaCard(
     artworkUrl: String?,
     fallbackIcon: ImageVector,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     onPlayClick: (() -> Unit)? = null,
     badgeText: String? = null,
     cardWidth: androidx.compose.ui.unit.Dp = 148.dp,
@@ -1265,9 +1275,10 @@ private fun FeedMediaCard(
     Column(
         modifier = Modifier
             .width(cardWidth)
-            .clickable(
+            .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
+                onLongClick = onLongClick,
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onClick()
@@ -1912,7 +1923,7 @@ private fun FeedSectionHeader(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 2.dp),
                 )
@@ -1959,7 +1970,7 @@ private fun FeedSectionHeader(
                 ) {
                     actionIcon?.let { icon ->
                         Icon(
-                            icon,
+                            if (icon == Icons.Filled.PlayArrow) androidx.compose.material.icons.filled.PlayCircle else icon,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(15.dp),
