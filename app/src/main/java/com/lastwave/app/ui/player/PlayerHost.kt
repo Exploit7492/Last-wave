@@ -107,6 +107,7 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -2967,10 +2968,10 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                                         },
                                     )
                                 },
-                        )
                     }
                 }
                 }
+                )
             }
             item { Spacer(Modifier.height(12.dp)) }
         }
