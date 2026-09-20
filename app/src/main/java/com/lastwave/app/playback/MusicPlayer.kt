@@ -713,8 +713,8 @@ class MusicPlayer @Inject constructor(
             .setBufferDurationsMs(
                 /* minBufferMs = */ if (handleAudioFocus) 45_000 else 15_000,
                 /* maxBufferMs = */ if (handleAudioFocus) 120_000 else 30_000,
-                /* bufferForPlaybackMs = */ 1_000,
-                /* bufferForPlaybackAfterRebufferMs = */ 2_000,
+                /* bufferForPlaybackMs = */ 500,
+                /* bufferForPlaybackAfterRebufferMs = */ 1_000,
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .setBackBuffer(15_000, true)
@@ -3305,11 +3305,14 @@ class MusicPlayer @Inject constructor(
         misc: MiscSettings,
         excludedLosslessUrls: Set<String>,
     ): ResolvedStream {
-        // Modules toggle OFF -> YouTube instantly via the early return below.
-        // The module branch is never launched nor awaited, so playback can't
-        // stall behind it. (No modules installed behaves the same: resolve()
-        // finds zero handles and returns null in ms while YouTube is in flight.)
-        val isYouTubeRequested = !allowLossless || misc.losslessQuality == com.lastwave.app.data.lossless.LosslessMusicApi.QUALITY_YOUTUBE || !misc.preferLosslessStreaming || !misc.preferProviderModules
+        val hasActiveModules = if (misc.preferProviderModules) {
+            runCatching { moduleManager.enabledHandles().isNotEmpty() }.getOrDefault(false)
+        } else false
+        val isYouTubeRequested = !allowLossless ||
+            misc.losslessQuality == com.lastwave.app.data.lossless.LosslessMusicApi.QUALITY_YOUTUBE ||
+            !misc.preferLosslessStreaming ||
+            !misc.preferProviderModules ||
+            !hasActiveModules
         if (isYouTubeRequested || (!videoId.isNullOrBlank() &&
                 (track.artist.isBlank() || track.artist.equals("Unknown artist", ignoreCase = true)))
         ) return resolveYoutubeTrackAudioStream(track, videoId)
@@ -3320,19 +3323,11 @@ class MusicPlayer @Inject constructor(
         }
         // Provider module (.lwp engine) resolution
         val moduleDeferred = applicationScope.async(Dispatchers.IO) {
-            if (!allowLossless || !misc.preferLosslessStreaming || !misc.preferProviderModules) null
+            if (!allowLossless || !misc.preferLosslessStreaming || !misc.preferProviderModules || !hasActiveModules) null
             else runCatching { resolveModuleTrackAudioStream(track, misc, excludedLosslessUrls) }.getOrNull()
         }
         return try {
-            // Strict module priority: wait for the module verdict first.
-            // Inside the module Qobuz + Tidal already run at the same time
-            // (provider.js raceFirstValid) and rejection counts only when
-            // BOTH backends reject. YouTube is used only after the module
-            // returns null (or the 6s backstop hits). YouTube extraction
-            // still starts together with the module above, so on rejection
-            // its result is usually already in hand — but it never preempts
-            // a pending module hit.
-            val wantModule = allowLossless && misc.preferLosslessStreaming && misc.preferProviderModules
+            val wantModule = allowLossless && misc.preferLosslessStreaming && misc.preferProviderModules && hasActiveModules
             val moduleStream: ResolvedStream? = if (wantModule) {
                 withTimeoutOrNull(MODULE_RESOLVE_TIMEOUT_MS) { moduleDeferred.await() }
             } else null
@@ -3437,7 +3432,7 @@ class MusicPlayer @Inject constructor(
                         innerTube.findBestMatch(
                             title = track.title,
                             artist = searchArtist,
-                            prefetchStreams = false,
+                            prefetchStreams = true,
                             excludedVideoIds = rejectedVideoIds,
                         ).videoId
                     } else null
@@ -3916,7 +3911,7 @@ class MusicPlayer @Inject constructor(
         const val MAX_PLAY_HISTORY = 100
         const val RESOLVED_URL_EXPIRY_MARGIN_MS = 2 * 60 * 1000L
         /** Module lookups must never stall the YouTube fallback behind them. */
-        const val MODULE_RESOLVE_TIMEOUT_MS = 6_000L
+        const val MODULE_RESOLVE_TIMEOUT_MS = 1_500L
         /** Offline license renewal attempt before giving up to streaming. */
         const val OFFLINE_LICENSE_RENEW_TIMEOUT_MS = 8_000L
         val PERMANENT_PLAYBACK_ERROR_CODES = setOf(

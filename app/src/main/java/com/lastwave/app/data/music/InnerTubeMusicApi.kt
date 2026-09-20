@@ -1771,7 +1771,7 @@ class InnerTubeMusicApi @Inject constructor(
             ?.let { entry ->
                 val cached = entry.value
                 val stream = cached.stream
-                if (stream.isFresh(cached.cachedAtEpochMs, now) && probeStream(stream, "cache-validate")) {
+                if (stream.isFresh(cached.cachedAtEpochMs, now)) {
                     lastResolvedStreams[resolutionKey(videoId, authScope)] = stream
                     logStreamEvent("cache-hit", stream)
                     return@withContext stream
@@ -1846,7 +1846,7 @@ class InnerTubeMusicApi @Inject constructor(
         }
         if (innerTubeXCandidate != null) {
             val compatible = innerTubeXCandidate.isAdaptive || isCompatibleAudioCandidate(innerTubeXCandidate)
-            if (compatible && probeStream(innerTubeXCandidate, "innertubex-probe")) {
+            if (compatible) {
                 cacheResolvedStream(innerTubeXCandidate, now)
                 lastResolvedStreams[resolutionKey(videoId, authScope)] = innerTubeXCandidate
                 logStreamEvent("innertubex-resolved", innerTubeXCandidate)
