@@ -3352,6 +3352,7 @@ class MusicPlayer @Inject constructor(
             ?: return null
         val s = descriptor.stream
         if (s.baseUrl.isNotBlank() && s.baseUrl in excludedLosslessUrls) return null
+        if (s.baseUrl.isBlank() && s.segments.isEmpty()) return null
 
         // Progressive clear module streams play directly like backend URLs.
         if ((s.type == "progressive" || (s.baseUrl.isNotBlank() && s.segments.isEmpty())) && !s.baseUrl.startsWith("data:application/dash+xml") && s.type != "dash_xml") {
@@ -3911,7 +3912,7 @@ class MusicPlayer @Inject constructor(
         const val MAX_PLAY_HISTORY = 100
         const val RESOLVED_URL_EXPIRY_MARGIN_MS = 2 * 60 * 1000L
         /** Module lookups must never stall the YouTube fallback behind them. */
-        const val MODULE_RESOLVE_TIMEOUT_MS = 1_500L
+        const val MODULE_RESOLVE_TIMEOUT_MS = 6_000L
         /** Offline license renewal attempt before giving up to streaming. */
         const val OFFLINE_LICENSE_RENEW_TIMEOUT_MS = 8_000L
         val PERMANENT_PLAYBACK_ERROR_CODES = setOf(
