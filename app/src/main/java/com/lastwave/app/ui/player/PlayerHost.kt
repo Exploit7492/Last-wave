@@ -1796,6 +1796,7 @@ private fun FullPlayer(
                         FullPlayerTab.LYRICS -> {
                             PredictiveBackScreen(
                                 enabled = currentTab == FullPlayerTab.LYRICS,
+                                backgroundColor = Color.Transparent,
                                 onBack = {
                                     if (lyricsFullscreen) {
                                         lyricsFullscreen = false
@@ -1840,6 +1841,7 @@ private fun FullPlayer(
                         FullPlayerTab.QUEUE -> {
                             PredictiveBackScreen(
                                 enabled = currentTab == FullPlayerTab.QUEUE,
+                                backgroundColor = Color.Transparent,
                                 onBack = { onTabChange(FullPlayerTab.NOW_PLAYING) },
                             ) {
                                 QueuePanel(

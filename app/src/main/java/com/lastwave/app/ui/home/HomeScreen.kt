@@ -1085,14 +1085,17 @@ private fun TrackRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    com.lastwave.app.util.ArtistHelper.primaryArtist(track.artist),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = secondaryTextColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                val displayArtist = com.lastwave.app.util.ArtistHelper.primaryArtist(track.artist)
+                if (displayArtist.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        displayArtist,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = secondaryTextColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             Spacer(Modifier.width(8.dp))
             if (isNowPlaying) {
@@ -1335,14 +1338,17 @@ private fun AlbumRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    com.lastwave.app.util.ArtistHelper.primaryArtist(album.artist),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                val displayArtist = com.lastwave.app.util.ArtistHelper.primaryArtist(album.artist)
+                if (displayArtist.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        displayArtist,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }

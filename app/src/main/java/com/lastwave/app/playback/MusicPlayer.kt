@@ -3377,19 +3377,44 @@ class MusicPlayer @Inject constructor(
                 samplingRateKHz = s.sampleRate.takeIf { it > 0 }?.div(1000.0),
             )
         }
+        val moduleBadge = try {
+            moduleResolver.badgeFor(descriptor, segBridge.audioBadge(descriptor))
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            segBridge.audioBadge(descriptor)
+        }
+        // The addon's descriptor can claim flac/UHD even when the manifest it
+        // fetched is AAC (Tidal silently answers the HIGH tier with mp4a.40.2),
+        // so the manifest's own codecs= attribute decides the lossless verdict
+        // here — the same source of truth the download path uses.
+        val manifestCodec = segBridge.declaredManifestCodec(descriptor)
+        val aacBitrateKbps = when {
+            manifestCodec?.startsWith("mp4a.40.5") == true -> 96
+            manifestCodec?.startsWith("mp4a") == true -> 320
+            else -> null
+        }
+        val dashBadge = if (aacBitrateKbps != null) {
+            if (aacBitrateKbps == 96) "HE-AAC" else "AAC"
+        } else moduleBadge
+        // Trace the spatial/Dolby decision so a lost Atmos mix is visible in
+        // logcat (codec=atmos must surface as a DOLBY ATMOS badge).
+        val manifestInfo = manifestCodec?.let { " manifest=$it" } ?: ""
+        android.util.Log.d(
+            "MusicPlayer",
+            "module DASH resolved: quality=${s.quality} codec=${s.codec}$manifestInfo -> badge=$dashBadge",
+        )
         return ResolvedStream(
             url = segBridge.mpdUri(descriptor).toString(),
             mimeType = MimeTypes.APPLICATION_MPD,
-            bitrateKbps = s.bandwidth.takeIf { it > 0 }?.div(1000),
-            audioCodec = try {
-                moduleResolver.badgeFor(descriptor, segBridge.audioBadge(descriptor))
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (_: Exception) {
-                segBridge.audioBadge(descriptor)
-            },
+            bitrateKbps = aacBitrateKbps ?: s.bandwidth.takeIf { it > 0 }?.div(1000),
+            audioCodec = dashBadge,
             cacheKey = descriptor.stableCacheKey(),
-            isLossless = !s.codec.equals("opus", ignoreCase = true),
+            isLossless = if (aacBitrateKbps != null) {
+                false
+            } else {
+                !s.codec.equals("opus", ignoreCase = true)
+            },
             bitDepth = s.bitDepth.takeIf { it > 0 },
             samplingRateKHz = s.sampleRate.takeIf { it > 0 }?.div(1000.0),
             segmentedDrm = descriptor,
@@ -3644,7 +3669,12 @@ class MusicPlayer @Inject constructor(
                     bitrateKbps = bitrateKbps,
                     bitDepth = bitDepth ?: if (isFlac) 16 else null,
                     samplingRateKHz = sampleRateKHz ?: if (isFlac) 44.1 else null,
-                    isLossless = isFlac && (bitDepth ?: 0) > 16,
+                    // FLAC is lossless at every bit depth. Requiring >16 here
+                    // marked CD-quality (16/44.1) FLAC — and any FLAC whose
+                    // container omits BITS_PER_SAMPLE — as lossy, which pushed
+                    // qualityLabel onto the kbps branch ("FLAC 1324 kbps")
+                    // instead of showing the bit depth / sample rate.
+                    isLossless = isFlac,
                 )
             }
             updateBitPerfectState()

@@ -90,6 +90,60 @@ class SegmentedDashBridge @Inject constructor(
             }
             .build()
         }
+
+        /**
+         * Pure label mapping — no context needed, so it is unit-testable.
+         *
+         * Dolby Atmos is signalled by the codec the provider module emits
+         * ("atmos" = E-AC-3 JOC spatial) as much as by the quality tier, so
+         * check both. This must never fall through to a stereo/OPUS label or
+         * the player + download badges silently drop the Atmos mix.
+         */
+        fun audioBadgeLabel(descriptor: SegmentedStreamDescriptor): String {
+            if (descriptor.stream.codec.equals("atmos", ignoreCase = true)) return "DOLBY ATMOS"
+            val codec = descriptor.stream.codec.lowercase()
+            return when (descriptor.stream.quality.uppercase()) {
+                "ATMOS", "DOLBY_ATMOS" -> "DOLBY ATMOS"
+                "UHD", "HI_RES_96" -> "UHD FLAC"
+                "HD" -> "HD FLAC"
+                "SD" -> if (codec.contains("mp3")) "320k MP3" else "AAC 320"
+                "LOW" -> "HE-AAC"
+                else -> when {
+                    codec.contains("flac") -> if ((descriptor.stream.bitDepth) > 16 || (descriptor.stream.sampleRate) > 48000) "UHD FLAC" else "HD FLAC"
+                    codec.contains("mp3") -> "320k MP3"
+                    codec.contains("aac") || codec.contains("mp4a") -> if (descriptor.stream.bandwidth in 1..128000) "HE-AAC" else "AAC 320"
+                    codec.contains("opus") -> "OPUS"
+                    else -> "AUDIO"
+                }
+            }
+        }
+
+        /**
+         * The codec actually declared inside the descriptor's DASH manifest, or
+         * null when it cannot be read.
+         *
+         * This is the source of truth for what the bytes really are: the addon's
+         * descriptor can claim `flac`/`UHD` even when the manifest it fetched is
+         * AAC (Tidal silently answers the HIGH tier with `mp4a.40.2`), so both the
+         * player badge and the download path must trust this over `stream.codec`.
+         */
+        fun declaredManifestCodec(descriptor: SegmentedStreamDescriptor): String? = runCatching {
+            val baseUrl = descriptor.stream.baseUrl
+            val xml = when {
+                baseUrl.startsWith("data:application/dash+xml;base64,") -> String(
+                    android.util.Base64.decode(baseUrl.substringAfter("base64,"), android.util.Base64.DEFAULT),
+                    Charsets.UTF_8,
+                )
+                baseUrl.startsWith("<?xml") -> baseUrl
+                else -> return@runCatching null
+            }
+            Regex("""codecs="([^"]+)"""").find(xml)
+                ?.groupValues
+                ?.get(1)
+                ?.trim()
+                ?.lowercase()
+                ?.takeIf { it.isNotBlank() }
+        }.getOrNull()
     }
 
     /** Full MediaItem for a segmented track; caller sets title/artist metadata. */
@@ -118,9 +172,8 @@ class SegmentedDashBridge @Inject constructor(
         return builder.build()
     }
 
-    fun audioBadge(descriptor: SegmentedStreamDescriptor): String = when (descriptor.stream.quality.uppercase()) {
-        "UHD", "HI_RES_96" -> "UHD FLAC"
-        "HD" -> "HD FLAC"
-        else -> "OPUS"
-    }
+    fun audioBadge(descriptor: SegmentedStreamDescriptor): String = audioBadgeLabel(descriptor)
+
+    fun declaredManifestCodec(descriptor: SegmentedStreamDescriptor): String? =
+        Companion.declaredManifestCodec(descriptor)
 }

@@ -540,6 +540,10 @@ class TrackDownloadManager @Inject constructor(
                 var dashInitUrl: String? = null
                 var dashMediaTemplate: String? = null
                 var dashSegmentCount = 0
+                /** Real codec from the DASH manifest (`flac` / `mp4a.40.2` / `ec-3`). */
+                var dashManifestCodec = ""
+                /** Manifest really carries FLAC (so the .m4a wrapper should be unwrapped). */
+                var dashIsFlacInMp4 = false
                 var bytesReadTotal = 0L
                 var totalBytesRecorded = -1L
                 var downloadSucceeded = false
@@ -556,8 +560,15 @@ class TrackDownloadManager @Inject constructor(
                                 resolvedUrl = s.baseUrl
                                 downloadHeaders = desc.headers
                                 mimeType = s.mimeType.ifBlank { "audio/flac" }
-                                extension = if (s.codec.equals("mp3", ignoreCase = true)) "mp3" else "flac"
-                                isLossless = !s.codec.equals("opus", ignoreCase = true) && !s.codec.equals("mp3", ignoreCase = true)
+                                extension = when {
+                                    s.codec.equals("mp3", ignoreCase = true) -> "mp3"
+                                    s.codec.equals("aac", ignoreCase = true) -> "m4a"
+                                    else -> "flac"
+                                }
+                                isLossless = !s.codec.equals("opus", ignoreCase = true) &&
+                                    !s.codec.equals("mp3", ignoreCase = true) &&
+                                    !s.codec.equals("aac", ignoreCase = true) &&
+                                    !s.codec.contains("mp4a", ignoreCase = true)
                                 formatBadge = if (isLossless) {
                                     if (s.bitDepth > 16 || s.sampleRate > 48000) "HI-RES FLAC" else "LOSSLESS FLAC"
                                 } else s.codec.uppercase()
@@ -565,16 +576,41 @@ class TrackDownloadManager @Inject constructor(
                             } else if (s.type == "dash_xml" || s.baseUrl.startsWith("data:application/dash+xml")) {
                                 val parsedDash = parseTidalDashManifest(s.baseUrl)
                                 if (parsedDash != null) {
+                                    // Trust the manifest's own codec, not the descriptor's
+                                    // assumption. Tidal answers HI_RES/LOSSLESS with
+                                    // FLAC-in-MP4 but LOW/HIGH with plain AAC (mp4a),
+                                    // and the old code labelled every DASH download as
+                                    // FLAC and named it .m4a either way — so a lossless
+                                    // request could be stored as AAC while claiming FLAC.
+                                    val manifestCodec = parsedDash.codec.ifBlank { s.codec.lowercase() }
+                                    val isAtmosStream = isAtmos ||
+                                        manifestCodec.startsWith("ec-3") ||
+                                        manifestCodec.startsWith("eac3") ||
+                                        manifestCodec.startsWith("ac-3")
+                                    val isFlacStream = manifestCodec.contains("flac")
                                     isDashModuleDownload = true
                                     dashInitUrl = parsedDash.initUrl
                                     dashMediaTemplate = parsedDash.mediaTemplate
                                     dashSegmentCount = parsedDash.segmentCount
+                                    dashManifestCodec = manifestCodec
+                                    // Unwrap whenever the container really holds FLAC,
+                                    // including Atmos-flagged releases: this backend serves
+                                    // their stereo 24/96 FLAC rendition (never E-AC-3 JOC),
+                                    // and an .m4a holding FLAC reads as AAC to players.
+                                    dashIsFlacInMp4 = isFlacStream
                                     resolvedUrl = parsedDash.initUrl
                                     downloadHeaders = desc.headers
                                     extension = "m4a"
                                     mimeType = "audio/mp4"
-                                    formatBadge = if (isAtmos) "DOLBY ATMOS" else if (s.bitDepth > 16 || s.sampleRate > 48000) "24-BIT FLAC" else "CD LOSSLESS"
-                                    isLossless = true
+                                    formatBadge = when {
+                                        isAtmosStream -> "DOLBY ATMOS"
+                                        isFlacStream ->
+                                            if (s.bitDepth > 16 || s.sampleRate > 48000) "24-BIT FLAC" else "CD LOSSLESS"
+                                        manifestCodec.startsWith("mp4a.40.5") -> "HE-AAC"
+                                        manifestCodec.startsWith("mp4a") -> "AAC 320"
+                                        else -> "AAC"
+                                    }
+                                    isLossless = isAtmosStream || isFlacStream
                                     durationMs = desc.durationSec * 1000L
                                 }
                             } else if (desc.drm != null && s.segments.isNotEmpty()) {
@@ -939,6 +975,31 @@ class TrackDownloadManager @Inject constructor(
                             formatBadge = "OPUS"
                         } else {
                             opusFile.delete()
+                        }
+                    }
+
+                    // 2b. Tidal lossless DASH is FLAC carried inside MP4. Users who
+                    // asked for FLAC expect a real .flac file, and an .m4a holding
+                    // FLAC reads as "AAC" to players and tag tools. Unwrap the
+                    // container losslessly — STREAMINFO from the dfLa box plus the
+                    // raw frames from every mdat; nothing is decoded or re-encoded,
+                    // so 24-bit hi-res stays bit-exact. On failure the .m4a is kept
+                    // rather than losing a completed download.
+                    if (dashIsFlacInMp4 && extension == "m4a") {
+                        val nativeFlac = File.createTempFile("dl_flac_", ".flac", context.cacheDir)
+                        if (Mp4FlacRemuxer.remux(currentAudioFile, nativeFlac)) {
+                            runCatching { currentAudioFile.delete() }
+                            currentAudioFile = nativeFlac
+                            tempDownloadFile = nativeFlac
+                            extension = "flac"
+                            mimeType = "audio/flac"
+                            isLossless = true
+                        } else {
+                            runCatching { nativeFlac.delete() }
+                            android.util.Log.w(
+                                "TrackDownloadManager",
+                                "FLAC unwrap failed for $title by $artist (codec=$dashManifestCodec); keeping .m4a",
+                            )
                         }
                     }
 
@@ -1558,6 +1619,13 @@ class TrackDownloadManager @Inject constructor(
         val initUrl: String,
         val mediaTemplate: String,
         val segmentCount: Int,
+        /**
+         * The Representation's declared codec, e.g. `flac`, `mp4a.40.2`, `ec-3`.
+         * Tidal serves AAC for the LOW/HIGH tiers and FLAC-in-MP4 for lossless,
+         * so the manifest — not the descriptor's assumption — decides whether a
+         * download really is lossless.
+         */
+        val codec: String = "",
     )
 
     private fun parseTidalDashManifest(baseUrl: String): ParsedDashManifest? = runCatching {
@@ -1576,6 +1644,13 @@ class TrackDownloadManager @Inject constructor(
         val mediaMatch = Regex("""media="([^"]+)"""").find(xmlStr) ?: return@runCatching null
         val mediaTemplate = mediaMatch.groupValues[1].replace("&amp;", "&")
 
+        val codec = Regex("""codecs="([^"]+)"""").find(xmlStr)
+            ?.groupValues
+            ?.get(1)
+            ?.trim()
+            ?.lowercase()
+            .orEmpty()
+
         var count = 0
         val sRegex = Regex("""<S\s+[^>]*>""")
         for (match in sRegex.findAll(xmlStr)) {
@@ -1590,6 +1665,7 @@ class TrackDownloadManager @Inject constructor(
             initUrl = initUrl,
             mediaTemplate = mediaTemplate,
             segmentCount = count,
+            codec = codec,
         )
     }.getOrNull()
 

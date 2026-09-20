@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -67,6 +68,7 @@ fun PredictiveBackScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    backgroundColor: Color = MaterialTheme.colorScheme.background,
     content: @Composable () -> Unit,
 ) {
     val progress = remember { Animatable(0f) }
@@ -123,7 +125,7 @@ fun PredictiveBackScreen(
     Box(
         modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .then(if (backgroundColor != Color.Transparent) Modifier.background(backgroundColor) else Modifier)
             .onGloballyPositioned { coords -> containerHeightPx = coords.size.height.toFloat() },
     ) {
         Box(

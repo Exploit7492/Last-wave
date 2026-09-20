@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.lyrics.LyricLine
+import com.lastwave.app.data.lyrics.LyricSyllable
 import com.lastwave.app.data.lyrics.isRtlText
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.MusicPlayerState
@@ -223,8 +224,7 @@ fun ModernLyricsPanel(
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .clipToBounds()
-                                    .padding(top = 12.dp),
+                                    .padding(top = 8.dp),
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -234,8 +234,8 @@ fun ModernLyricsPanel(
                                 ) {
                                     Surface(
                                         shape = CircleShape,
-                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        color = liquidGlassContainerColor(Color.White.copy(alpha = 0.16f)),
+                                        contentColor = Color.White.copy(alpha = 0.92f),
                                     ) {
                                         Text(
                                             text = syncLabel,
@@ -247,32 +247,33 @@ fun ModernLyricsPanel(
                                         )
                                     }
                                 }
-                            KaraokeLyricsView(
-                                listState = listState,
-                                lyrics = syncedLyrics,
-                                showTranslation = true,
-                                showPhonetic = true,
-                                currentPosition = { smoothedPositionMs.toInt() },
-                                onLineClicked = { line ->
-                                    player.seekTo(line.start.toLong())
-                                },
-                                onLinePressed = {},
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxWidth(),
-                                offset = 84.dp,
-                                normalLineTextStyle = LocalTextStyle.current.copy(
-                                    fontSize = if (isWordSynced) 34.sp else 27.sp,
-                                    fontWeight = FontWeight.Black,
-                                    textMotion = TextMotion.Animated,
-                                ),
-                                accompanimentLineTextStyle = LocalTextStyle.current.copy(
-                                    fontSize = if (isWordSynced) 22.sp else 19.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    textMotion = TextMotion.Animated,
-                                ),
-                                textColor = Color.White,
-                            )
+                                KaraokeLyricsView(
+                                    listState = listState,
+                                    lyrics = syncedLyrics,
+                                    showTranslation = true,
+                                    showPhonetic = true,
+                                    currentPosition = { smoothedPositionMs.toInt() },
+                                    onLineClicked = { line ->
+                                        player.seekTo(line.start.toLong())
+                                    },
+                                    onLinePressed = {},
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 24.dp),
+                                    offset = 84.dp,
+                                    normalLineTextStyle = LocalTextStyle.current.copy(
+                                        fontSize = if (isWordSynced) 28.sp else 24.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        textMotion = TextMotion.Animated,
+                                    ),
+                                    accompanimentLineTextStyle = LocalTextStyle.current.copy(
+                                        fontSize = if (isWordSynced) 20.sp else 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        textMotion = TextMotion.Animated,
+                                    ),
+                                    textColor = Color.White,
+                                )
                             }
                         }
                     } else if (!targetState.plainLyrics.isNullOrBlank()) {
@@ -319,21 +320,17 @@ private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine 
     val isLineRtl = isRtl || (isOverallRtl && (text.isBlank() || text == "♪"))
 
     return if (hasSyllables) {
-        // Word-sync providers store each word trimmed, so concatenating
-        // contents directly would render "Allthatglittersisgold". The
-        // trailing space carries no timing — it is purely visual and keeps
-        // sync exact. Only insert when the line itself contains spaces so
-        // CJK lines without spaces and already-spaced providers (Kugou KRC)
-        // are untouched — and never before a continuation fragment
-        // (Apple Music `part` words like "with"+"drawals").
+        val leadSyllables = syllables.filter { !it.isBackground }.ifEmpty { syllables }
+        val bgSyllables = if (leadSyllables.size < syllables.size) syllables.filter { it.isBackground } else emptyList()
         val needsSpacing = text.contains(' ') || text.contains('\u00A0')
-        KaraokeLine.MainKaraokeLine(
-            syllables = syllables.mapIndexed { index, syl ->
+
+        fun List<LyricSyllable>.toKaraokeSyllables(): List<KaraokeSyllable> {
+            return mapIndexed { index, syl ->
                 val sStart = syl.timeMs.toInt()
                 val sEnd = (syl.timeMs + syl.durationMs).toInt().coerceAtLeast(sStart)
-                val next = syllables.getOrNull(index + 1)
+                val next = getOrNull(index + 1)
                 val separator = if (needsSpacing &&
-                    index < syllables.lastIndex &&
+                    index < lastIndex &&
                     !syl.text.endsWith(' ') &&
                     !syl.text.endsWith('\u00A0') &&
                     next?.appendToPrevious != true &&
@@ -344,12 +341,35 @@ private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine 
                     start = sStart,
                     end = sEnd,
                 )
-            },
+            }
+        }
+
+        val mainSyllables = leadSyllables.toKaraokeSyllables()
+        val accompaniment = if (bgSyllables.isNotEmpty()) {
+            val bgStart = bgSyllables.first().timeMs.toInt()
+            val bgEnd = (bgSyllables.last().timeMs + bgSyllables.last().durationMs).toInt().coerceAtLeast(bgStart)
+            listOf(
+                KaraokeLine.AccompanimentKaraokeLine(
+                    syllables = bgSyllables.toKaraokeSyllables(),
+                    translation = null,
+                    alignment = if (isLineRtl) KaraokeAlignment.Start else KaraokeAlignment.End,
+                    start = bgStart,
+                    end = bgEnd,
+                    phonetic = null,
+                ),
+            )
+        } else {
+            emptyList()
+        }
+
+        KaraokeLine.MainKaraokeLine(
+            syllables = mainSyllables,
             translation = null,
             phonetic = transliteration,
             alignment = if (isLineRtl) KaraokeAlignment.End else KaraokeAlignment.Start,
             start = lineStart,
             end = lineEnd.coerceAtLeast(lineStart),
+            accompanimentLines = accompaniment,
         )
     } else {
         SyncedLine(

@@ -65,3 +65,17 @@ The shared modifier now explicitly clips sampled pixels to the glass shape, inst
 Player shuffle/repeat controls share a state-aware button: animated selected fill and icon color, a selected indicator dot, press-scale feedback, and accessibility state descriptions. Repeat-one keeps its distinct icon. These follow-up changes are source-reviewed only; matching the screenshots' intended appearance still needs device verification.
 
 The repeated double-shell button pattern is now handled by `LiquidGlassSurface`: its transparent outer clickable Surface retains Material touch-target sizing, interaction source and semantics; its inner non-clickable Surface owns both the glass modifier and the visible fill/border. Nineteen call sites use it across feed, classic/modern lyrics, player, playlist and settings, including the two feed header actions from the first follow-up. Press transforms and layout modifiers stay on the outer component. This change adds no backdrop captures and does not alter player actions.
+
+## Liquid Glass material rework (2026-09-19)
+
+Reworked the material recipe in `ui/theme/LiquidGlass.kt` to read as optical depth rather than "blur + shiny outline", without touching any call-site signatures (all ~70 `liquidGlassChrome`/`liquidGlassContainerColor`/`LiquidGlassSurface`/`LiquidGlassIconButton` callers compile unchanged).
+
+- Replaced `glassMaterialForPreset` with `glassRecipeForPreset` returning a `GlassRecipe(material, rim, shadow, innerShadow)`. Blur dropped to 7–14dp (was 10–22dp) so artwork stays recognizable; refraction kept subtle (13–22dp); saturation near 1.0 (1.05–1.08) for a whisper of contextual color; `depthEffect = true` (domed lens).
+- Rim highlight is now a faint sub-pixel hairline (`Highlight(width = 0.5.dp, alpha ≈ 0.26–0.32)`) **only** on small floating controls/cards; large flat surfaces (nav bar, mini-player, sheets, overlays) get `rim = null` so there is no lit border. The old `Highlight.Default` (BlendMode.Plus directional specular) and `Shadow.Default` on every surface are gone.
+- Depth comes from a soft `Shadow` punched out under the element plus a whisper of `InnerShadow`, so panes float instead of glowing.
+- `canvasLiquidGlassChrome` (preview / API<31 / low-RAM / software-rendering fallback) no longer paints a white reflection gradient, a fake pink/blue "refraction" diagonal, or a 1dp white border stroke. It now draws a theme-keyed translucent substrate, a very soft top-light gradient (alphas ≤0.10, fading out before any hard edge), and a soft ambient drop outline — light + depth only, no stroke, no gloss, no fake refraction.
+- The legibility veil (`fallbackTintOnly`) is theme-aware (darkens in dark mode, lifts in light) so the GPU glass stays legible over arbitrary backdrops without reading as an opaque card; `liquidGlassContainerColor` alpha caps lowered (dark 0.50 / light 0.56) so the refracted backdrop shows through.
+- `LiquidGlassIconButton` now uses the shared `FloatingControls` recipe and disables `dragging`/`stretching`, responding to touch with soft press illumination (`interactiveHighlight`) instead of a translate — smooth, interruptible, and never fighting a parent press-scale or scroll.
+- Capability gating, backdrop capture ownership, `BackdropBlur` (player artwork blur), and all layout/navigation/player behavior are unchanged. `chromaticAberration`/`gradientBlur` remain off; no per-frame allocations added.
+
+Source-reviewed only; visual fidelity and device behavior still require on-device verification.

@@ -35,7 +35,7 @@ class LocalStatsRepository @Inject constructor(
         val downloaded = runCatching { downloadedTrackDao.getAllList() }.getOrDefault(emptyList())
 
         val allTracks = (playlists.flatMap { it.tracks } + liked)
-            .filter { it.name.isNotBlank() && it.artist.isNotBlank() }
+            .filter { it.name.isNotBlank() && it.artist.isNotBlank() && !com.lastwave.app.util.ArtistHelper.isPlayCountOrStat(it.artist) }
 
         // Plays proxy: each saved occurrence counts once; duplicates across
         // playlists collapse for distinct counts but sum for total plays.
@@ -92,7 +92,8 @@ class LocalStatsRepository @Inject constructor(
             AlbumSeed(t.artist.trim(), album, t.artworkUrl)
         } + downloaded.mapNotNull { d ->
             val album = d.album.trim().takeIf(String::isNotBlank) ?: return@mapNotNull null
-            AlbumSeed(d.artist.trim().ifBlank { "Unknown artist" }, album, d.artworkUrl)
+            val cleanArtist = d.artist.trim().takeIf { !com.lastwave.app.util.ArtistHelper.isPlayCountOrStat(it) && it.isNotBlank() } ?: "Unknown artist"
+            AlbumSeed(cleanArtist, album, d.artworkUrl)
         }
         val albumGroups = albumSeeds.groupBy { "${it.artist.lowercase()}|${it.title.lowercase()}" }
         val topAlbums = albumGroups.entries

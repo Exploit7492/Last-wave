@@ -330,16 +330,25 @@ class TrackDetailsViewModel @Inject constructor(
                 if (descriptor != null && descriptor.stream.baseUrl.isNotBlank()) {
                     val s = descriptor.stream
                     val isAtmos = s.codec.equals("atmos", ignoreCase = true)
-                    val isLossless = isAtmos || (!s.codec.equals("opus", ignoreCase = true) && !s.codec.equals("mp3", ignoreCase = true))
+                    val isLossless = isAtmos || (!s.codec.equals("opus", ignoreCase = true) &&
+                        !s.codec.equals("mp3", ignoreCase = true) &&
+                        !s.codec.equals("aac", ignoreCase = true) &&
+                        !s.codec.contains("mp4a", ignoreCase = true))
                     val badge = if (isAtmos) {
                         "DOLBY ATMOS"
                     } else if (isLossless) {
                         if (s.bitDepth > 16 || s.sampleRate > 48000) "24-BIT HI-RES" else "CD LOSSLESS"
-                    } else if (s.codec.equals("mp3", ignoreCase = true)) "320k MP3" else s.codec.uppercase()
+                    } else if (s.codec.equals("mp3", ignoreCase = true)) {
+                        "320k MP3"
+                    } else if (s.codec.equals("aac", ignoreCase = true) || s.codec.contains("mp4a", ignoreCase = true)) {
+                        if (s.bandwidth in 1..128000) "HE-AAC" else "AAC 320"
+                    } else s.codec.uppercase()
                     val codec = if (isAtmos) {
                         "Dolby Atmos (E-AC-3 JOC Spatial)"
                     } else if (s.codec.equals("mp3", ignoreCase = true)) {
                         "MPEG Layer 3 (MP3)"
+                    } else if (s.codec.equals("aac", ignoreCase = true) || s.codec.contains("mp4a", ignoreCase = true)) {
+                        "Advanced Audio Coding (AAC)"
                     } else {
                         "Free Lossless Audio Codec (FLAC)"
                     }

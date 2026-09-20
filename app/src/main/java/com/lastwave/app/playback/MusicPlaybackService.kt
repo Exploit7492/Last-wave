@@ -587,10 +587,13 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
 
     private fun cleanTrackMetadata(title: String, artist: String): CleanTrackMetadata {
         if (title == cleanedSourceTitle && artist == cleanedSourceArtist) return cleanedMetadata
-        val cleanArtist = artist.trim()
+        var cleanArtist = artist.trim()
             .replace(TOPIC_SUFFIX_REGEX, "")
             .replace(VEVO_SUFFIX_REGEX, "")
             .trim()
+        if (com.lastwave.app.util.ArtistHelper.isPlayCountOrStat(cleanArtist)) {
+            cleanArtist = ""
+        }
         val cleanTitle = title.trim()
             .replace(TITLE_SUFFIX_REGEX, "")
             .trim()

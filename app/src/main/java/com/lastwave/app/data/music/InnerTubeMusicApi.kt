@@ -1474,9 +1474,18 @@ class InnerTubeMusicApi @Inject constructor(
 
         val songPages = collectBrowseSongPages(root, limit = 100)
         val tracks = songPages.tracks.map { track ->
+            val cleanArtist = track.artist.trim()
+            val resolvedArtist = if (com.lastwave.app.util.ArtistHelper.isPlayCountOrStat(cleanArtist) ||
+                cleanArtist.isBlank() ||
+                cleanArtist.equals("Unknown artist", ignoreCase = true)
+            ) {
+                artist
+            } else {
+                cleanArtist
+            }
             com.lastwave.app.playback.PlayableTrack(
                 title = track.title,
-                artist = track.artist.takeUnless { it == "Unknown artist" } ?: artist,
+                artist = resolvedArtist,
                 album = title,
                 artworkUrl = track.artworkUrl ?: artworkUrl,
                 videoId = track.videoId,
@@ -2781,7 +2790,7 @@ class InnerTubeMusicApi @Inject constructor(
         val artist = allDetailRuns.firstOrNull { run ->
             run.obj("navigationEndpoint")?.obj("browseEndpoint")?.string("browseId")?.startsWith("UC") == true
         }?.string("text") ?: allDetailRuns.mapNotNull { it.string("text") }
-            .firstOrNull { it.isUsefulDetail() && parseDuration(it) == null }
+            .firstOrNull { it.isLikelyArtistDetail() }
             ?: "Unknown artist"
         val album = allDetailRuns.firstOrNull { run ->
             run.obj("navigationEndpoint")?.obj("browseEndpoint")?.string("browseId")?.startsWith("MPRE") == true
@@ -2937,7 +2946,15 @@ class InnerTubeMusicApi @Inject constructor(
             value.equals("EP", true) || value.equals("Playlist", true)
         ) return false
         if (parseDuration(value) != null || value.matches(Regex("^(19|20)\\d{2}$"))) return false
-        if (value.contains(" view", ignoreCase = true) || value.contains(" song", ignoreCase = true)) return false
+        if (value.contains(" view", ignoreCase = true) ||
+            value.contains(" views", ignoreCase = true) ||
+            value.contains(" song", ignoreCase = true) ||
+            value.contains(" play", ignoreCase = true) ||
+            value.contains(" plays", ignoreCase = true) ||
+            value.contains(" stream", ignoreCase = true) ||
+            value.contains(" track", ignoreCase = true)
+        ) return false
+        if (com.lastwave.app.util.ArtistHelper.isPlayCountOrStat(value)) return false
         return true
     }
 
