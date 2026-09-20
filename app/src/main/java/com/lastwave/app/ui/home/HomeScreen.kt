@@ -922,14 +922,6 @@ private fun MixHeader(sortMode: HomeSortMode, onSortModeChange: (HomeSortMode) -
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSortModeChange(HomeSortMode.MOST_PLAYED); menuOpen = false
                 }
-                SortOption(Icons.Filled.Album, "Top Albums", sortMode == HomeSortMode.TOP_ALBUMS) {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onSortModeChange(HomeSortMode.TOP_ALBUMS); menuOpen = false
-                }
-                SortOption(Icons.Filled.People, "Top Artists", sortMode == HomeSortMode.TOP_ARTISTS) {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onSortModeChange(HomeSortMode.TOP_ARTISTS); menuOpen = false
-                }
                 SortOption(Icons.Filled.DateRange, "Last 7 Days", sortMode == HomeSortMode.LAST_7_DAYS) {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSortModeChange(HomeSortMode.LAST_7_DAYS); menuOpen = false
@@ -937,6 +929,14 @@ private fun MixHeader(sortMode: HomeSortMode, onSortModeChange: (HomeSortMode) -
                 SortOption(Icons.Filled.CalendarMonth, "Last 30 Days", sortMode == HomeSortMode.LAST_30_DAYS) {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSortModeChange(HomeSortMode.LAST_30_DAYS); menuOpen = false
+                }
+                SortOption(Icons.Filled.People, "Top Artists", sortMode == HomeSortMode.TOP_ARTISTS) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSortModeChange(HomeSortMode.TOP_ARTISTS); menuOpen = false
+                }
+                SortOption(Icons.Filled.Album, "Top Albums", sortMode == HomeSortMode.TOP_ALBUMS) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSortModeChange(HomeSortMode.TOP_ALBUMS); menuOpen = false
                 }
             }
         }

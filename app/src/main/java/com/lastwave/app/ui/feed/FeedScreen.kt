@@ -302,7 +302,14 @@ fun FeedScreen(
                     }
                     if (isSectionVisible(HomeSection.QUICK_TILES) && quickTiles.isNotEmpty()) {
                         item(key = "quick_tiles") {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
                             FeedSectionHeader(title = "Quick access")
+                                    Spacer(modifier = Modifier.height(12.dp))
                             QuickTilesGrid(
                                 tiles = quickTiles,
                                 onTileClick = { tile ->
@@ -317,6 +324,9 @@ fun FeedScreen(
                                     }
                                 },
                             )
+                        
+                                }
+                            }
                         }
                     }
 
@@ -332,6 +342,12 @@ fun FeedScreen(
 
                     if (isSectionVisible(HomeSection.QUICK_PICKS) && state.feedData.quickPicks.isNotEmpty()) {
                         item(key = "quick_picks") {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
                             val title = if (state.feedData.hasYtRecommendations) "Picked for you" else "Quick picks"
                             val subtitle = if (state.feedData.hasYtRecommendations) {
                                 "From your listening - refreshed for you"
@@ -355,12 +371,21 @@ fun FeedScreen(
                                 onTrackClick = { index -> viewModel.playTracksQueue(state.feedData.quickPicks, index, "Quick Picks") },
                                 onMenuClick = { menuTrack = it },
                             )
+                        
+                                }
+                            }
                         }
                     }
 
                     if (isSectionVisible(HomeSection.BECAUSE_YOU_LISTEN_TO)) {
                     state.feedData.becauseYouListenTo?.takeIf { it.items.isNotEmpty() }?.let { section ->
                         item(key = "because_you_listen_to") {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
                             FeedSectionHeader(
                                 title = section.title,
                                 subtitle = section.subtitle,
@@ -383,6 +408,9 @@ fun FeedScreen(
                                     }
                                 },
                             )
+                        
+                                }
+                            }
                         }
                     }
                     }
@@ -426,6 +454,12 @@ fun FeedScreen(
 
                     if (isSectionVisible(HomeSection.JUMP_BACK_IN) && state.feedData.jumpBackIn.isNotEmpty()) {
                         item(key = "jump_back_in") {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
                             FeedSectionHeader(
                                 title = "Jump back in",
                                 subtitle = "From your listening history",
@@ -443,11 +477,20 @@ fun FeedScreen(
                                     }
                                 },
                             )
+                        
+                                }
+                            }
                         }
                     }
 
                     if (isSectionVisible(HomeSection.MIXES) && state.feedData.mixes.isNotEmpty()) {
                         item(key = "mixed_for_you") {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
                             FeedSectionHeader(
                                 title = "Mixes to explore",
                                 subtitle = "Familiar favorites, fresh combinations",
@@ -470,6 +513,9 @@ fun FeedScreen(
                                     }
                                 },
                             )
+                        
+                                }
+                            }
                         }
                     }
 
@@ -491,6 +537,12 @@ fun FeedScreen(
 
                     if (isSectionVisible(HomeSection.TOP_ARTISTS) && individualTopArtists.isNotEmpty()) {
                         item(key = "top_artists") {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
                             FeedSectionHeader(
                                     title = "Artists for you",
                                     subtitle = "Worth another listen",
@@ -513,11 +565,20 @@ fun FeedScreen(
                                         )
                                     }
                                 }
+                            
+                                }
                             }
+                        }
                         }
 
                     if (isSectionVisible(HomeSection.HEAVY_ROTATION) && state.feedData.heavyRotation.isNotEmpty()) {
                         item(key = "heavy_rotation") {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
                             FeedSectionHeader(
                                 title = "Favorites to revisit",
                                 subtitle = "From your listening profile",
@@ -539,11 +600,20 @@ fun FeedScreen(
                                     }
                                 },
                             )
+                        
+                                }
+                            }
                         }
                     }
 
                     if (isSectionVisible(HomeSection.ALBUMS) && state.feedData.recentAlbums.isNotEmpty()) {
                         item(key = "albums_in_rotation") {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
                             FeedSectionHeader(
                                 title = "Albums for you",
                                 subtitle = "Real albums from your taste — Last.fm tops + YT Music picks",
@@ -567,11 +637,20 @@ fun FeedScreen(
                                     }
                                 },
                             )
+                        
+                                }
+                            }
                         }
                     }
 
                     if (isSectionVisible(HomeSection.CHARTS) && state.feedData.charts.isNotEmpty()) {
                         item(key = "trending_charts") {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
                             FeedSectionHeader(
                                 title = "Trending now",
                                 subtitle = "Most popular right now · tap a rank to play",
@@ -593,11 +672,20 @@ fun FeedScreen(
                                     )
                                 }
                             }
+                        
+                                }
+                            }
                         }
                     }
 
                     if (isSectionVisible(HomeSection.NEW_RELEASES) && state.feedData.newReleases.isNotEmpty()) {
                         item(key = "new_releases") {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
                             FeedSectionHeader(
                                 title = "New releases",
                                 subtitle = "Fresh drops and new albums",
@@ -625,11 +713,20 @@ fun FeedScreen(
                                     }
                                 },
                             )
+                        
+                                }
+                            }
                         }
                     }
 
                     if (isSectionVisible(HomeSection.FRIENDS) && state.feedData.friends.isNotEmpty()) {
                         item(key = "friends_activity") {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
                             FeedSectionHeader(
                                 title = "Your friends",
                                 subtitle = "People in your listening circle",
@@ -649,6 +746,9 @@ fun FeedScreen(
                                             onOpenFriendProfile(friend.name, friend.displayName, friend.avatarUrl)
                                         },
                                     )
+                                }
+                            }
+                        
                                 }
                             }
                         }

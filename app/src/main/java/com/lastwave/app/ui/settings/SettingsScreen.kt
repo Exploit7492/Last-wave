@@ -2291,7 +2291,7 @@ private fun YouTubeAccountRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconBadge(
-                Icons.Filled.PlayCircle,
+                Icons.Filled.SmartDisplay,
                 MaterialTheme.colorScheme.errorContainer,
                 MaterialTheme.colorScheme.onErrorContainer,
             )
@@ -2354,6 +2354,7 @@ private const val LAST_FM_CREATE_KEY_URL = "https://www.last.fm/api/account/crea
 private fun LastFmIntegrationCard(
     isConnected: Boolean,
     username: String,
+    avatarUrl: String?,
     connecting: Boolean,
     awaitingApproval: Boolean,
     hasApiKey: Boolean,
@@ -2384,11 +2385,20 @@ private fun LastFmIntegrationCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (isConnected) {
-                    IconBadge(
-                        Icons.Filled.CloudSync,
-                        MaterialTheme.colorScheme.primaryContainer,
-                        MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
+                    if (avatarUrl != null) {
+                        coil.compose.AsyncImage(
+                            model = avatarUrl,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                        )
+                    } else {
+                        IconBadge(
+                            Icons.Filled.CloudSync,
+                            MaterialTheme.colorScheme.primaryContainer,
+                            MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
                 } else {
                     Box(
                         Modifier
