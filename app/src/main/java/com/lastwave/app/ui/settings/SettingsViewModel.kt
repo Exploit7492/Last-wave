@@ -140,20 +140,6 @@ class SettingsViewModel @Inject constructor(
     private val _avatarUrl = MutableStateFlow<String?>(null)
     val avatarUrl: StateFlow<String?> = _avatarUrl.asStateFlow()
 
-    init {
-        viewModelScope.launch(Dispatchers.IO) {
-            session.collect { sess ->
-                if (sess.username.isNotBlank()) {
-                    homeRepository.fetchStats(sess.username).onSuccess { stats ->
-                        _avatarUrl.value = stats.avatarUrl
-                    }
-                } else {
-                    _avatarUrl.value = null
-                }
-            }
-        }
-    }
-
     val session: StateFlow<SessionData> = kotlinx.coroutines.flow.combine(
         sessionPreferences.session,
         authRepository.authState,
@@ -168,6 +154,20 @@ class SettingsViewModel @Inject constructor(
     }
         .withSettingsFallback("session", SessionData())
         .stateIn(viewModelScope, SettingsSharing, SessionData())
+
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            session.collect { sess ->
+                if (sess.username.isNotBlank()) {
+                    homeRepository.fetchStats(sess.username).onSuccess { stats ->
+                        _avatarUrl.value = stats.avatarUrl
+                    }
+                } else {
+                    _avatarUrl.value = null
+                }
+            }
+        }
+    }
 
     val theme: StateFlow<ThemeUiState> = themeRepository.uiState
 
