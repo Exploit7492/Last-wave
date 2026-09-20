@@ -41,7 +41,13 @@ class SegmentedDashBridge @Inject constructor(
 
     /** Offline variant: same chunks, local audio file as the base. */
     fun mpdUriForBase(descriptor: SegmentedStreamDescriptor, baseUrl: String): Uri {
-        val mpd = SegmentedMpdBuilder.build(descriptor, baseUrl)
+        val mpd = when {
+            baseUrl.startsWith("data:application/dash+xml;base64,") -> {
+                String(android.util.Base64.decode(baseUrl.substringAfter("base64,"), android.util.Base64.DEFAULT), Charsets.UTF_8)
+            }
+            baseUrl.startsWith("<?xml") -> baseUrl
+            else -> SegmentedMpdBuilder.build(descriptor, baseUrl)
+        }
         val digest = MessageDigest.getInstance("SHA-256")
             .digest(mpd.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }

@@ -97,29 +97,45 @@ class NowPlayingWidget : GlanceAppWidget() {
     }
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
+        // Every input here is fallible on a cold widget-only process (full
+        // Hilt graph build, listener-settings IPC, prefs read). A single
+        // throw used to abort provideGlance before provideContent, leaving
+        // the 5x1 widget stuck on glance_default_loading_layout forever.
+        // Each step now degrades independently so provideContent ALWAYS runs:
+        // worst case the widget shows its empty state, never a spinner.
         val entryPoint = runCatching {
             EntryPointAccessors.fromApplication(context.applicationContext, WidgetEntryPoint::class.java)
         }.getOrNull()
-        val themeUiState = entryPoint?.themeRepository()?.uiState?.value
+        // NOTE: themeRepository() builds the full app graph — kept OUTSIDE
+        // the entry-point lookup above on purpose is what used to crash here,
+        // so resolve it inside its own runCatching with static fallbacks.
+        val themeUiState = runCatching { entryPoint?.themeRepository()?.uiState?.value }.getOrNull()
         val darkScheme = themeUiState?.darkColorScheme
-            ?: com.lastwave.app.ui.theme.Md3SchemeBuilder.buildDarkScheme("#E03030", false)
+            ?: runCatching { com.lastwave.app.ui.theme.Md3SchemeBuilder.buildDarkScheme("#E03030", false) }.getOrNull()
+            ?: androidx.compose.material3.darkColorScheme()
         val lightScheme = themeUiState?.lightColorScheme
-            ?: com.lastwave.app.ui.theme.Md3SchemeBuilder.buildLightScheme("#E03030", false)
+            ?: runCatching { com.lastwave.app.ui.theme.Md3SchemeBuilder.buildLightScheme("#E03030", false) }.getOrNull()
+            ?: androidx.compose.material3.lightColorScheme()
 
         val colors = ColorProviders(light = lightScheme, dark = darkScheme)
-        val hasNotificationAccess = NotificationManagerCompat
-            .getEnabledListenerPackages(context)
-            .contains(context.packageName)
-        val snapshot = NowPlayingWidgetSnapshot.read(context)
+        val hasNotificationAccess = runCatching {
+            NotificationManagerCompat
+                .getEnabledListenerPackages(context)
+                .contains(context.packageName)
+        }.getOrDefault(false)
+        val snapshot = runCatching { NowPlayingWidgetSnapshot.read(context) }
+            .getOrDefault(NowPlayingWidgetSnapshot())
         val animationFrame = WidgetUpdater.animationFrame
         // Keep the artwork's equalizer waves ticking after process death or
         // a freshly placed widget that restored a playing snapshot.
-        if (snapshot.hasSession && snapshot.isPlaying &&
-            (hasNotificationAccess || snapshot.sourcePackage == context.packageName)
-        ) {
-            WidgetUpdater.startWaveAnimation(context.applicationContext)
-        } else {
-            WidgetUpdater.stopWaveAnimation()
+        runCatching {
+            if (snapshot.hasSession && snapshot.isPlaying &&
+                (hasNotificationAccess || snapshot.sourcePackage == context.packageName)
+            ) {
+                WidgetUpdater.startWaveAnimation(context.applicationContext)
+            } else {
+                WidgetUpdater.stopWaveAnimation()
+            }
         }
 
         provideContent {

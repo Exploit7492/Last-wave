@@ -47,6 +47,18 @@ class ModuleCrypto @Inject constructor() {
 
     fun isKeyProvisioned(): Boolean = appKey() != null
 
+    /** Encrypts data into an LWP1 envelope (magic 'LWP1' + 12-byte nonce + AES-256-GCM ciphertext + tag). */
+    fun encrypt(plaintext: ByteArray, key: ByteArray): ByteArray {
+        require(key.size == 32) { "Module key must be 32 bytes" }
+        val nonce = ByteArray(12).apply { java.security.SecureRandom().nextBytes(this) }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+            init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, nonce))
+        }
+        val ct = cipher.doFinal(plaintext)
+        val magic = byteArrayOf('L'.code.toByte(), 'W'.code.toByte(), 'P'.code.toByte(), '1'.code.toByte())
+        return magic + nonce + ct
+    }
+
     /** Throws on wrong key / tampered bytes (GCM auth). */
     fun decrypt(envelope: ByteArray, key: ByteArray): ByteArray {
         require(key.size == 32) { "Module key must be 32 bytes" }

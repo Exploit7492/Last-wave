@@ -3,6 +3,8 @@
 package com.lastwave.app.playback
 
 import android.media.AudioDeviceInfo
+import android.media.AudioFormat
+import android.os.Build
 import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.AuxEffectInfo
@@ -61,6 +63,9 @@ class NativeProcessingAudioSink(
     private var pendingOutput: ByteBuffer? = null
     @Volatile
     private var lastVolume = 1f
+    // Buffer already gain-scaled for the current direct-passthrough buffer
+    // (see handleDirectPassthrough). Renderer thread only.
+    private var lastGainBuffer: ByteBuffer? = null
     private var pendingPresentationTimeUs = 0L
     private var pendingAccessUnitCount = 0
     private var pendingOutputFrameCount = 0
@@ -170,12 +175,17 @@ class NativeProcessingAudioSink(
                     return false
                 }
                 safeResetProcessor()
+                // Platform BIT_PERFECT preference must be active BEFORE the
+                // AudioTrack opens — setting it after configure() leaves the
+                // first track on the shared mixer (192k -> 48k hijack).
+                configureUsbOutput(format, format.pcmEncoding, outputChannels)
                 enhancedDelegate.configure(format, specifiedBufferSize, outputChannels)
                 if (activeDelegate !== enhancedDelegate) safeFlush(fallbackDelegate)
                 activeDelegate = enhancedDelegate
                 processingActive = false
                 processedFormat = null
-                configureUsbOutput(format, C.ENCODING_PCM_FLOAT, outputChannels)
+                lastGainBuffer = null
+                syncDelegateVolume()
                 notifyPlatformEffectsRequired(false)
                 if (playing) enhancedDelegate.play()
             } else {
@@ -183,12 +193,14 @@ class NativeProcessingAudioSink(
                 // packing: the source rate opens the AudioTrack, so no
                 // LastWave resampler runs at any depth.
                 safeResetProcessor()
+                configureUsbOutput(format, format.pcmEncoding, outputChannels)
                 fallbackDelegate.configure(format, specifiedBufferSize, outputChannels)
                 if (activeDelegate !== fallbackDelegate) safeFlush(enhancedDelegate)
                 activeDelegate = fallbackDelegate
                 processingActive = false
                 processedFormat = null
-                configureUsbOutput(format, format.pcmEncoding, outputChannels)
+                lastGainBuffer = null
+                syncDelegateVolume()
                 notifyPlatformEffectsRequired(false)
                 if (playing) fallbackDelegate.play()
             }
@@ -251,6 +263,8 @@ class NativeProcessingAudioSink(
                 activeDelegate = enhancedDelegate
                 processingActive = true
                 configureUsbOutput(floatFormat, C.ENCODING_PCM_FLOAT, outputChannels)
+                lastGainBuffer = null
+                syncDelegateVolume()
                 notifyPlatformEffectsRequired(false)
                 if (playing) enhancedDelegate.play()
                 return true
@@ -270,6 +284,8 @@ class NativeProcessingAudioSink(
             activeDelegate = fallbackDelegate
             processingActive = true
             configureUsbOutput(floatFormat, C.ENCODING_PCM_16BIT, outputChannels)
+            lastGainBuffer = null
+            syncDelegateVolume()
             notifyPlatformEffectsRequired(false)
             if (playing) fallbackDelegate.play()
             Log.i(TAG, "Using native Float32 DSP with PCM16 AudioTrack compatibility output")
@@ -300,6 +316,8 @@ class NativeProcessingAudioSink(
         // encoding here), not a hardcoded PCM16 that can never match a
         // 24-bit direct stream on read-back.
         configureUsbOutput(format, format.pcmEncoding, outputChannels)
+        lastGainBuffer = null
+        syncDelegateVolume()
         notifyPlatformEffectsRequired(true)
         if (playing) fallbackDelegate.play()
     }
@@ -346,7 +364,7 @@ class NativeProcessingAudioSink(
         encodedAccessUnitCount: Int,
     ): Boolean {
         if (!processingActive) {
-            return activeDelegate.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+            return handleDirectPassthrough(buffer, presentationTimeUs, encodedAccessUnitCount)
         }
         try {
             return handleProcessedBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
@@ -366,6 +384,105 @@ class NativeProcessingAudioSink(
         } catch (retryError: LinkageError) {
             if (!switchToPlatformFallback("Processed PCM16 retry linkage failed", retryError)) throw retryError
             fallbackDelegate.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+        }
+    }
+
+    /**
+     * Bit-perfect direct path with workable volume. At unity gain the buffer
+     * passes untouched (bit-exact). Below unity — app volume, ducking, fades —
+     * samples are scaled in software first, because a granted BIT_PERFECT
+     * mixer bypass ignores AudioTrack volume: without this the volume keys
+     * would go dead the moment raw output engages. Any scaling is observed
+     * via [currentVolume], so the signal-path verdict honestly fails while
+     * attenuated and passes again at unity.
+     */
+    private fun handleDirectPassthrough(
+        buffer: ByteBuffer,
+        presentationTimeUs: Long,
+        encodedAccessUnitCount: Int,
+    ): Boolean {
+        val gain = lastVolume
+        val needsGain = bitPerfectRequested && bitPerfectAtConfigure && hasConfigured &&
+            gain < 1f - 1e-6f && gain >= 0f && buffer.hasRemaining()
+        if (!needsGain) {
+            lastGainBuffer = null
+            return activeDelegate.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+        }
+        // Media3 retries the SAME buffer object when the delegate partially
+        // consumes it. Scale once per buffer identity: re-scaling the tail on
+        // retry would compound attenuation.
+        if (lastGainBuffer !== buffer) {
+            val fmt = configuredFormat
+            if (fmt == null || fmt.sampleMimeType != MimeTypes.AUDIO_RAW) {
+                return activeDelegate.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+            }
+            scalePcmInPlace(buffer, buffer.position(), buffer.limit(), fmt.pcmEncoding, gain)
+            lastGainBuffer = buffer
+        }
+        return activeDelegate.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+    }
+
+    /** Linear gain on interleaved PCM, in place, with proper rounding/clipping. */
+    private fun scalePcmInPlace(
+        buffer: ByteBuffer,
+        startPos: Int,
+        endPos: Int,
+        media3Encoding: Int,
+        gain: Float,
+    ) {
+        if (gain <= 0f) {
+            var pos = startPos
+            while (pos < endPos) {
+                buffer.put(pos, 0.toByte())
+                pos++
+            }
+            return
+        }
+        when (media3Encoding) {
+            C.ENCODING_PCM_16BIT -> {
+                var pos = startPos
+                while (pos + 1 < endPos) {
+                    val sample = buffer.getShort(pos).toInt()
+                    val scaled = (sample * gain + if (sample >= 0) 0.5f else -0.5f).toInt()
+                        .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                    buffer.putShort(pos, scaled.toShort())
+                    pos += 2
+                }
+            }
+            C.ENCODING_PCM_24BIT -> {
+                var pos = startPos
+                while (pos + 2 < endPos) {
+                    val b0 = buffer.get(pos).toInt() and 0xFF
+                    val b1 = buffer.get(pos + 1).toInt() and 0xFF
+                    val b2 = buffer.get(pos + 2).toInt()
+                    var sample = (b2 shl 16) or (b1 shl 8) or b0
+                    if (sample and 0x800000 != 0) sample -= 0x1000000
+                    val scaled = (sample * gain + if (sample >= 0) 0.5f else -0.5f).toInt()
+                        .coerceIn(-0x800000, 0x7FFFFF)
+                    buffer.put(pos, (scaled and 0xFF).toByte())
+                    buffer.put(pos + 1, ((scaled shr 8) and 0xFF).toByte())
+                    buffer.put(pos + 2, ((scaled shr 16) and 0xFF).toByte())
+                    pos += 3
+                }
+            }
+            C.ENCODING_PCM_32BIT -> {
+                var pos = startPos
+                while (pos + 3 < endPos) {
+                    val sample = buffer.getInt(pos)
+                    val scaled = (sample * gain.toDouble()).toLong()
+                        .coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong())
+                    buffer.putInt(pos, scaled.toInt())
+                    pos += 4
+                }
+            }
+            C.ENCODING_PCM_FLOAT -> {
+                var pos = startPos
+                while (pos + 3 < endPos) {
+                    buffer.putFloat(pos, (buffer.getFloat(pos) * gain).coerceIn(-1f, 1f))
+                    pos += 4
+                }
+            }
+            else -> Unit
         }
     }
 
@@ -535,22 +652,53 @@ class NativeProcessingAudioSink(
     fun isBitPerfectConfigStale(): Boolean =
         hasConfigured && (bitPerfectRequested != bitPerfectAtConfigure)
 
-    private fun configureUsbOutput(format: Format, encoding: Int, channels: IntArray?) {
+    private fun configureUsbOutput(format: Format, media3Encoding: Int, channels: IntArray?) {
         if (format.sampleMimeType != MimeTypes.AUDIO_RAW || format.sampleRate <= 0) {
             usbOutput?.setFormat(null)
             return
         }
         val count = channels?.size ?: format.channelCount
         val mask = when (count) {
-            1 -> android.media.AudioFormat.CHANNEL_OUT_MONO
-            2 -> android.media.AudioFormat.CHANNEL_OUT_STEREO
+            1 -> AudioFormat.CHANNEL_OUT_MONO
+            2 -> AudioFormat.CHANNEL_OUT_STEREO
             else -> { usbOutput?.setFormat(null); return }
         }
+        // Media3 C.ENCODING_* ints are NOT android.media.AudioFormat ints
+        // (e.g. Media3 24-bit != Android 24-bit-packed). Passing them through
+        // raw builds a wrong mixer request (24-bit source asked as 8-bit),
+        // so BIT_PERFECT never matches and the mixer hijacks to 48 kHz.
+        val androidEncoding = androidEncodingFor(media3Encoding)
+        if (androidEncoding == 0) {
+            Log.w(TAG, "BIT-PERFECT mixer request skipped: no Android encoding for Media3 $media3Encoding")
+            usbOutput?.setFormat(null)
+            return
+        }
         val pcm = runCatching {
-            android.media.AudioFormat.Builder().setSampleRate(format.sampleRate)
-                .setEncoding(encoding).setChannelMask(mask).build()
+            AudioFormat.Builder().setSampleRate(format.sampleRate)
+                .setEncoding(androidEncoding).setChannelMask(mask).build()
         }.getOrNull()
         usbOutput?.setFormat(pcm)
+    }
+
+    /**
+     * Maps Media3 PCM encoding to the platform AudioFormat encoding used by
+     * AudioTrack and AudioMixerAttributes. Returns 0 when the device cannot
+     * represent the source depth directly (caller fails closed).
+     */
+    private fun androidEncodingFor(media3Encoding: Int): Int = when (media3Encoding) {
+        C.ENCODING_PCM_16BIT -> AudioFormat.ENCODING_PCM_16BIT
+        C.ENCODING_PCM_24BIT -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            AudioFormat.ENCODING_PCM_24BIT_PACKED
+        } else {
+            0
+        }
+        C.ENCODING_PCM_32BIT -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            AudioFormat.ENCODING_PCM_32BIT
+        } else {
+            0
+        }
+        C.ENCODING_PCM_FLOAT -> AudioFormat.ENCODING_PCM_FLOAT
+        else -> 0
     }
 
     override fun setOutputStreamOffsetUs(outputStreamOffsetUs: Long) {
@@ -583,12 +731,28 @@ class NativeProcessingAudioSink(
         // duck, bypassing ExoPlayer.getVolume. Bit-perfect verification must
         // observe the gain that actually reaches AudioTrack, not the request.
         lastVolume = volume
-        enhancedDelegate.setVolume(volume)
-        fallbackDelegate.setVolume(volume)
+        // On the direct bypass path gain is applied in software inside
+        // handleDirectPassthrough (the BIT_PERFECT mixer ignores AudioTrack
+        // volume, which is exactly why the keys went dead). Pin the platform
+        // gain at unity there so it can never double-attenuate.
+        val forwarded = if (bitPerfectRequested && bitPerfectAtConfigure && !processingActive) 1f else volume
+        enhancedDelegate.setVolume(forwarded)
+        fallbackDelegate.setVolume(forwarded)
     }
 
-    /** Last gain forwarded to AudioTrack (1 = unity). */
+    /** Last gain reaching the output (1 = unity). */
     fun currentVolume(): Float = lastVolume
+
+    /**
+     * Reconciles platform gain after a (re)configure: unity on the direct
+     * bypass (software gain in handleDirectPassthrough owns it), otherwise
+     * the last requested volume.
+     */
+    private fun syncDelegateVolume() {
+        val forwarded = if (bitPerfectRequested && bitPerfectAtConfigure && !processingActive) 1f else lastVolume
+        runCatching { enhancedDelegate.setVolume(forwarded) }
+        runCatching { fallbackDelegate.setVolume(forwarded) }
+    }
 
     override fun pause() {
         playing = false
@@ -806,6 +970,7 @@ class NativeProcessingAudioSink(
     private fun clearPending() {
         pendingInputLimit = 0
         pendingOutput = null
+        lastGainBuffer = null
         pendingPresentationTimeUs = 0L
         pendingAccessUnitCount = 0
         pendingOutputFrameCount = 0

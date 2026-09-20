@@ -48,6 +48,8 @@ data class SignalPathInput(
     val systemVolumeFixed: Boolean,
     val dac: UsbDacInfo?,
     val routedToDac: Boolean,
+    /** True only when the platform granted BIT_PERFECT on the DAC route. */
+    val routeVerified: Boolean,
     val driftPpm: Double?,
     val glitchCount: Long,
     val isPlaying: Boolean,
@@ -301,6 +303,33 @@ fun evaluateSignalPath(i: SignalPathInput): SignalPathReport {
             R.string.signal_detail_usb_ok_plain,
             listOf(dac.name),
             passed = false,
+        )
+    }
+
+    // 9 — Routing verification: requesting the DAC is not proof the platform
+    // granted it. Raw output requires the BIT_PERFECT grant on that route;
+    // otherwise Android still owns the stream (shared mixer hijack).
+    when {
+        dac == null -> checks += PathCheck(
+            R.string.signal_label_output,
+            R.string.signal_detail_no_dac,
+            passed = false,
+        )
+        !i.routedToDac -> checks += PathCheck(
+            R.string.signal_label_output,
+            R.string.signal_detail_not_routed,
+            listOf(dac.name),
+            passed = false,
+        )
+        !i.routeVerified -> checks += PathCheck(
+            R.string.signal_label_output,
+            R.string.signal_detail_route_unverified,
+            passed = false,
+        )
+        else -> checks += PathCheck(
+            R.string.signal_label_output,
+            R.string.signal_detail_bit_perfect_configured,
+            passed = true,
         )
     }
 

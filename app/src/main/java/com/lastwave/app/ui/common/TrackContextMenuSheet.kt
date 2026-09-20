@@ -92,6 +92,8 @@ import com.lastwave.app.ui.player.LocalAddToPlaylist
 import com.lastwave.app.ui.player.PlayerCastMenuRow
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /** Which optional rows this instance of the sheet should show — matches the
@@ -141,8 +143,15 @@ enum class TrackDownloadStatus {
 @HiltViewModel
 class DownloadMenuViewModel @Inject constructor(
     private val downloadManager: com.lastwave.app.data.download.TrackDownloadManager,
+    settingsPreferences: com.lastwave.app.data.local.SettingsPreferences,
 ) : ViewModel() {
     val activeDownloads = downloadManager.downloads
+
+    /** Mirrors Settings -> Audio & Streaming -> Download Quality so the
+     *  3-dot menu label always shows what will actually be downloaded. */
+    val downloadQuality = settingsPreferences.settings
+        .map { it.downloadQuality }
+        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5_000), 27)
 
     suspend fun checkStatus(title: String, artist: String): TrackDownloadStatus {
         if (downloadManager.isDownloading(title, artist)) return TrackDownloadStatus.DOWNLOADING
@@ -153,6 +162,19 @@ class DownloadMenuViewModel @Inject constructor(
     fun download(title: String, artist: String, album: String? = null, artworkUrl: String? = null) {
         downloadManager.downloadTrack(title, artist, album, artworkUrl)
     }
+}
+
+/** Short label for the configured download tier — must stay in sync with the
+ *  Download Quality tiers in SettingsScreen (28/27/7/6/5/4/-1). */
+fun downloadLabelForQuality(quality: Int): String = when (quality) {
+    28 -> "Download (Dolby Atmos)"
+    27 -> "Download (Max Quality)"
+    7 -> "Download (Hi-Res)"
+    6 -> "Download (CD Lossless)"
+    5 -> "Download (Standard)"
+    4 -> "Download (Data Saver)"
+    -1 -> "Download (YouTube)"
+    else -> "Download (Max Quality)"
 }
 
 @HiltViewModel
@@ -264,6 +286,8 @@ fun TrackContextMenuSheet(
     var resolvedGenre by remember(target) { mutableStateOf<String?>(null) }
     var resolvingGenre by remember(target) { mutableStateOf(false) }
     val activeDownloads by downloadViewModel.activeDownloads.collectAsStateWithLifecycle()
+    val downloadQuality by downloadViewModel.downloadQuality.collectAsStateWithLifecycle()
+    val downloadLabel = remember(downloadQuality) { downloadLabelForQuality(downloadQuality) }
     var isDownloaded by remember(target) { mutableStateOf(false) }
 
     LaunchedEffect(target, activeDownloads) {
@@ -467,7 +491,7 @@ fun TrackContextMenuSheet(
                                 }
                             }
                             else -> {
-                                MenuActionRow(Icons.Filled.Download, "Download (Max Quality)", position = pos) {
+                                MenuActionRow(Icons.Filled.Download, downloadLabel, position = pos) {
                                     downloadViewModel.download(t.name, t.artist, playable.album, playable.artworkUrl)
                                     onDismiss()
                                 }

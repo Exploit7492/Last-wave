@@ -4,6 +4,7 @@ import android.util.Base64
 import android.util.Log
 import com.dokar.quickjs.QuickJs
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -72,11 +73,12 @@ class ModuleRunner @Inject constructor(
         val target = "{\"title\":${q(title)},\"artist\":${q(artist)}," +
             "\"durationSec\":$durationSec,\"quality\":${q(quality)}}"
         Log.d(TAG, "resolvePlayback: target=$target")
-        val res = js.evaluate<String>(
-            "${providerTarget(handle)}.resolvePlayback($target).then(r=>JSON.stringify(r));",
+        val res = evaluateAsync(
+            js,
+            "${providerTarget(handle)}.resolvePlayback($target)",
             "resolve.js",
         )
-        Log.d(TAG, "resolvePlayback result len: ${res.length}")
+        Log.d(TAG, "resolvePlayback result len: ${res.length} head: ${res.take(200)}")
         res
     }
 
@@ -93,8 +95,9 @@ class ModuleRunner @Inject constructor(
         val ref = "{\"trackId\":${q(trackId)},\"quality\":${q(quality)}," +
             "\"title\":${q(title)},\"artist\":${q(artist)}," +
             "\"album\":${q(album)},\"durationSec\":$durationSec}"
-        js.evaluate<String>(
-            "${providerTarget(handle)}.refreshPlayback($ref).then(r=>JSON.stringify(r));",
+        evaluateAsync(
+            js,
+            "${providerTarget(handle)}.refreshPlayback($ref)",
             "refresh.js",
         )
     }
@@ -107,8 +110,9 @@ class ModuleRunner @Inject constructor(
         headers: Map<String, String>,
     ): String = withEngine(handle) { js ->
         val ctx = "{\"licenseUrl\":${q(licenseUrl)},\"headers\":${JSONObject(headers).toString()}}"
-        js.evaluate<String>(
-            "${providerTarget(handle)}.buildLicenseRequest(${q(challengeB64)},$ctx).then(r=>JSON.stringify(r));",
+        evaluateAsync(
+            js,
+            "${providerTarget(handle)}.buildLicenseRequest(${q(challengeB64)},$ctx)",
             "license_build.js",
         )
     }
@@ -116,8 +120,9 @@ class ModuleRunner @Inject constructor(
     /** Module-owned license parsing: raw response bytes in, CDM license out. */
     suspend fun parseLicenseResponse(handle: ProviderHandle, responseB64: String): String =
         withEngine(handle) { js ->
-            js.evaluate<String>(
-                "${providerTarget(handle)}.parseLicenseResponse(${q(responseB64)},{ }).then(r=>JSON.stringify(r));",
+            evaluateAsync(
+                js,
+                "${providerTarget(handle)}.parseLicenseResponse(${q(responseB64)},{ })",
                 "license_parse.js",
             )
         }
@@ -129,8 +134,9 @@ class ModuleRunner @Inject constructor(
         policyCache[handle.id]?.let { return it }
         val raw = runCatching {
             withEngine(handle) { js ->
-                js.evaluate<String>(
-                    "${providerTarget(handle)}.getDownloadPolicy().then(r=>JSON.stringify(r));",
+                evaluateAsync(
+                    js,
+                    "${providerTarget(handle)}.getDownloadPolicy()",
                     "policy.js",
                 )
             }
@@ -148,6 +154,47 @@ class ModuleRunner @Inject constructor(
 
     private fun globalOf(handle: ProviderHandle): String =
         handle.manifest.global.ifBlank { "LastWaveProvider" }
+
+    /**
+     * Evaluates a promise-returning JS expression to its settled JSON string.
+     *
+     * QuickJS `evaluate` hands back the Promise object itself (coerced to
+     * `"Promise { <state>: ... }"`), never the resolved value — awaiting it
+     * from Kotlin is impossible. So the settlement is captured into a global
+     * and read back with a follow-up evaluation (each evaluation also pumps
+     * the job queue, driving any straggler microtasks). Rejections settle to
+     * `"null"` so callers fall through to their normal fallback chain.
+     */
+    private suspend fun evaluateAsync(
+        js: QuickJs,
+        promiseExpression: String,
+        fileName: String,
+        timeoutMs: Long = 30_000L,
+    ): String {
+        runCatching {
+            js.evaluate<String>(
+                "globalThis.__lw_final = null; globalThis.__lw_done = false; " +
+                    "($promiseExpression).then(" +
+                    "function(r){ try { globalThis.__lw_final = JSON.stringify(r); } " +
+                    "catch(e) { globalThis.__lw_final = 'null'; } globalThis.__lw_done = true; }," +
+                    "function(e){ globalThis.__lw_final = 'null'; globalThis.__lw_done = true; });" +
+                    "\"__awaiting__\";",
+                fileName,
+            )
+        }
+        // First evaluation already drives the chain (bridge calls are
+        // synchronous); poll only covers a partially-drained queue.
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val done = runCatching {
+                js.evaluate<String>("globalThis.__lw_done === true ? 'yes' : 'no';", "poll.js")
+            }.getOrNull() == "yes"
+            if (done) break
+            delay(50)
+        }
+        return runCatching { js.evaluate<String>("globalThis.__lw_final;", "read.js") }
+            .getOrNull() ?: "null"
+    }
 
     private suspend fun withEngine(
         handle: ProviderHandle,
@@ -198,15 +245,15 @@ class ModuleRunner @Inject constructor(
 
     private fun namespaceScript(): String =
         "globalThis.LastWave=Object.assign(globalThis.LastWave||{},{" +
-            "httpRequest:a=>globalThis.__lw_httpRequest(a)," +
-            "rsaSign:a=>globalThis.__lw_rsaSign(a)," +
+            "httpRequest:a=>{var s=typeof a==='string'?a:JSON.stringify(a);var r=globalThis.__lw_httpRequest(s);try{return JSON.parse(r);}catch(_){return r;}}," +
+            "rsaSign:a=>globalThis.__lw_rsaSign(typeof a==='string'?a:JSON.stringify(a))," +
             "b64decode:a=>globalThis.__lw_b64decode(a)," +
             "b64encode:a=>globalThis.__lw_b64encode(a)," +
             "storeGet:a=>globalThis.__lw_storeGet(a)," +
-            "storeSet:a=>globalThis.__lw_storeSet(a)," +
+            "storeSet:a=>globalThis.__lw_storeSet(typeof a==='string'?a:JSON.stringify(a))," +
             "logWrite:a=>globalThis.__lw_logWrite(a)," +
             "uuid:()=>globalThis.__lw_uuid(\"\")," +
-            "sleepMs:a=>globalThis.__lw_sleepMs(a)});" +
+            "sleepMs:a=>globalThis.__lw_sleepMs(typeof a==='string'?a:JSON.stringify(a))});" +
             "\"__bridge_ready__\";"
 
     private fun bindBridge(engine: QuickJs, handle: ProviderHandle) {

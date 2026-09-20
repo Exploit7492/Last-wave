@@ -73,4 +73,4 @@ data class OfflineSidecar(
 
 fun ProviderManifest.isPlaybackEligible(): Boolean =
     id.isNotBlank() && entryPoint.isNotBlank() &&
-        capabilities.contains("search") && capabilities.contains("playback")
+        capabilities.contains("playback")

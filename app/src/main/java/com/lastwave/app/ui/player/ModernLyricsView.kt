@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -156,12 +157,12 @@ fun ModernLyricsPanel(
                             ExpressiveInlineLoadingIndicator(
                                 size = 42.dp,
                                 strokeWidth = 3.5.dp,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = Color.White,
                             )
                             Text(
                                 "Finding lyrics…",
                                 style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = Color.White.copy(alpha = 0.70f),
                             )
                         }
                     }
@@ -222,6 +223,7 @@ fun ModernLyricsPanel(
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
+                                    .clipToBounds()
                                     .padding(top = 12.dp),
                             ) {
                                 Row(
@@ -390,12 +392,12 @@ private fun ModernPlainLyricsView(
                     Icons.Filled.SyncDisabled,
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = Color.White.copy(alpha = 0.90f),
                 )
                 Text(
                     "Lyrics not time-synced",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = Color.White.copy(alpha = 0.70f),
                 )
             }
 
@@ -408,7 +410,7 @@ private fun ModernPlainLyricsView(
                     letterSpacing = 0.1.sp,
                 ),
                 textAlign = TextAlign.Start,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.94f),
+                color = Color.White.copy(alpha = 0.94f),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -434,14 +436,14 @@ private fun ModernEmptyLyricsView(
                 imageVector = if (isInstrumental) Icons.Filled.MusicOff else Icons.Filled.Lyrics,
                 contentDescription = null,
                 modifier = Modifier.size(42.dp),
-                tint = MaterialTheme.colorScheme.primary,
+                tint = Color.White.copy(alpha = 0.90f),
             )
 
             Text(
                 text = if (isInstrumental) "Instrumental" else "No lyrics",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = Color.White,
             )
 
             Text(
@@ -451,7 +453,7 @@ private fun ModernEmptyLyricsView(
                     "No synced lyrics found for this track."
                 },
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Color.White.copy(alpha = 0.70f),
                 textAlign = TextAlign.Center,
             )
 
@@ -504,8 +506,8 @@ private fun ModernLyricsControls(
                     onClick = onToggleFullscreen,
                     interactionSource = playerInteraction,
                     shape = CircleShape,
-                    color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)),
-                    contentColor = MaterialTheme.colorScheme.primary,
+                    color = liquidGlassContainerColor(Color.White.copy(alpha = 0.14f)),
+                    contentColor = Color.White.copy(alpha = 0.90f),
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp,
                     modifier = Modifier
@@ -539,7 +541,7 @@ private fun ModernLyricsControls(
                 durationMs = totalDurationMs,
                 isPlaying = state.isPlaying,
                 onSeek = player::seekTo,
-                isTranslucent = false,
+                isTranslucent = true,
                 trackKey = state.current?.let { it.videoId ?: "${it.artist}|${it.title}" },
                 showTimeLabels = false,
                 modifier = Modifier.fillMaxWidth(),
@@ -565,7 +567,7 @@ private fun ModernLyricsControls(
             Text(
                 formatTime(shown.toLong()),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.94f),
+                color = Color.White.copy(alpha = 0.85f),
             )
 
             Row(
@@ -578,13 +580,13 @@ private fun ModernLyricsControls(
                         .size(42.dp)
                         .liquidGlassChrome(CircleShape, LocalLiquidGlass.current)
                         .clip(CircleShape)
-                        .background(liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f))),
+                        .background(liquidGlassContainerColor(Color.White.copy(alpha = 0.14f))),
                 ) {
                     Icon(
                         Icons.Filled.SkipPrevious,
                         "Previous",
                         Modifier.size(24.dp),
-                        tint = MaterialTheme.colorScheme.onSurface,
+                        tint = Color.White.copy(alpha = 0.94f),
                     )
                 }
 
@@ -592,8 +594,8 @@ private fun ModernLyricsControls(
                     glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current),
                     onClick = player::togglePlayPause,
                     shape = CircleShape,
-                    color = liquidGlassContainerColor(MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    color = liquidGlassContainerColor(Color.White),
+                    contentColor = Color.Black,
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp,
                     modifier = Modifier.size(52.dp),
@@ -602,7 +604,7 @@ private fun ModernLyricsControls(
                         if (state.isBuffering) {
                             ExpressiveInlineLoadingIndicator(
                                 size = 22.dp,
-                                color = MaterialTheme.colorScheme.onPrimary,
+                                color = Color.Black,
                                 strokeWidth = 2.5.dp,
                             )
                         } else {
@@ -617,13 +619,13 @@ private fun ModernLyricsControls(
                         .size(42.dp)
                         .liquidGlassChrome(CircleShape, LocalLiquidGlass.current)
                         .clip(CircleShape)
-                        .background(liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f))),
+                        .background(liquidGlassContainerColor(Color.White.copy(alpha = 0.14f))),
                 ) {
                     Icon(
                         Icons.Filled.SkipNext,
                         "Next",
                         Modifier.size(24.dp),
-                        tint = MaterialTheme.colorScheme.onSurface,
+                        tint = Color.White.copy(alpha = 0.94f),
                     )
                 }
             }
@@ -631,7 +633,7 @@ private fun ModernLyricsControls(
             Text(
                 "−${formatTime((totalDurationMs - shown.toLong()).coerceAtLeast(0))}",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.94f),
+                color = Color.White.copy(alpha = 0.85f),
             )
         }
     }

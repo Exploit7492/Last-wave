@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -296,7 +297,7 @@ private fun SyncedLyricsList(
 
     LazyColumn(
         state = listState,
-        modifier = modifier,
+        modifier = modifier.clipToBounds(),
         contentPadding = PaddingValues(
             top = 40.dp,
             bottom = 130.dp,
@@ -500,17 +501,9 @@ private fun SyncedLyricsList(
                 label = "lyricAlpha_$index",
             )
 
-            val interactiveColor = MaterialTheme.colorScheme.primary
+            val interactiveColor = Color.White
             val textColor by animateColorAsState(
-                targetValue = if (isActive) {
-                    when {
-                        liquidGlass -> MaterialTheme.colorScheme.onPrimaryContainer
-                        animationStyle == LyricsAnimation.LOSSLESS_GLOW -> interactiveColor
-                        else -> MaterialTheme.colorScheme.onSurface
-                    }
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
+                targetValue = Color.White,
                 animationSpec = tween(140),
                 label = "lyricColor_$index",
             )
@@ -559,7 +552,7 @@ private fun SyncedLyricsList(
                         currentPositionMs = currentPositionMs,
                         isActive = isActive,
                         activeColor = textColor,
-                        inactiveColor = MaterialTheme.colorScheme.onSurface,
+                        inactiveColor = Color.White.copy(alpha = 0.55f),
                         liquidGlass = liquidGlass,
                         accentColor = interactiveColor,
                         animationStyle = animationStyle,
@@ -790,12 +783,12 @@ private fun PlainLyricsView(
                     Icons.Filled.SyncDisabled,
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = Color.White.copy(alpha = 0.90f),
                 )
                 Text(
                     "Lyrics not time-synced",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = Color.White.copy(alpha = 0.70f),
                 )
             }
 
@@ -808,7 +801,7 @@ private fun PlainLyricsView(
                     letterSpacing = 0.1.sp,
                 ),
                 textAlign = TextAlign.Start,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.94f),
+                color = Color.White.copy(alpha = 0.94f),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -834,14 +827,14 @@ private fun EmptyLyricsView(
                 imageVector = if (isInstrumental) Icons.Filled.MusicOff else Icons.Filled.Lyrics,
                 contentDescription = null,
                 modifier = Modifier.size(42.dp),
-                tint = MaterialTheme.colorScheme.primary,
+                tint = Color.White.copy(alpha = 0.90f),
             )
 
             Text(
                 text = if (isInstrumental) "Instrumental" else "No lyrics",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = Color.White,
             )
 
             Text(
@@ -851,7 +844,7 @@ private fun EmptyLyricsView(
                     "No synced lyrics found for this track."
                 },
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Color.White.copy(alpha = 0.70f),
                 textAlign = TextAlign.Center,
             )
 
@@ -907,8 +900,8 @@ private fun LyricsPlaybackControls(
                     onClick = onToggleFullscreen,
                     interactionSource = playerInteraction,
                     shape = CircleShape,
-                    color = liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)),
-                    contentColor = MaterialTheme.colorScheme.primary,
+                    color = liquidGlassContainerColor(Color.White.copy(alpha = 0.14f)),
+                    contentColor = Color.White.copy(alpha = 0.90f),
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp,
                     modifier = Modifier
@@ -942,7 +935,7 @@ private fun LyricsPlaybackControls(
                 durationMs = totalDurationMs,
                 isPlaying = state.isPlaying,
                 onSeek = player::seekTo,
-                isTranslucent = false,
+                isTranslucent = true,
                 trackKey = state.current?.let { it.videoId ?: "${it.artist}|${it.title}" },
                 showTimeLabels = false,
                 modifier = Modifier.fillMaxWidth(),
@@ -968,7 +961,7 @@ private fun LyricsPlaybackControls(
             Text(
                 formatTime(shown.toLong()),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.94f),
+                color = Color.White.copy(alpha = 0.85f),
             )
 
             Row(
@@ -981,13 +974,13 @@ private fun LyricsPlaybackControls(
                         .size(42.dp)
                         .liquidGlassChrome(CircleShape, LocalLiquidGlass.current)
                         .clip(CircleShape)
-                        .background(liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f))),
+                        .background(liquidGlassContainerColor(Color.White.copy(alpha = 0.14f))),
                 ) {
                     Icon(
                         Icons.Filled.SkipPrevious,
                         "Previous",
                         Modifier.size(24.dp),
-                        tint = MaterialTheme.colorScheme.onSurface,
+                        tint = Color.White.copy(alpha = 0.94f),
                     )
                 }
 
@@ -995,8 +988,8 @@ private fun LyricsPlaybackControls(
                     glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current),
                     onClick = player::togglePlayPause,
                     shape = CircleShape,
-                    color = liquidGlassContainerColor(MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    color = liquidGlassContainerColor(Color.White),
+                    contentColor = Color.Black,
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp,
                     modifier = Modifier.size(52.dp),
@@ -1005,7 +998,7 @@ private fun LyricsPlaybackControls(
                         if (state.isBuffering) {
                             ExpressiveInlineLoadingIndicator(
                                 size = 22.dp,
-                                color = MaterialTheme.colorScheme.onPrimary,
+                                color = Color.Black,
                                 strokeWidth = 2.5.dp,
                             )
                         } else {
@@ -1020,13 +1013,13 @@ private fun LyricsPlaybackControls(
                         .size(42.dp)
                         .liquidGlassChrome(CircleShape, LocalLiquidGlass.current)
                         .clip(CircleShape)
-                        .background(liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f))),
+                        .background(liquidGlassContainerColor(Color.White.copy(alpha = 0.14f))),
                 ) {
                     Icon(
                         Icons.Filled.SkipNext,
                         "Next",
                         Modifier.size(24.dp),
-                        tint = MaterialTheme.colorScheme.onSurface,
+                        tint = Color.White.copy(alpha = 0.94f),
                     )
                 }
             }
@@ -1034,7 +1027,7 @@ private fun LyricsPlaybackControls(
             Text(
                 "−${formatTime((totalDurationMs - shown.toLong()).coerceAtLeast(0))}",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.94f),
+                color = Color.White.copy(alpha = 0.85f),
             )
         }
     }

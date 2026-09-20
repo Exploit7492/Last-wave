@@ -11,7 +11,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.lastwave.app.data.repository.ThemeUiState
-import com.kyant.backdrop.backdrops.rememberCanvasBackdrop
+import com.hakim.liquify.ProvideBackdrop
+import com.hakim.liquify.backdrops.rememberCanvasBackdrop
+import com.hakim.liquify.material.GlassMaterial
+import com.hakim.liquify.material.ProvideGlassMaterial
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -75,17 +78,23 @@ fun LastWaveTheme(
                 LocalLiquidGlass provides themeState.liquidGlass,
                 LocalIsDarkTheme provides isDark,
             ) {
-                if (isLiquidGlassBackdropSupported()) {
-                    val backgroundColor = MaterialTheme.colorScheme.background
-                    val backgroundBackdrop = rememberCanvasBackdrop { drawRect(backgroundColor) }
-                    CompositionLocalProvider(
-                        LocalLiquidGlassBackdrop provides backgroundBackdrop,
-                        LocalLiquidGlassOverlayBackdrop provides backgroundBackdrop,
-                    ) {
+                // App-wide Apple glass recipe: nav bars, icons, sheets all follow this.
+                // Individual surfaces can still override via liquidGlassChrome preset.
+                ProvideGlassMaterial(GlassMaterial.Regular) {
+                    if (isLiquidGlassBackdropSupported()) {
+                        val backgroundColor = MaterialTheme.colorScheme.background
+                        val backgroundBackdrop = rememberCanvasBackdrop { drawRect(backgroundColor) }
+                        CompositionLocalProvider(
+                            LocalLiquidGlassBackdrop provides backgroundBackdrop,
+                            LocalLiquidGlassOverlayBackdrop provides backgroundBackdrop,
+                        ) {
+                            ProvideBackdrop(backgroundBackdrop) {
+                                content()
+                            }
+                        }
+                    } else {
                         content()
                     }
-                } else {
-                    content()
                 }
             }
         }

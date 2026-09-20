@@ -311,6 +311,26 @@ fun DownloadsScreen(
                 subtitle = headerSubtitle,
                 onBack = headerBack,
                 actions = {
+                    if (activeDownloads.isNotEmpty()) {
+                        FilledTonalButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.cancelAllDownloads()
+                            },
+                            colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(34.dp),
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Cancel All (${activeDownloads.size})", style = MaterialTheme.typography.labelSmall)
+                        }
+                        Spacer(Modifier.width(6.dp))
+                    }
                     Box {
                         IconButton(
                             onClick = {
@@ -325,6 +345,16 @@ fun DownloadsScreen(
                             expanded = showOptionsMenu,
                             onDismissRequest = { showOptionsMenu = false },
                         ) {
+                            if (activeDownloads.isNotEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("Cancel all downloads (${activeDownloads.size})", color = MaterialTheme.colorScheme.error) },
+                                    leadingIcon = { Icon(Icons.Filled.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                    onClick = {
+                                        showOptionsMenu = false
+                                        viewModel.cancelAllDownloads()
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = {
                                     Row(

@@ -896,27 +896,31 @@ fun SettingsScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel(stringResource(R.string.settings_section_audio))
                     val qualitySubtitle = when (misc.losslessQuality) {
+                        28 -> "Dolby Atmos (Spatial Immersive Audio)"
                         27 -> "Max (Up to 24-bit / 192 kHz)"
                         7 -> "Hi-Res (24-bit / 96 kHz)"
                         6 -> "CD Lossless (16-bit / 44.1 kHz FLAC)"
                         5 -> "Standard (320 kbps MP3)"
+                        4 -> "Data Saver (96 kbps HE-AAC)"
                         -1 -> "YouTube Music (AAC / Opus)"
                         else -> "Max (Up to 24-bit / 192 kHz)"
                     }
                     val downloadQualitySubtitle = when (misc.downloadQuality) {
+                        28 -> "Dolby Atmos (Spatial Immersive Audio)"
                         27 -> "Max (24-bit / 192 kHz FLAC)"
                         7 -> "Hi-Res (24-bit / 96 kHz FLAC)"
                         6 -> "CD Lossless (16-bit / 44.1 kHz FLAC)"
                         5 -> "Standard (320 kbps MP3)"
+                        4 -> "Data Saver (96 kbps HE-AAC)"
                         -1 -> "YouTube Music (AAC / Opus)"
                         else -> "Max (24-bit / 192 kHz FLAC)"
                     }
 
                     val isIgnored = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
                     val totalAudioRows = if (misc.crossfadeEnabled) {
-                        if (isIgnored) 6 else 7
+                        if (isIgnored) 7 else 8
                     } else {
-                        if (isIgnored) 5 else 6
+                        if (isIgnored) 6 else 7
                     }
                     SettingsGroup(rowCount = totalAudioRows) { index, position ->
                         when (index) {
@@ -939,6 +943,20 @@ fun SettingsScreen(
                                 position = position,
                             )
                             2 -> SettingsToggleCard(
+                                icon = Icons.Filled.GraphicEq,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = "Dolby Atmos / Spatial Audio",
+                                subtitle = if (misc.dolbyAtmosEnabled) {
+                                    "Direct Tidal multi-channel spatial audio (skips Qobuz)"
+                                } else {
+                                    "Off \u2022 Streams standard stereo lossless audio"
+                                },
+                                checked = misc.dolbyAtmosEnabled,
+                                onCheckedChange = viewModel::setDolbyAtmosEnabled,
+                                position = position,
+                            )
+                            3 -> SettingsToggleCard(
                                 icon = Icons.Filled.Tune,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -952,7 +970,7 @@ fun SettingsScreen(
                                 onCheckedChange = viewModel::setBitPerfectEnabled,
                                 position = position,
                             )
-                            3 -> SettingsToggleCard(
+                            4 -> SettingsToggleCard(
                                 icon = Icons.Filled.GraphicEq,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -968,7 +986,7 @@ fun SettingsScreen(
                                 onCheckedChange = viewModel::setCrossfadeEnabled,
                                 position = position,
                             )
-                            4 -> if (misc.crossfadeEnabled) {
+                            5 -> if (misc.crossfadeEnabled) {
                                 CrossfadeDurationRow(
                                     seconds = misc.crossfadeSeconds,
                                     onSecondsChange = viewModel::setCrossfadeSeconds,
@@ -990,7 +1008,7 @@ fun SettingsScreen(
                                     position = position,
                                 )
                             }
-                            5 -> if (misc.crossfadeEnabled) {
+                            6 -> if (misc.crossfadeEnabled) {
                                 SettingsToggleCard(
                                     icon = Icons.Filled.Lyrics,
                                     iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -1016,7 +1034,7 @@ fun SettingsScreen(
                                     position = position,
                                 )
                             }
-                            6 -> if (!isIgnored) {
+                            7 -> if (!isIgnored) {
                                 SettingsActionCard(
                                     icon = Icons.Filled.Bolt,
                                     iconContainer = MaterialTheme.colorScheme.errorContainer,
@@ -1548,10 +1566,12 @@ fun SettingsScreen(
 
     if (showQualityDialog) {
         val tiers = listOf(
+            Triple(28, "Dolby Atmos", "Spatial Immersive Audio • Tidal Master" to "ATMOS"),
             Triple(27, "Max Quality", "Up to 24-bit / 192 kHz • Lossless Studio FLAC" to "24-BIT / 192k"),
             Triple(7, "Hi-Res Audio", "24-bit / 96 kHz • Lossless Studio FLAC" to "24-BIT / 96k"),
             Triple(6, "CD Lossless", "16-bit / 44.1 kHz • Lossless CD FLAC" to "16-BIT / 44.1k"),
-            Triple(5, "Standard Quality", "320 kbps • MP3 (Data Saver)" to "320 kbps"),
+            Triple(5, "Standard Quality", "320 kbps • MP3 / AAC" to "320 kbps"),
+            Triple(4, "Data Saver", "96 kbps • High Efficiency AAC" to "96 kbps"),
             Triple(-1, "YouTube Music", "128-256 kbps • YouTube Music AAC / Opus stream" to "YOUTUBE"),
         )
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1696,10 +1716,12 @@ fun SettingsScreen(
 
     if (showDownloadQualityDialog) {
         val downloadTiers = listOf(
+            Triple(28, "Dolby Atmos", "Spatial Immersive Audio • Tidal Master" to "ATMOS"),
             Triple(27, "Max Quality", "Up to 24-bit / 192 kHz • Studio Master FLAC" to "24-BIT / 192k"),
             Triple(7, "Hi-Res Audio", "24-bit / 96 kHz • Studio FLAC" to "24-BIT / 96k"),
             Triple(6, "CD Lossless", "16-bit / 44.1 kHz • Bit-Exact CD FLAC" to "16-BIT / 44.1k"),
-            Triple(5, "Standard Quality", "320 kbps • High-Bitrate MP3" to "320 kbps"),
+            Triple(5, "Standard Quality", "320 kbps • High-Bitrate MP3 / AAC" to "320 kbps"),
+            Triple(4, "Data Saver", "96 kbps • High Efficiency AAC" to "96 kbps"),
             Triple(-1, "YouTube Music", "128-256 kbps • YouTube Music AAC / Opus stream" to "YOUTUBE"),
         )
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)

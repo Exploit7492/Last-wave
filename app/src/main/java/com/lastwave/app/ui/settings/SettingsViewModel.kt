@@ -382,6 +382,7 @@ class SettingsViewModel @Inject constructor(
     fun setPreferLosslessStreaming(enabled: Boolean) = launchSettingsAction("update streaming preference") { settingsPreferences.setPreferLosslessStreaming(enabled) }
     fun setLosslessQuality(quality: Int) = launchSettingsAction("update streaming quality") { settingsPreferences.setLosslessQuality(quality) }
     fun setDownloadQuality(quality: Int) = launchSettingsAction("update download quality") { settingsPreferences.setDownloadQuality(quality) }
+    fun setDolbyAtmosEnabled(enabled: Boolean) = launchSettingsAction("update Dolby Atmos preference") { settingsPreferences.setDolbyAtmosEnabled(enabled) }
     fun setStudioMasterClarity(enabled: Boolean) {
         // Apply immediately; DataStore persists the same state for future engine instances.
         launchSettingsAction("update Studio Master Clarity") {

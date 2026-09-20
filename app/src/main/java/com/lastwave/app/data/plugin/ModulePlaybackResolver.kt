@@ -31,11 +31,14 @@ class ModulePlaybackResolver @Inject constructor(
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    /** Repo quality tier (27/7/6/5) mapped to the module quality id. */
+    /** Repo quality tier (28/27/7/6/5/4) mapped to the module quality id. */
     fun moduleQuality(repoQuality: Int): String = when (repoQuality) {
+        28 -> "ATMOS"
+        27 -> "UHD"
         7 -> "HI_RES_96"
         6 -> "HD"
         5 -> "SD"
+        4 -> "LOW"
         else -> "UHD"
     }
 
@@ -141,8 +144,12 @@ class ModulePlaybackResolver @Inject constructor(
     }
     private fun accept(descriptor: SegmentedStreamDescriptor): Boolean {
         if (descriptor.stream.baseUrl.isBlank()) return false
-        // Progressive clear streams carry no segments; segmented ones must.
-        if (descriptor.stream.type != "progressive" && descriptor.stream.segments.isEmpty()) return false
+        // Progressive clear streams and raw DASH manifests carry no segments; custom segmented ones must.
+        if (descriptor.stream.type != "progressive" &&
+            descriptor.stream.type != "dash_xml" &&
+            !descriptor.stream.baseUrl.startsWith("data:application/dash+xml") &&
+            descriptor.stream.segments.isEmpty()
+        ) return false
         if (descriptor.isExpired()) {
             Log.d(TAG, "descriptor expired, dropping")
             return false

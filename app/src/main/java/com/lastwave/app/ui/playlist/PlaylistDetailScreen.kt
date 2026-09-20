@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Lock
@@ -97,7 +98,7 @@ import com.lastwave.app.ui.theme.LiquidGlassSurface
 import com.lastwave.app.ui.theme.liquidGlassChrome
 import com.lastwave.app.ui.theme.liquidGlassContainerColor
 import com.lastwave.app.ui.theme.LiquidGlassPreset
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.hakim.liquify.backdrops.rememberLayerBackdrop
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -433,15 +434,24 @@ fun PlaylistDetailScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box {
+                            val sortGlass = LocalLiquidGlass.current
                             Surface(
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     sortMenuOpen = true
                                 },
                                 shape = RoundedCornerShape(50),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                                color = liquidGlassContainerColor(
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                                    enabled = sortGlass,
+                                ),
                                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                tonalElevation = 2.dp,
+                                tonalElevation = if (sortGlass) 0.dp else 2.dp,
+                                modifier = Modifier.liquidGlassChrome(
+                                    RoundedCornerShape(50),
+                                    sortGlass,
+                                    LiquidGlassPreset.FloatingControls,
+                                ),
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
@@ -465,10 +475,19 @@ fun PlaylistDetailScreen(
                                 expanded = sortMenuOpen,
                                 onDismissRequest = { sortMenuOpen = false },
                                 shape = RoundedCornerShape(20.dp),
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                tonalElevation = 6.dp,
-                                shadowElevation = 10.dp,
-                                modifier = Modifier.widthIn(min = 210.dp),
+                                containerColor = liquidGlassContainerColor(
+                                    MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    enabled = sortGlass,
+                                ),
+                                tonalElevation = if (sortGlass) 0.dp else 6.dp,
+                                shadowElevation = if (sortGlass) 0.dp else 10.dp,
+                                modifier = Modifier
+                                    .widthIn(min = 210.dp)
+                                    .liquidGlassChrome(
+                                        RoundedCornerShape(20.dp),
+                                        sortGlass,
+                                        LiquidGlassPreset.ContextMenu,
+                                    ),
                             ) {
                                 PlaylistTrackSort.entries.forEach { option ->
                                     val isSelected = currentSort == option
@@ -762,6 +781,15 @@ fun PlaylistDetailScreen(
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     viewModel.downloadPlaylist(playlistId)
+                                    overflowMenuOpen = false
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Cancel playlist downloads") },
+                                leadingIcon = { Icon(Icons.Filled.Close, contentDescription = null) },
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    viewModel.cancelPlaylistDownloads(playlistId)
                                     overflowMenuOpen = false
                                 },
                             )

@@ -307,6 +307,16 @@ class DownloadsViewModel @Inject constructor(
         }
     }
 
+    fun cancelAllDownloads() {
+        try {
+            downloadManager.cancelAllDownloads()
+        } catch (error: Exception) {
+            android.util.Log.e("DownloadsViewModel", "Failed to cancel all downloads", error)
+        } catch (error: LinkageError) {
+            android.util.Log.e("DownloadsViewModel", "Download cancellation unsupported", error)
+        }
+    }
+
     fun deleteTrack(track: DownloadedTrackEntity) {
         launchDownloadAction("delete download") {
             downloadManager.deleteDownloadedTrack(track)

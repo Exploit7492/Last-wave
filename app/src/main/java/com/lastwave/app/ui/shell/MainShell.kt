@@ -74,8 +74,9 @@ import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.ui.playlist.PlaylistScreen
 import com.lastwave.app.ui.theme.LiquidGlassPreset
 import com.lastwave.app.ui.theme.LocalLiquidGlass
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.lastwave.app.ui.theme.LocalLiquidGlassOverlayBackdrop
+import com.hakim.liquify.backdrops.LayerBackdrop
+import com.hakim.liquify.backdrops.rememberLayerBackdrop
 import com.lastwave.app.ui.theme.isLiquidGlassBackdropSupported
 import com.lastwave.app.ui.theme.liquidGlassChrome
 import com.lastwave.app.ui.theme.liquidGlassContainerColor
@@ -226,12 +227,24 @@ private fun UpdatePromptCard(
     onUpdate: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val glass = LocalLiquidGlass.current
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.primaryContainer,
-        shadowElevation = 8.dp,
-        tonalElevation = 6.dp,
-        modifier = Modifier.fillMaxWidth(),
+        color = liquidGlassContainerColor(
+            MaterialTheme.colorScheme.primaryContainer,
+            enabled = glass,
+            backdrop = LocalLiquidGlassOverlayBackdrop.current,
+        ),
+        shadowElevation = if (glass) 0.dp else 8.dp,
+        tonalElevation = if (glass) 0.dp else 6.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidGlassChrome(
+                RoundedCornerShape(20.dp),
+                glass,
+                LiquidGlassPreset.Card,
+                LocalLiquidGlassOverlayBackdrop.current,
+            ),
     ) {
         Row(
             modifier = Modifier.padding(start = 16.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),

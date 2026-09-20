@@ -67,7 +67,7 @@ import com.lastwave.app.ui.theme.liquidGlassSource
 import com.lastwave.app.ui.theme.liquidGlassChrome
 import com.lastwave.app.ui.theme.liquidGlassContainerColor
 import com.lastwave.app.ui.theme.LiquidGlassPreset
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.hakim.liquify.backdrops.rememberLayerBackdrop
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.zIndex

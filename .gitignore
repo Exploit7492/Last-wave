@@ -51,5 +51,9 @@ keystore_credentials.txt
 .env
 .wrangler/
 .gradle_home/
-.mygradle/
+# Bundled provider modules (.lwp packages) and packaging tools
+app/src/main/assets/modules/
+*.lwp
+tools/
+provider.js
 

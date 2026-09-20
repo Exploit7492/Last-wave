@@ -199,7 +199,7 @@
     <string name="dl_saved_structured">Music/%1$s/ • %2$s • %3$d song(s)</string>
     <string name="dl_clear_history">This will clear the history list in the app. Your audio files in Music/%1$s will stay safely on your device.</string>
     <string name="dl_delete_all">This will permanently delete all %1$d downloaded audio files from Music/%2$s and free up %3$s of storage.</string>
-    <string name="dl_empty_hint">Tap the 3-dot menu on any song and select \"Download (Max Quality)\". Lossless FLAC tracks and YouTube audio are saved directly to your device\'s Music folder (see Download folder in the ⋮ menu) with embedded metadata &amp; synchronized LRCLIB lyrics.</string>
+    <string name="dl_empty_hint">Tap the 3-dot menu on any song and select \"Download\". Tracks are saved at your chosen Settings → Audio &amp; Streaming → Download Quality directly to your device\'s Music folder (see Download folder in the ⋮ menu) with embedded metadata &amp; synchronized LRCLIB lyrics.</string>
     <string name="dl_open_folder">Open Music/%1$s</string>
     <string name="dl_open_manager">Open in File Manager</string>
     <string name="dl_clear_history_only">Clear Download History Only</string>

@@ -2,7 +2,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/notification_root"
     android:layout_width="match_parent"
-    android:layout_height="128dp"
+    android:layout_height="152dp"
     android:clipToOutline="true">
 
     <ImageView

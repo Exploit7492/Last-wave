@@ -58,7 +58,16 @@ class UsbBitPerfectOutput(private val manager: AudioManager?) {
     }
 
     private fun apply() {
-        if (Build.VERSION.SDK_INT < 34) return
+        if (Build.VERSION.SDK_INT < 34) {
+            if (enabled) {
+                android.util.Log.w(
+                    TAG,
+                    "BIT-PERFECT mixer bypass requires Android 14+ (API 34); " +
+                        "SDK=${Build.VERSION.SDK_INT} cannot bypass the shared mixer",
+                )
+            }
+            return
+        }
         val target = device
         val pcm = format
         if (!enabled || target == null || pcm == null) {
@@ -67,10 +76,39 @@ class UsbBitPerfectOutput(private val manager: AudioManager?) {
         }
         if (target.type != AudioDeviceInfo.TYPE_USB_DEVICE && target.type != AudioDeviceInfo.TYPE_USB_HEADSET) return
         runCatching {
-            val supported = manager?.getSupportedMixerAttributes(target)?.firstOrNull {
-                it.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT && sameFormat(it.format, pcm)
-            } ?: return
-            if (manager?.setPreferredMixerAttributes(attributes, target, supported) == true) requestedDevice = target
+            val all = manager?.getSupportedMixerAttributes(target).orEmpty()
+            val bitPerfectModes = all.filter {
+                it.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT
+            }
+            if (bitPerfectModes.isEmpty()) {
+                android.util.Log.w(
+                    TAG,
+                    "BIT-PERFECT unsupported by DAC ${target.productName}: " +
+                        "no BIT_PERFECT mixer mode advertised",
+                )
+                return
+            }
+            val supported = bitPerfectModes.firstOrNull { sameFormat(it.format, pcm) }
+            if (supported == null) {
+                val want = "${pcm.encoding}/${pcm.sampleRate}Hz/mask=${pcm.channelMask}"
+                val have = bitPerfectModes.mapNotNull { it.format }
+                    .joinToString { "${it.encoding}/${it.sampleRate}Hz/mask=${it.channelMask}" }
+                android.util.Log.w(
+                    TAG,
+                    "BIT-PERFECT format mismatch: want $want; DAC offers [$have]",
+                )
+                return
+            }
+            if (manager?.setPreferredMixerAttributes(attributes, target, supported) == true) {
+                requestedDevice = target
+                android.util.Log.i(
+                    TAG,
+                    "BIT-PERFECT mixer bypass granted: ${pcm.encoding}/${pcm.sampleRate}Hz " +
+                        "-> ${target.productName}",
+                )
+            } else {
+                android.util.Log.w(TAG, "BIT-PERFECT setPreferredMixerAttributes rejected by platform")
+            }
         }
     }
 
@@ -96,5 +134,9 @@ class UsbBitPerfectOutput(private val manager: AudioManager?) {
                 a.sampleRate == b.sampleRate &&
                 a.channelMask == b.channelMask
         }.getOrDefault(false)
+    }
+
+    private companion object {
+        const val TAG = "UsbBitPerfect"
     }
 }

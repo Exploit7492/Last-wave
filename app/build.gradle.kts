@@ -60,26 +60,9 @@ android {
         }
         val maskLiteral = "new byte[] { " + secretMask.joinToString(", ") { "(byte) $it" } + " }"
 
-        val losslessBackendUrl = resolveSecret(
-            "LOSSLESS_BACKEND_URL",
-            "LOSSLESS_BASE_URL",
-            "BACKEND_BASE_URL"
-        )
-        buildConfigField("byte[]", "LOSSLESS_BACKEND_URL_BYTES", obfuscateSecret(losslessBackendUrl))
-
-        val losslessApiKey = resolveSecret(
-            "LOSSLESS_API_KEY",
-            "LOSSLESS_AUTH_KEY",
-            "API_AUTH_KEY"
-        )
-        buildConfigField("byte[]", "LOSSLESS_API_KEY_BYTES", obfuscateSecret(losslessApiKey))
-
-        val lyricsApiKey = resolveSecret("LYRICS_API_KEY", "API_KEY", "LYRICS_AUTH_TOKEN")
-        buildConfigField("byte[]", "LYRICS_API_KEY_BYTES", obfuscateSecret(lyricsApiKey))
-
         // Provider-module code key (AES-256, base64 of 32 bytes). Provisioned
         // per build via env / gradle property / local.properties / .env as
-        // PROVIDER_MODULE_KEY — never committed. Empty = modules unloadable.
+        // PROVIDER_MODULE_KEY.
         val providerModuleKey = resolveSecret("PROVIDER_MODULE_KEY")
         buildConfigField("byte[]", "PROVIDER_MODULE_KEY_BYTES", obfuscateSecret(providerModuleKey))
 
@@ -230,7 +213,10 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
-    implementation(libs.kyant.backdrop)
+    // Apple-style liquid glass (AGSL refraction + merging). Replaces Kyant backdrop.
+    // Shapes is the lightweight squircle geometry Liquify refracts through (no RenderEffect).
+    implementation(libs.liquify)
+    implementation(libs.kyant.shapes)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)

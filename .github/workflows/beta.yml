@@ -34,8 +34,6 @@ jobs:
 
       - name: Build Beta Release APKs
         env:
-          LOSSLESS_BACKEND_URL: ${{ secrets.LOSSLESS_BACKEND_URL }}
-          LOSSLESS_API_KEY: ${{ secrets.LOSSLESS_API_KEY }}
           LYRICS_API_KEY: ${{ secrets.LYRICS_API_KEY }}
           PROVIDER_MODULE_KEY: ${{ secrets.PROVIDER_MODULE_KEY }}
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}

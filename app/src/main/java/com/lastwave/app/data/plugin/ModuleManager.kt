@@ -38,10 +38,13 @@ class ModuleManager @Inject constructor(
     fun modulesDirFor(id: String): File = File(rootDir(), sanitizeId(id))
 
     suspend fun list(): List<InstalledProviderModule> = withContext(Dispatchers.IO) {
+        ensureBundledModulesInstalled()
         readRegistry().modules
     }
 
-    suspend fun enabledHandles(): List<ProviderHandle> = withContext(Dispatchers.IO) {        readRegistry().modules
+    suspend fun enabledHandles(): List<ProviderHandle> = withContext(Dispatchers.IO) {
+        ensureBundledModulesInstalled()
+        readRegistry().modules
             .filter { it.enabled && it.manifest.isPlaybackEligible() }
             .mapNotNull { entry ->
                 val dir = modulesDirFor(entry.manifest.id)
@@ -52,10 +55,40 @@ class ModuleManager @Inject constructor(
 
     /** Handle for a manifest id regardless of enabled flag (license path). */
     suspend fun findHandleById(id: String): ProviderHandle? = withContext(Dispatchers.IO) {
+        ensureBundledModulesInstalled()
         val entry = readRegistry().modules.firstOrNull { it.manifest.id == id } ?: return@withContext null
         val dir = modulesDirFor(entry.manifest.id)
         if (File(dir, "module.lwp").isFile) ProviderHandle(entry.manifest.id, entry.manifest, dir)
         else null
+    }
+
+    private fun ensureBundledModulesInstalled() {
+        val assetFiles = runCatching { context.assets.list("modules") }.getOrNull() ?: return
+        for (filename in assetFiles) {
+            if (!filename.endsWith(".lwp", ignoreCase = true)) continue
+            val tmp = File(context.cacheDir, "bundled_$filename")
+            try {
+                context.assets.open("modules/$filename").use { input ->
+                    tmp.outputStream().use { input.copyTo(it) }
+                }
+                val manifest = readManifest(tmp) ?: continue
+                val dir = modulesDirFor(manifest.id)
+                val moduleFile = File(dir, "module.lwp")
+                val reg = readRegistry()
+                val existing = reg.modules.firstOrNull { it.manifest.id == manifest.id }
+                if (!moduleFile.isFile || existing == null || existing.manifest.versionCode < manifest.versionCode || moduleFile.length() != tmp.length()) {
+                    dir.mkdirs()
+                    File(dir, "store").mkdirs()
+                    tmp.copyTo(moduleFile, overwrite = true)
+                    val entry = InstalledProviderModule(manifest, enabled = existing?.enabled ?: true, installedAt = System.currentTimeMillis())
+                    writeRegistry(reg.modules.filterNot { it.manifest.id == manifest.id } + entry)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("ModuleManager", "Failed to auto-install bundled module $filename: ${e.message}")
+            } finally {
+                runCatching { tmp.delete() }
+            }
+        }
     }
 
     suspend fun install(uri: Uri): ModuleInstallResult = withContext(Dispatchers.IO) {

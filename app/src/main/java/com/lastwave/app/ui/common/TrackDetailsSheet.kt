@@ -2,7 +2,9 @@ package com.lastwave.app.ui.common
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,37 +63,73 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lastwave.app.data.download.TrackDownloadManager
+import com.lastwave.app.data.genre.GenreResolver
 import com.lastwave.app.data.local.db.DownloadedTrackDao
 import com.lastwave.app.data.local.db.DownloadedTrackEntity
 import com.lastwave.app.data.local.SessionPreferences
 import com.lastwave.app.data.model.RecentTracksEnvelope
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.network.LastFmApiService
-import com.lastwave.app.data.lossless.LosslessMusicApi
+import com.lastwave.app.data.plugin.ModulePlaybackResolver
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import com.lastwave.app.ui.theme.LiquidGlassPreset
+import com.lastwave.app.ui.theme.LocalLiquidGlass
+import com.lastwave.app.ui.theme.LocalLiquidGlassOverlayBackdrop
+import com.lastwave.app.ui.theme.liquidGlassChrome
+import com.lastwave.app.ui.theme.liquidGlassContainerColor
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.net.URLEncoder
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
+
+@Serializable
+private data class ITunesTrackResult(
+    val artistName: String? = null,
+    val collectionName: String? = null,
+    @SerialName("trackName") val trackName: String? = null,
+    val primaryGenreName: String? = null,
+    val releaseDate: String? = null,
+    val trackNumber: Int? = null,
+    val trackCount: Int? = null,
+    val discNumber: Int? = null,
+    val discCount: Int? = null,
+    val trackTimeMillis: Long? = null,
+    val copyright: String? = null,
+    val contentAdvisoryRating: String? = null,
+    @SerialName("isStreamable") val isStreamable: Boolean? = null,
+)
+
+@Serializable
+private data class ITunesSearchResponse(
+    val resultCount: Int = 0,
+    val results: List<ITunesTrackResult> = emptyList(),
+)
 
 data class TrackSpecs(
     val title: String,
@@ -112,16 +150,30 @@ data class TrackSpecs(
     val lastPlayedText: String? = null,
     val isLoved: Boolean = false,
     val isScrobbleStatsLoaded: Boolean = false,
+    // Rich metadata
+    val genre: String? = null,
+    val composer: String? = null,
+    val releaseDate: String? = null,
+    val label: String? = null,
+    val trackNumber: Int? = null,
+    val trackCount: Int? = null,
+    val discNumber: Int? = null,
+    val discCount: Int? = null,
+    val contentRating: String? = null,
+    val wikiSummary: String? = null,
+    val isMetadataLoaded: Boolean = false,
 )
 
 @HiltViewModel
 class TrackDetailsViewModel @Inject constructor(
-    private val losslessMusicApi: LosslessMusicApi,
+    private val moduleResolver: ModulePlaybackResolver,
     private val innerTube: InnerTubeMusicApi,
     private val downloadedTrackDao: DownloadedTrackDao,
     private val downloadManager: TrackDownloadManager,
     private val lastFmApi: LastFmApiService,
     private val sessionPreferences: SessionPreferences,
+    private val genreResolver: GenreResolver,
+    private val okHttpClient: OkHttpClient,
 ) : ViewModel() {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -142,10 +194,19 @@ class TrackDetailsViewModel @Inject constructor(
                 isDownloading = isDownloading,
             )
 
-            // Resolve real audio resolution specs + Last.fm Scrobble stats in background
+            // Resolve real audio resolution specs + Last.fm Scrobble stats + rich metadata in background
             withContext(Dispatchers.IO) {
+                // 0. Kick off genre + iTunes metadata in parallel
+                val genreDeferred = async {
+                    runCatching { genreResolver.resolve(title, artist) }.getOrDefault("")
+                }
+                val itunesDeferred = async {
+                    runCatching { fetchITunesMetadata(title, artist) }.getOrNull()
+                }
+
                 // 1. Fetch Last.fm Scrobble Stats & History
                 val session = runCatching { sessionPreferences.session.first() }.getOrNull()
+                var wikiSummary: String? = null
                 if (session != null && session.apiKey.isNotBlank()) {
                     var userPlays = 0L
                     var globalPlays = 0L
@@ -172,6 +233,13 @@ class TrackDetailsViewModel @Inject constructor(
                             globalPlays = trackObj?.get("playcount")?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
                             listeners = trackObj?.get("listeners")?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
                             loved = trackObj?.get("userloved")?.jsonPrimitive?.contentOrNull == "1"
+                            // Extract wiki summary
+                            val wikiObj = trackObj?.get("wiki")?.jsonObject
+                            wikiSummary = wikiObj?.get("summary")?.jsonPrimitive?.contentOrNull
+                                ?.replace(Regex("<[^>]*>"), "")  // strip HTML tags
+                                ?.replace(Regex("Read more on Last\\.fm.*"), "")  // strip footer link
+                                ?.trim()
+                                ?.takeIf { it.isNotBlank() }
                         }
                     }
 
@@ -250,23 +318,36 @@ class TrackDetailsViewModel @Inject constructor(
                         isLoved = loved,
                         lastPlayedText = lastPlayedDisplay,
                         isScrobbleStatsLoaded = true,
+                        wikiSummary = wikiSummary,
                     )
                 }
 
-                // 3. Audio stream resolution
-                val losslessStream = runCatching {
-                    losslessMusicApi.resolveStream(title, artist, preferredQuality = LosslessMusicApi.QUALITY_MAX_HI_RES)
+                // 3. Audio stream resolution via provider module (.lwp engine)
+                val descriptor = runCatching {
+                    moduleResolver.resolve(title, artist, 27)
                 }.getOrNull()
 
-                if (losslessStream != null) {
-                    val badge = when {
-                        losslessStream.bitDepth > 16 || losslessStream.samplingRate > 48.0 -> "24-BIT HI-RES"
-                        losslessStream.formatId == LosslessMusicApi.QUALITY_CD_LOSSLESS -> "CD LOSSLESS"
-                        losslessStream.formatId == LosslessMusicApi.QUALITY_MP3_320 -> "320k MP3"
-                        else -> "FLAC"
+                if (descriptor != null && descriptor.stream.baseUrl.isNotBlank()) {
+                    val s = descriptor.stream
+                    val isAtmos = s.codec.equals("atmos", ignoreCase = true)
+                    val isLossless = isAtmos || (!s.codec.equals("opus", ignoreCase = true) && !s.codec.equals("mp3", ignoreCase = true))
+                    val badge = if (isAtmos) {
+                        "DOLBY ATMOS"
+                    } else if (isLossless) {
+                        if (s.bitDepth > 16 || s.sampleRate > 48000) "24-BIT HI-RES" else "CD LOSSLESS"
+                    } else if (s.codec.equals("mp3", ignoreCase = true)) "320k MP3" else s.codec.uppercase()
+                    val codec = if (isAtmos) {
+                        "Dolby Atmos (E-AC-3 JOC Spatial)"
+                    } else if (s.codec.equals("mp3", ignoreCase = true)) {
+                        "MPEG Layer 3 (MP3)"
+                    } else {
+                        "Free Lossless Audio Codec (FLAC)"
                     }
-                    val codec = if (losslessStream.formatId == LosslessMusicApi.QUALITY_MP3_320) "MPEG Layer 3 (MP3)" else "Free Lossless Audio Codec (FLAC)"
-                    val depthRate = "${losslessStream.bitDepth}-bit / ${losslessStream.samplingRate} kHz (${losslessStream.bitrateKbps ?: 0} kbps)"
+                    val depthRate = if (isAtmos) {
+                        "24-bit / ${if (s.sampleRate > 0) s.sampleRate / 1000.0 else 48.0} kHz (6 Channels Spatial)"
+                    } else {
+                        "${if (s.bitDepth > 0) s.bitDepth else 16}-bit / ${if (s.sampleRate > 0) s.sampleRate / 1000.0 else 44.1} kHz (${if (s.bandwidth > 0) s.bandwidth / 1000 else 1411} kbps)"
+                    }
                     val durText = downloaded?.durationMs?.takeIf { it > 0L }?.let { ms ->
                         val dur = (ms / 1000).toInt()
                         "%d:%02d".format(dur / 60, dur % 60)
@@ -276,8 +357,8 @@ class TrackDetailsViewModel @Inject constructor(
                         qualityBadge = badge,
                         audioCodec = codec,
                         bitDepthSampleRate = depthRate,
-                        provider = "Lossless Master CDN",
-                        isLossless = true,
+                        provider = "Lossless Provider Module",
+                        isLossless = isLossless,
                         durationText = durText,
                     )
                 } else {
@@ -299,6 +380,41 @@ class TrackDetailsViewModel @Inject constructor(
                         isLossless = false,
                     )
                 }
+
+                // 4. Merge genre + iTunes metadata
+                val genre = genreDeferred.await()
+                val itunes = itunesDeferred.await()
+                val releaseFormatted = itunes?.releaseDate?.let { formatReleaseDate(it) }
+                val label = itunes?.copyright
+                    ?.replace(Regex("^[©℗]\\s*\\d{4}\\s*"), "")  // strip "© 2023 "
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+                val contentRating = itunes?.contentAdvisoryRating?.let { advisory ->
+                    when {
+                        advisory.equals("Explicit", ignoreCase = true) -> "Explicit"
+                        advisory.equals("Clean", ignoreCase = true) -> "Clean"
+                        advisory.equals("notExplicit", ignoreCase = true) -> null
+                        advisory.isBlank() -> null
+                        else -> advisory
+                    }
+                }
+
+                _specs.value = _specs.value?.copy(
+                    genre = genre.takeIf { it.isNotBlank() },
+                    composer = itunes?.artistName?.takeIf {
+                        // Only show composer if iTunes returns a different artist (featuring, etc.)
+                        // Otherwise it's redundant. The copyright field is more useful.
+                        false
+                    },
+                    releaseDate = releaseFormatted,
+                    label = label,
+                    trackNumber = itunes?.trackNumber,
+                    trackCount = itunes?.trackCount,
+                    discNumber = itunes?.discNumber,
+                    discCount = itunes?.discCount,
+                    contentRating = contentRating,
+                    isMetadataLoaded = true,
+                )
             }
         }
     }
@@ -321,6 +437,32 @@ class TrackDetailsViewModel @Inject constructor(
             days < 30 -> "${days / 7}w ago"
             days < 365 -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(millis))
             else -> SimpleDateFormat("MMM yyyy", Locale.getDefault()).format(Date(millis))
+        }
+    }
+
+    private fun fetchITunesMetadata(title: String, artist: String): ITunesTrackResult? {
+        val term = "$title $artist"
+        val url = "https://itunes.apple.com/search?term=${URLEncoder.encode(term, "UTF-8")}&media=music&entity=song&limit=3"
+        val request = Request.Builder().url(url).build()
+        val response = okHttpClient.newCall(request).execute()
+        if (!response.isSuccessful) return null
+        val body = response.body?.string().orEmpty()
+        val parsed = json.decodeFromString<ITunesSearchResponse>(body)
+        // Best match: prefer exact title+artist match
+        return parsed.results.firstOrNull { result ->
+            result.trackName.equals(title, ignoreCase = true) &&
+                result.artistName?.contains(artist, ignoreCase = true) == true
+        } ?: parsed.results.firstOrNull()
+    }
+
+    private fun formatReleaseDate(isoDate: String): String? {
+        if (isoDate.isBlank()) return null
+        return try {
+            val inputFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+            val date = inputFormat.parse(isoDate) ?: return isoDate.take(4)
+            SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()).format(date)
+        } catch (_: Exception) {
+            isoDate.take(4).takeIf { it.length == 4 }
         }
     }
 
@@ -354,7 +496,16 @@ fun TrackDetailsSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.liquidGlassChrome(
+            RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            LocalLiquidGlass.current,
+            LiquidGlassPreset.ModalSheet,
+            LocalLiquidGlassOverlayBackdrop.current,
+        ),
+        containerColor = liquidGlassContainerColor(
+            MaterialTheme.colorScheme.surfaceContainerLow,
+            backdrop = LocalLiquidGlassOverlayBackdrop.current,
+        ),
         contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         dragHandle = {
             Surface(
@@ -531,7 +682,118 @@ fun TrackDetailsSheet(
                 )
             }
 
-            // 4. Audio & Stream Specifications Card
+            // 4. Track Information Card (Genre, Release, Label, etc.)
+            if (currentSpecs.isMetadataLoaded && listOfNotNull(
+                    currentSpecs.genre,
+                    currentSpecs.releaseDate,
+                    currentSpecs.label,
+                    currentSpecs.contentRating,
+                    currentSpecs.trackNumber?.toString(),
+                ).isNotEmpty()
+            ) {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Info, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Track Information", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        }
+
+                        currentSpecs.genre?.let { DetailRow(label = "Genre", value = it) }
+                        currentSpecs.composer?.let { DetailRow(label = "Composer", value = it) }
+                        currentSpecs.releaseDate?.let { DetailRow(label = "Released", value = it) }
+                        currentSpecs.label?.let { DetailRow(label = "Label", value = it) }
+                        if (currentSpecs.trackNumber != null) {
+                            val trackText = if (currentSpecs.trackCount != null && currentSpecs.trackCount > 0) {
+                                "${currentSpecs.trackNumber} of ${currentSpecs.trackCount}"
+                            } else {
+                                "${currentSpecs.trackNumber}"
+                            }
+                            DetailRow(label = "Track", value = trackText)
+                        }
+                        if (currentSpecs.discNumber != null && (currentSpecs.discCount ?: 1) > 1) {
+                            val discText = if (currentSpecs.discCount != null) {
+                                "${currentSpecs.discNumber} of ${currentSpecs.discCount}"
+                            } else {
+                                "${currentSpecs.discNumber}"
+                            }
+                            DetailRow(label = "Disc", value = discText)
+                        }
+                        currentSpecs.contentRating?.let {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "Rating",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (it == "Explicit") MaterialTheme.colorScheme.errorContainer
+                                    else MaterialTheme.colorScheme.secondaryContainer,
+                                ) {
+                                    Text(
+                                        text = it,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (it == "Explicit") MaterialTheme.colorScheme.onErrorContainer
+                                        else MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5. About / Wiki Summary
+            if (!currentSpecs.wikiSummary.isNullOrBlank()) {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    var expanded by remember { mutableStateOf(false) }
+                    Column(
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .animateContentSize(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Album, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("About", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        }
+                        Text(
+                            text = currentSpecs.wikiSummary,
+                            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = if (expanded) Int.MAX_VALUE else 4,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (currentSpecs.wikiSummary.length > 200) {
+                            Text(
+                                text = if (expanded) "Show less" else "Read more",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.clickable { expanded = !expanded },
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 6. Audio & Stream Specifications Card
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
@@ -553,7 +815,7 @@ fun TrackDetailsSheet(
                 }
             }
 
-            // 5. Offline Storage Card
+            // 7. Offline Storage Card
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),

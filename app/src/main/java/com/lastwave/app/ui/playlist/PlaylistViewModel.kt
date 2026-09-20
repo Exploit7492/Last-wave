@@ -512,6 +512,27 @@ class PlaylistViewModel @Inject constructor(
         }
     }
 
+    fun cancelPlaylistDownloads(playlistId: Long) {
+        viewModelScope.launch {
+            val playlist = _uiState.value.playlists.firstOrNull { it.id == playlistId }
+                ?: _uiState.value.detailPlaylist?.takeIf { it.id == playlistId }
+                ?: runCatching { playlistRepository.getById(playlistId) }.getOrNull()
+            val tracks = playlist?.tracks.orEmpty()
+            var cancelled = 0
+            for (track in tracks) {
+                if (trackDownloadManager.isDownloading(track.name, track.artist)) {
+                    trackDownloadManager.cancelDownload(track.name, track.artist)
+                    cancelled++
+                }
+            }
+            _uiState.update {
+                it.copy(
+                    toastMessage = if (cancelled > 0) "Cancelled $cancelled downloads" else "No active downloads in playlist",
+                )
+            }
+        }
+    }
+
     /** Port of §4.2's "Generate Fresh" — re-runs the same mode with the
      *  same inputs and saves a brand-new playlist inspired from the original. */
     fun regenerate(id: Long, onRegenerated: ((Long) -> Unit)? = null) {

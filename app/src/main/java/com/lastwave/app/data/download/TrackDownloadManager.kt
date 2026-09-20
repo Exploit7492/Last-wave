@@ -123,7 +123,6 @@ private class DownloadInterruptedException(message: String, cause: Throwable? = 
 @Singleton
 class TrackDownloadManager @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val losslessMusicApi: LosslessMusicApi,
     private val innerTube: InnerTubeMusicApi,
     private val artworkRepository: ArtworkRepository,
     private val lyricsRepository: LyricsRepository,
@@ -155,10 +154,9 @@ class TrackDownloadManager @Inject constructor(
         // of parallel ranges could OOM the process after a few downloads.
         private const val DOWNLOAD_BUFFER_SIZE = 128 * 1024 // 128 KB
         private const val PARALLEL_YOUTUBE_PARTS = 4
-        // At most 2 full-track downloads run at once; extra taps queue behind
-        // the semaphore instead of stacking sockets, buffers and bitmap
-        // decodes until the process dies (the 5-to-6-download crash).
-        private const val MAX_CONCURRENT_DOWNLOADS = 2
+        // Bulk downloads run strictly one by one sequentially to avoid
+        // stacking sockets, buffers and bitmap decodes.
+        private const val MAX_CONCURRENT_DOWNLOADS = 1
         private const val MIN_PARALLEL_DOWNLOAD_BYTES = 2L * 1024 * 1024
         private const val MIN_VALID_AUDIO_BYTES = 1_024L
         private const val RECONNECT_POLL_INTERVAL_MS = 500L
@@ -369,6 +367,17 @@ class TrackDownloadManager @Inject constructor(
         _downloads.update { it - key }
     }
 
+    fun cancelDownload(title: String, artist: String) {
+        cancelDownload(makeDownloadKey(title, artist))
+    }
+
+    fun cancelAllDownloads() {
+        val allKeys = (activeKeys + _downloads.value.keys).toSet()
+        allKeys.forEach { key ->
+            cancelDownload(key)
+        }
+    }
+
     fun reconnectDownload(key: String): Boolean {
         if (key !in activeKeys) return false
         reconnectGenerations[key]?.incrementAndGet() ?: return false
@@ -516,105 +525,386 @@ class TrackDownloadManager @Inject constructor(
                 var expectedContentLength: Long? = null
                 var useParallelDownload = false
 
-                val downloadQuality = misc.downloadQuality
+                // Dolby ON → request the Atmos mix (28); the Tidal DASH leg
+                // below already saves it as .m4a. Otherwise honor the
+                // download-quality setting (stereo tiers / YouTube).
+                val downloadQuality =
+                    if (misc.dolbyAtmosEnabled) LosslessMusicApi.QUALITY_DOLBY_ATMOS
+                    else misc.downloadQuality
                 val isYouTubeRequested = downloadQuality == LosslessMusicApi.QUALITY_YOUTUBE
 
-                if (!isYouTubeRequested) {
-                    val losslessStream = losslessMusicApi.resolveStream(
-                        title = title,
-                        artist = artist,
-                        expectedAlbum = resolvedAlbum,
-                        preferredQuality = downloadQuality,
-                    )
-
-                    if (losslessStream != null) {
-                        resolvedUrl = losslessStream.url
-                        mimeType = losslessStream.mimeType
-                        extension = if (losslessStream.formatId == LosslessMusicApi.QUALITY_MP3_320) "mp3" else "flac"
-                        formatBadge = when {
-                            losslessStream.bitDepth > 16 || losslessStream.samplingRate > 48.0 -> "HI-RES FLAC"
-                            losslessStream.formatId == LosslessMusicApi.QUALITY_CD_LOSSLESS -> "LOSSLESS FLAC"
-                            losslessStream.formatId == LosslessMusicApi.QUALITY_MP3_320 -> "320k MP3"
-                            else -> "FLAC"
-                        }
-                        isLossless = true
-                        durationMs = 0L
-                    }
-                }
-
-                // 1b. Provider modules (segmented DRM only): same CloudFront
-                // bytes the player streams, fetched as one contiguous range.
+                // 1. Provider module (.lwp engine): progressive clear FLAC/MP3 or segmented DASH (Dolby Atmos / Tidal Hi-Res)
                 var moduleDescriptor: SegmentedStreamDescriptor? = null
                 var moduleLicenseDeferred: Deferred<OfflineKeys?>? = null
-                if (resolvedUrl == null && downloadQuality != LosslessMusicApi.QUALITY_YOUTUBE) {
-                    moduleDescriptor = runCatching {
-                        moduleResolver.resolve(title, artist, downloadQuality)
-                    }.getOrNull()?.takeIf { desc ->
-                        val s = desc.stream
-                        desc.drm != null && s.baseUrl.isNotBlank() &&
-                            s.type != "progressive" && s.segments.isNotEmpty()
-                    }
-                    moduleDescriptor?.let { desc ->
-                        val s = desc.stream
-                        resolvedUrl = s.baseUrl
-                        downloadHeaders = desc.headers
-                        expectedContentLength = s.segments
-                            .mapNotNull { it.range.substringAfterLast("-").toLongOrNull() }
-                            .maxOrNull()?.plus(1)
-                        useParallelDownload = true
-                        extension = "m4a"
-                        mimeType = "audio/mp4"
-                        formatBadge = segBridge.audioBadge(desc)
-                        isLossless = !s.codec.equals("opus", ignoreCase = true)
-                        durationMs = desc.durationSec * 1000L
-                        // Offline license in parallel with the bytes.
-                        moduleLicenseDeferred = applicationScope.async(Dispatchers.IO) {
-                            runCatching { offlineLicense.acquire(desc) }.getOrNull()
+                var isDashModuleDownload = false
+                var dashInitUrl: String? = null
+                var dashMediaTemplate: String? = null
+                var dashSegmentCount = 0
+                var bytesReadTotal = 0L
+                var totalBytesRecorded = -1L
+                var downloadSucceeded = false
+
+                if (!isYouTubeRequested) {
+                    try {
+                        val desc = runCatching {
+                            moduleResolver.resolve(title, artist, downloadQuality)
+                        }.getOrNull()
+                        if (desc != null && desc.stream.baseUrl.isNotBlank()) {
+                            val s = desc.stream
+                            val isAtmos = s.codec.equals("atmos", ignoreCase = true)
+                            if ((s.type == "progressive" || s.segments.isEmpty()) && !s.baseUrl.startsWith("data:application/dash+xml") && s.type != "dash_xml") {
+                                resolvedUrl = s.baseUrl
+                                downloadHeaders = desc.headers
+                                mimeType = s.mimeType.ifBlank { "audio/flac" }
+                                extension = if (s.codec.equals("mp3", ignoreCase = true)) "mp3" else "flac"
+                                isLossless = !s.codec.equals("opus", ignoreCase = true) && !s.codec.equals("mp3", ignoreCase = true)
+                                formatBadge = if (isLossless) {
+                                    if (s.bitDepth > 16 || s.sampleRate > 48000) "HI-RES FLAC" else "LOSSLESS FLAC"
+                                } else s.codec.uppercase()
+                                durationMs = desc.durationSec * 1000L
+                            } else if (s.type == "dash_xml" || s.baseUrl.startsWith("data:application/dash+xml")) {
+                                val parsedDash = parseTidalDashManifest(s.baseUrl)
+                                if (parsedDash != null) {
+                                    isDashModuleDownload = true
+                                    dashInitUrl = parsedDash.initUrl
+                                    dashMediaTemplate = parsedDash.mediaTemplate
+                                    dashSegmentCount = parsedDash.segmentCount
+                                    resolvedUrl = parsedDash.initUrl
+                                    downloadHeaders = desc.headers
+                                    extension = "m4a"
+                                    mimeType = "audio/mp4"
+                                    formatBadge = if (isAtmos) "DOLBY ATMOS" else if (s.bitDepth > 16 || s.sampleRate > 48000) "24-BIT FLAC" else "CD LOSSLESS"
+                                    isLossless = true
+                                    durationMs = desc.durationSec * 1000L
+                                }
+                            } else if (desc.drm != null && s.segments.isNotEmpty()) {
+                                moduleDescriptor = desc
+                                resolvedUrl = s.baseUrl
+                                downloadHeaders = desc.headers
+                                expectedContentLength = s.segments
+                                    .mapNotNull { it.range.substringAfterLast("-").toLongOrNull() }
+                                    .maxOrNull()?.plus(1)
+                                useParallelDownload = true
+                                extension = "m4a"
+                                mimeType = "audio/mp4"
+                                formatBadge = segBridge.audioBadge(desc)
+                                isLossless = !s.codec.equals("opus", ignoreCase = true)
+                                durationMs = desc.durationSec * 1000L
+                                // Offline license in parallel with the bytes.
+                                moduleLicenseDeferred = applicationScope.async(Dispatchers.IO) {
+                                    runCatching { offlineLicense.acquire(desc) }.getOrNull()
+                                }
+                            }
+
+                            if (resolvedUrl != null) {
+                                val rawFile = File.createTempFile("dl_raw_", ".$extension", context.cacheDir)
+                                tempDownloadFile = rawFile
+
+                                if (isDashModuleDownload && dashInitUrl != null && dashMediaTemplate != null && dashSegmentCount > 0) {
+                                    bytesReadTotal = downloadDashSegmentsToTempFile(
+                                        downloadKey = key,
+                                        notificationId = notifId,
+                                        title = title,
+                                        artist = artist,
+                                        formatBadge = formatBadge,
+                                        initUrl = dashInitUrl!!,
+                                        mediaTemplate = dashMediaTemplate!!,
+                                        segmentCount = dashSegmentCount,
+                                        headers = downloadHeaders,
+                                        target = rawFile,
+                                    )
+                                    totalBytesRecorded = bytesReadTotal
+                                } else {
+                                    var lastProgress = 0
+                                    var lastNotifTime = 0L
+                                    var lastUnknownProgressBytes = 0L
+                                    val progressLock = Any()
+                                    val transfer = downloadToTempFile(
+                                        downloadKey = key,
+                                        url = checkNotNull(resolvedUrl),
+                                        target = rawFile,
+                                        requestHeaders = downloadHeaders,
+                                        expectedContentLength = expectedContentLength,
+                                        useParallelRanges = useParallelDownload,
+                                        onConnectionStateChanged = { isWaiting ->
+                                            _downloads.value[key]?.let { current ->
+                                                val updated = current.copy(isWaitingForConnection = isWaiting)
+                                                updateProgress(updated)
+                                                runCatching {
+                                                    showDownloadNotification(
+                                                        notificationId = notifId,
+                                                        downloadKey = key,
+                                                        title = title,
+                                                        artist = artist,
+                                                        progress = updated.progressPercent,
+                                                        isIndeterminate = updated.totalBytes <= 0L,
+                                                        badgeText = updated.formatBadge,
+                                                        isWaitingForConnection = isWaiting,
+                                                    )
+                                                }
+                                            }
+                                        },
+                                    ) { downloadedBytes, totalBytes ->
+                                        synchronized(progressLock) {
+                                            val now = android.os.SystemClock.uptimeMillis()
+                                            if (totalBytes > 0) {
+                                                val progress = ((downloadedBytes * 100) / totalBytes).toInt().coerceIn(0, 100)
+                                                if (progress > lastProgress) {
+                                                    lastProgress = progress
+                                                    updateProgress(
+                                                        DownloadProgress(
+                                                            key = key, title = title, artist = artist,
+                                                            progressPercent = progress,
+                                                            bytesDownloaded = downloadedBytes,
+                                                            totalBytes = totalBytes,
+                                                            formatBadge = formatBadge,
+                                                        ),
+                                                    )
+                                                    if (progress == 100 || now - lastNotifTime >= 250L) {
+                                                        lastNotifTime = now
+                                                        runCatching {
+                                                            showDownloadNotification(notifId, key, title, artist, progress, false, formatBadge)
+                                                        }
+                                                    }
+                                                }
+                                            } else if (downloadedBytes - lastUnknownProgressBytes >= 1024 * 1024) {
+                                                lastUnknownProgressBytes = downloadedBytes
+                                                val mbDown = String.format("%.1f MB", downloadedBytes / (1024.0 * 1024.0))
+                                                updateProgress(
+                                                    DownloadProgress(
+                                                        key = key, title = title, artist = artist,
+                                                        progressPercent = 0,
+                                                        bytesDownloaded = downloadedBytes,
+                                                        totalBytes = -1L,
+                                                        formatBadge = "$formatBadge • $mbDown",
+                                                    ),
+                                                )
+                                                if (now - lastNotifTime >= 500L) {
+                                                    lastNotifTime = now
+                                                    runCatching {
+                                                        showDownloadNotification(notifId, key, title, artist, 0, true, formatBadge)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    val contentType = transfer.contentType.lowercase()
+                                    if (contentType.contains("webm")) {
+                                        extension = "webm"
+                                        mimeType = "audio/webm"
+                                        formatBadge = "WEBM OPUS"
+                                    } else if (contentType.contains("ogg") || contentType.contains("opus")) {
+                                        extension = "opus"
+                                        mimeType = "audio/ogg"
+                                        formatBadge = "OPUS"
+                                    } else if (contentType.contains("mpeg") || contentType.contains("mp3")) {
+                                        extension = "mp3"
+                                        mimeType = "audio/mpeg"
+                                        formatBadge = "MP3"
+                                    } else if (contentType.contains("mp4") || contentType.contains("m4a") || contentType.contains("aac")) {
+                                        extension = "m4a"
+                                        mimeType = "audio/mp4"
+                                        formatBadge = "M4A AAC"
+                                    }
+                                    bytesReadTotal = transfer.bytesDownloaded
+                                    totalBytesRecorded = transfer.totalBytes
+                                }
+
+                                if (!isDashModuleDownload && useParallelDownload && !hasExpectedContainer(rawFile, extension)) {
+                                    throw IOException("Downloaded payload is not a valid ${extension.uppercase()} audio file")
+                                }
+                                downloadSucceeded = true
+                            }
                         }
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (moduleError: Throwable) {
+                        android.util.Log.w("TrackDownloadManager", "Module download failed for $title by $artist; falling back to YouTube Music", moduleError)
+                        moduleLicenseDeferred?.cancel()
+                        moduleLicenseDeferred = null
+                        moduleDescriptor = null
+                        isDashModuleDownload = false
+                        resolvedUrl = null
+                        tempDownloadFile?.let { runCatching { if (it.exists()) it.delete() } }
+                        tempDownloadFile = null
+                        downloadSucceeded = false
                     }
                 }
 
-                if (resolvedUrl == null) {
-                    // Fallback to YouTube Music (prefer M4A/AAC for universal media player compatibility)
-                    val bestMatch = preloadedBestMatch
-                        ?: innerTube.findBestMatch(title, artist, prefetchStreams = false)
-                    val videoId = bestMatch.videoId ?: error("No audio source found for $title")
-                    if (resolvedArtworkUrl == null) {
-                        resolvedArtworkUrl = bestMatch.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
+                // 2. Fallback to YouTube Music if module was not requested or module download failed
+                if (!downloadSucceeded) {
+                    try {
+                        updateProgress(
+                            DownloadProgress(
+                                key = key,
+                                title = title,
+                                artist = artist,
+                                progressPercent = 0,
+                                formatBadge = "YOUTUBE",
+                            )
+                        )
+                        val bestMatch = preloadedBestMatch
+                            ?: innerTube.findBestMatch(title, artist, prefetchStreams = false)
+                        val videoId = bestMatch.videoId ?: throw IOException("No audio source found for $title")
+                        if (resolvedArtworkUrl == null) {
+                            resolvedArtworkUrl = bestMatch.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
+                        }
+                        if (resolvedAlbum == null) resolvedAlbum = bestMatch.album
+                        val ytStream = innerTube.resolveDownloadStream(videoId)
+                        resolvedUrl = ytStream.url
+                        downloadHeaders = ytStream.requestHeaders
+                        expectedContentLength = ytStream.contentLength
+                            ?: runCatching { Uri.parse(ytStream.url).getQueryParameter("clen")?.toLongOrNull() }.getOrNull()
+                        useParallelDownload = true
+                        val rawMime = ytStream.mimeType.orEmpty().lowercase()
+                        if (rawMime.contains("mp4") || rawMime.contains("m4a") || rawMime.contains("aac")) {
+                            extension = "m4a"
+                            mimeType = "audio/mp4"
+                            formatBadge = "M4A AAC"
+                        } else if (rawMime.contains("webm")) {
+                            extension = "webm"
+                            mimeType = "audio/webm"
+                            formatBadge = "WEBM OPUS"
+                        } else if (rawMime.contains("ogg") || rawMime.contains("opus")) {
+                            extension = "opus"
+                            mimeType = "audio/ogg"
+                            formatBadge = "OPUS"
+                        } else if (rawMime.contains("mpeg") || rawMime.contains("mp3")) {
+                            extension = "mp3"
+                            mimeType = "audio/mpeg"
+                            formatBadge = "MP3"
+                        } else {
+                            extension = "m4a"
+                            mimeType = "audio/mp4"
+                            formatBadge = "AUDIO"
+                        }
+                        isLossless = false
+
+                        val rawFile = File.createTempFile("dl_raw_", ".$extension", context.cacheDir)
+                        tempDownloadFile = rawFile
+
+                        var lastProgress = 0
+                        var lastNotifTime = 0L
+                        var lastUnknownProgressBytes = 0L
+                        val progressLock = Any()
+                        val transfer = downloadToTempFile(
+                            downloadKey = key,
+                            url = checkNotNull(resolvedUrl),
+                            target = rawFile,
+                            requestHeaders = downloadHeaders,
+                            expectedContentLength = expectedContentLength,
+                            useParallelRanges = useParallelDownload,
+                            onConnectionStateChanged = { isWaiting ->
+                                _downloads.value[key]?.let { current ->
+                                    val updated = current.copy(isWaitingForConnection = isWaiting)
+                                    updateProgress(updated)
+                                    runCatching {
+                                        showDownloadNotification(
+                                            notificationId = notifId,
+                                            downloadKey = key,
+                                            title = title,
+                                            artist = artist,
+                                            progress = updated.progressPercent,
+                                            isIndeterminate = updated.totalBytes <= 0L,
+                                            badgeText = updated.formatBadge,
+                                            isWaitingForConnection = isWaiting,
+                                        )
+                                    }
+                                }
+                            },
+                        ) { downloadedBytes, totalBytes ->
+                            synchronized(progressLock) {
+                                val now = android.os.SystemClock.uptimeMillis()
+                                if (totalBytes > 0) {
+                                    val progress = ((downloadedBytes * 100) / totalBytes).toInt().coerceIn(0, 100)
+                                    if (progress > lastProgress) {
+                                        lastProgress = progress
+                                        updateProgress(
+                                            DownloadProgress(
+                                                key = key, title = title, artist = artist,
+                                                progressPercent = progress,
+                                                bytesDownloaded = downloadedBytes,
+                                                totalBytes = totalBytes,
+                                                formatBadge = formatBadge,
+                                            ),
+                                        )
+                                        if (progress == 100 || now - lastNotifTime >= 250L) {
+                                            lastNotifTime = now
+                                            runCatching {
+                                                showDownloadNotification(notifId, key, title, artist, progress, false, formatBadge)
+                                            }
+                                        }
+                                    }
+                                } else if (downloadedBytes - lastUnknownProgressBytes >= 1024 * 1024) {
+                                    lastUnknownProgressBytes = downloadedBytes
+                                    val mbDown = String.format("%.1f MB", downloadedBytes / (1024.0 * 1024.0))
+                                    updateProgress(
+                                        DownloadProgress(
+                                            key = key, title = title, artist = artist,
+                                            progressPercent = 0,
+                                            bytesDownloaded = downloadedBytes,
+                                            totalBytes = -1L,
+                                            formatBadge = "$formatBadge • $mbDown",
+                                        ),
+                                    )
+                                    if (now - lastNotifTime >= 500L) {
+                                        lastNotifTime = now
+                                        runCatching {
+                                            showDownloadNotification(notifId, key, title, artist, 0, true, formatBadge)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        val contentType = transfer.contentType.lowercase()
+                        if (contentType.contains("webm")) {
+                            extension = "webm"
+                            mimeType = "audio/webm"
+                            formatBadge = "WEBM OPUS"
+                        } else if (contentType.contains("ogg") || contentType.contains("opus")) {
+                            extension = "opus"
+                            mimeType = "audio/ogg"
+                            formatBadge = "OPUS"
+                        } else if (contentType.contains("mpeg") || contentType.contains("mp3")) {
+                            extension = "mp3"
+                            mimeType = "audio/mpeg"
+                            formatBadge = "MP3"
+                        } else if (contentType.contains("mp4") || contentType.contains("m4a") || contentType.contains("aac")) {
+                            extension = "m4a"
+                            mimeType = "audio/mp4"
+                            formatBadge = "M4A AAC"
+                        }
+                        bytesReadTotal = transfer.bytesDownloaded
+                        totalBytesRecorded = transfer.totalBytes
+
+                        if (useParallelDownload && !hasExpectedContainer(rawFile, extension)) {
+                            throw IOException("Downloaded payload is not a valid ${extension.uppercase()} audio file")
+                        }
+                        downloadSucceeded = true
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (ytError: Throwable) {
+                        // When last YouTube download failed, skip it cleanly and move to next song
+                        android.util.Log.w("TrackDownloadManager", "YouTube download failed for $title by $artist; skipping song", ytError)
+                        tempDownloadFile?.let { runCatching { if (it.exists()) it.delete() } }
+                        tempDownloadFile = null
+                        updateProgress(
+                            DownloadProgress(
+                                key = key,
+                                title = title,
+                                artist = artist,
+                                progressPercent = 0,
+                                error = "Skipped: ${ytError.localizedMessage ?: "Stream unavailable"}",
+                            ),
+                        )
+                        runCatching {
+                            showErrorNotification(notifId, key, title, artist, "Skipped: stream unavailable")
+                        }
+                        return@launch
                     }
-                    if (resolvedAlbum == null) resolvedAlbum = bestMatch.album
-                    val ytStream = innerTube.resolveDownloadStream(videoId)
-                    resolvedUrl = ytStream.url
-                    downloadHeaders = ytStream.requestHeaders
-                    expectedContentLength = ytStream.contentLength
-                        ?: runCatching { Uri.parse(ytStream.url).getQueryParameter("clen")?.toLongOrNull() }.getOrNull()
-                    useParallelDownload = true
-                    val rawMime = ytStream.mimeType.orEmpty().lowercase()
-                    if (rawMime.contains("mp4") || rawMime.contains("m4a") || rawMime.contains("aac")) {
-                        extension = "m4a"
-                        mimeType = "audio/mp4"
-                        formatBadge = "M4A AAC"
-                    } else if (rawMime.contains("webm")) {
-                        extension = "webm"
-                        mimeType = "audio/webm"
-                        formatBadge = "WEBM OPUS"
-                    } else if (rawMime.contains("ogg") || rawMime.contains("opus")) {
-                        extension = "opus"
-                        mimeType = "audio/ogg"
-                        formatBadge = "OPUS"
-                    } else if (rawMime.contains("mpeg") || rawMime.contains("mp3")) {
-                        extension = "mp3"
-                        mimeType = "audio/mpeg"
-                        formatBadge = "MP3"
-                    } else {
-                        extension = "m4a"
-                        mimeType = "audio/mp4"
-                        formatBadge = "AUDIO"
-                    }
-                    isLossless = false
                 }
 
-                // 2. Proactively start lyrics lookup concurrently with the download
+                // 3. Proactively start lyrics lookup concurrently with the download
                 val shouldDownloadLyrics = runCatching {
                     settingsPreferences.settings.first().downloadLyrics
                 }.getOrDefault(true)
@@ -634,112 +924,15 @@ class TrackDownloadManager @Inject constructor(
                     null
                 }
 
-                // 3. Download raw stream to local temp cache file
-                val rawFile = File.createTempFile("dl_raw_", ".$extension", context.cacheDir)
-                tempDownloadFile = rawFile
-
-                    var lastProgress = 0
-                    var lastNotifTime = 0L
-                    var lastUnknownProgressBytes = 0L
-                    val progressLock = Any()
-                    val transfer = downloadToTempFile(
-                        downloadKey = key,
-                        url = checkNotNull(resolvedUrl),
-                        target = rawFile,
-                        requestHeaders = downloadHeaders,
-                        expectedContentLength = expectedContentLength,
-                        useParallelRanges = useParallelDownload,
-                        onConnectionStateChanged = { isWaiting ->
-                            _downloads.value[key]?.let { current ->
-                                val updated = current.copy(isWaitingForConnection = isWaiting)
-                                updateProgress(updated)
-                                runCatching {
-                                    showDownloadNotification(
-                                        notificationId = notifId,
-                                        downloadKey = key,
-                                        title = title,
-                                        artist = artist,
-                                        progress = updated.progressPercent,
-                                        isIndeterminate = updated.totalBytes <= 0L,
-                                        badgeText = updated.formatBadge,
-                                        isWaitingForConnection = isWaiting,
-                                    )
-                                }
-                            }
-                        },
-                    ) { downloadedBytes, totalBytes ->
-                        synchronized(progressLock) {
-                            val now = android.os.SystemClock.uptimeMillis()
-                            if (totalBytes > 0) {
-                                val progress = ((downloadedBytes * 100) / totalBytes).toInt().coerceIn(0, 100)
-                                if (progress > lastProgress) {
-                                    lastProgress = progress
-                                    updateProgress(
-                                        DownloadProgress(
-                                            key = key, title = title, artist = artist,
-                                            progressPercent = progress,
-                                            bytesDownloaded = downloadedBytes,
-                                            totalBytes = totalBytes,
-                                            formatBadge = formatBadge,
-                                        ),
-                                    )
-                                    // Throttle notification IPC to avoid Binder lock contention during rapid downloading
-                                    if (progress == 100 || now - lastNotifTime >= 250L) {
-                                        lastNotifTime = now
-                                        runCatching {
-                                            showDownloadNotification(notifId, key, title, artist, progress, false, formatBadge)
-                                        }
-                                    }
-                                }
-                            } else if (downloadedBytes - lastUnknownProgressBytes >= 1024 * 1024) {
-                                lastUnknownProgressBytes = downloadedBytes
-                                val mbDown = String.format("%.1f MB", downloadedBytes / (1024.0 * 1024.0))
-                                updateProgress(
-                                    DownloadProgress(
-                                        key = key, title = title, artist = artist,
-                                        progressPercent = 0,
-                                        bytesDownloaded = downloadedBytes,
-                                        totalBytes = -1L,
-                                        formatBadge = "$formatBadge • $mbDown",
-                                    ),
-                                )
-                                if (now - lastNotifTime >= 500L) {
-                                    lastNotifTime = now
-                                    runCatching {
-                                        showDownloadNotification(notifId, key, title, artist, 0, true, formatBadge)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    val bytesReadTotal = transfer.bytesDownloaded
-                    val contentType = transfer.contentType.lowercase()
-                    if (contentType.contains("webm")) {
-                        extension = "webm"
-                        mimeType = "audio/webm"
-                        formatBadge = "WEBM OPUS"
-                    } else if (contentType.contains("ogg") || contentType.contains("opus")) {
-                        extension = "opus"
-                        mimeType = "audio/ogg"
-                        formatBadge = "OPUS"
-                    } else if (contentType.contains("mpeg") || contentType.contains("mp3")) {
-                        extension = "mp3"
-                        mimeType = "audio/mpeg"
-                        formatBadge = "MP3"
-                    } else if (contentType.contains("mp4") || contentType.contains("m4a") || contentType.contains("aac")) {
-                        extension = "m4a"
-                        mimeType = "audio/mp4"
-                        formatBadge = "M4A AAC"
-                    }
-                    if (useParallelDownload && !hasExpectedContainer(rawFile, extension)) {
-                        throw IOException("Downloaded payload is not a valid ${extension.uppercase()} audio file")
-                    }
+                    val downloadedFile = tempDownloadFile ?: throw IOException("Downloaded file is missing")
+                    var currentAudioFile = downloadedFile
 
                     // Losslessly remux WebM Opus into standard Ogg Opus for universal player & tag compatibility
                     if (extension == "webm") {
                         val opusFile = File.createTempFile("dl_remux_", ".opus", context.cacheDir)
-                        if (WebmOpusRemuxer.remux(rawFile, opusFile)) {
-                            rawFile.delete()
+                        if (WebmOpusRemuxer.remux(currentAudioFile, opusFile)) {
+                            currentAudioFile.delete()
+                            currentAudioFile = opusFile
                             tempDownloadFile = opusFile
                             extension = "opus"
                             mimeType = "audio/ogg"
@@ -754,7 +947,7 @@ class TrackDownloadManager @Inject constructor(
                     // Skip transcode, license and sidecar entirely.
                     val moduleClear = moduleDescriptor?.takeIf { it.drm != null }?.let { desc ->
                         desc.stream.type != "progressive" &&
-                            !Mp4EncryptionScanner.isEncrypted(tempDownloadFile)
+                            !Mp4EncryptionScanner.isEncrypted(currentAudioFile)
                     } == true
 
                     // 3b. Module DRM: transcode decrypted PCM into true FLAC so the
@@ -774,7 +967,7 @@ class TrackDownloadManager @Inject constructor(
                     if (transcodeDesc != null) {
                         val transResult = try {
                             flacTranscoder.transcodeToFlac(
-                                sourceFile = tempDownloadFile,
+                                sourceFile = currentAudioFile,
                                 descriptor = transcodeDesc,
                                 title = title,
                                 artist = artist,
@@ -788,7 +981,8 @@ class TrackDownloadManager @Inject constructor(
                         }
                         transcodedFlac = transResult?.file
                         if (transcodedFlac != null) {
-                            runCatching { tempDownloadFile.delete() }
+                            runCatching { currentAudioFile.delete() }
+                            currentAudioFile = transcodedFlac
                             tempDownloadFile = transcodedFlac
                             moduleLicenseDeferred?.cancel()
                             extension = "flac"
@@ -809,7 +1003,7 @@ class TrackDownloadManager @Inject constructor(
                     // 4. Resolve exact audio duration from downloaded file
                     val durationRetriever = android.media.MediaMetadataRetriever()
                     try {
-                        durationRetriever.setDataSource(tempDownloadFile.absolutePath)
+                        durationRetriever.setDataSource(currentAudioFile.absolutePath)
                         val durStr = durationRetriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
                         durStr?.toLongOrNull()?.takeIf { it > 0 }?.let { durationMs = it }
                         if (resolvedAlbum.isNullOrBlank()) {
@@ -865,7 +1059,7 @@ class TrackDownloadManager @Inject constructor(
                     // PICTURE for FLAC/Opus, Matroska tags for WebM,
                     // iTunes atoms for M4A, ID3v2.3 otherwise).
                     val metadataEmbedded = audioTagWriter.embedMetadata(
-                        audioFile = tempDownloadFile,
+                        audioFile = currentAudioFile,
                         title = title,
                         artist = artist,
                         album = resolvedAlbum,
@@ -875,7 +1069,7 @@ class TrackDownloadManager @Inject constructor(
                         year = year,
                     )
                     if (!metadataEmbedded) {
-                        throw IOException("Could not safely embed audio metadata")
+                        android.util.Log.w("TrackDownloadManager", "Could not safely embed audio metadata; preserving audio file")
                     }
 
                     // 5. Transfer tagged file to public storage / MediaStore
@@ -905,8 +1099,8 @@ class TrackDownloadManager @Inject constructor(
                     if (uri != null) activeUris[key] = uri
                     if (file != null) activeFiles[key] = file
 
-                    val taggedFileLength = tempDownloadFile.length()
-                    val copiedBytes = tempDownloadFile.inputStream().use { input ->
+                    val taggedFileLength = currentAudioFile.length()
+                    val copiedBytes = currentAudioFile.inputStream().use { input ->
                         destStream.use { output ->
                             val copied = input.copyTo(output, DOWNLOAD_BUFFER_SIZE)
                             output.flush()
@@ -956,7 +1150,7 @@ class TrackDownloadManager @Inject constructor(
                     artworkUrl = resolvedArtworkUrl,
                     filePath = finalPath,
                     mediaStoreUri = uri?.toString(),
-                    fileSizeBytes = tempDownloadFile.length(),
+                    fileSizeBytes = currentAudioFile.length(),
                     formatBadge = formatBadge,
                     durationMs = durationMs,
                     isLossless = isLossless,
@@ -988,7 +1182,7 @@ class TrackDownloadManager @Inject constructor(
                             licenseExpiresAtMs = keys.licenseExpiresAtMs,
                             audioFilePath = finalPath,
                             mediaStoreUri = uri?.toString().orEmpty(),
-                            bytes = tempDownloadFile.length(),
+                            bytes = currentAudioFile.length(),
                             downloadedAtMs = System.currentTimeMillis(),
                         ),
                     )
@@ -1001,7 +1195,7 @@ class TrackDownloadManager @Inject constructor(
                         artist = artist,
                         progressPercent = 100,
                         bytesDownloaded = bytesReadTotal,
-                        totalBytes = transfer.totalBytes,
+                        totalBytes = if (totalBytesRecorded > 0) totalBytesRecorded else bytesReadTotal,
                         formatBadge = formatBadge,
                         isFinished = true,
                     ),
@@ -1358,6 +1552,137 @@ class TrackDownloadManager @Inject constructor(
                 }
             }
         })
+    }
+
+    private data class ParsedDashManifest(
+        val initUrl: String,
+        val mediaTemplate: String,
+        val segmentCount: Int,
+    )
+
+    private fun parseTidalDashManifest(baseUrl: String): ParsedDashManifest? = runCatching {
+        val xmlStr = if (baseUrl.startsWith("data:application/dash+xml;base64,")) {
+            val b64 = baseUrl.substringAfter("base64,")
+            String(android.util.Base64.decode(b64, android.util.Base64.DEFAULT), Charsets.UTF_8)
+        } else if (baseUrl.startsWith("<?xml")) {
+            baseUrl
+        } else {
+            return@runCatching null
+        }
+
+        val initMatch = Regex("""initialization="([^"]+)"""").find(xmlStr) ?: return@runCatching null
+        val initUrl = initMatch.groupValues[1].replace("&amp;", "&")
+
+        val mediaMatch = Regex("""media="([^"]+)"""").find(xmlStr) ?: return@runCatching null
+        val mediaTemplate = mediaMatch.groupValues[1].replace("&amp;", "&")
+
+        var count = 0
+        val sRegex = Regex("""<S\s+[^>]*>""")
+        for (match in sRegex.findAll(xmlStr)) {
+            val sTag = match.value
+            val rMatch = Regex("""r="(\d+)"""").find(sTag)
+            val r = rMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            count += 1 + r
+        }
+        if (count <= 0) count = 50
+
+        ParsedDashManifest(
+            initUrl = initUrl,
+            mediaTemplate = mediaTemplate,
+            segmentCount = count,
+        )
+    }.getOrNull()
+
+    private suspend fun downloadDashSegmentsToTempFile(
+        downloadKey: String,
+        notificationId: Int,
+        title: String,
+        artist: String,
+        formatBadge: String,
+        initUrl: String,
+        mediaTemplate: String,
+        segmentCount: Int,
+        headers: Map<String, String>,
+        target: File,
+    ): Long = withContext(Dispatchers.IO) {
+        val totalParts = segmentCount + 1
+        var completedParts = 0
+        var totalBytesWritten = 0L
+        val targetStream = FileOutputStream(target, false)
+
+        try {
+            // 1. Download initialization segment (0.mp4) containing ftyp and moov boxes
+            val initReq = Request.Builder()
+                .url(initUrl)
+                .apply {
+                    headers.forEach { (k, v) -> addHeader(k, v) }
+                    if (headers.keys.none { it.equals("User-Agent", ignoreCase = true) }) {
+                        addHeader("User-Agent", DOWNLOAD_USER_AGENT)
+                    }
+                }
+                .build()
+
+            downloadClient.newCall(initReq).execute().use { resp ->
+                if (!resp.isSuccessful) throw IOException("Failed to download DASH init chunk: HTTP ${resp.code}")
+                val body = resp.body ?: throw IOException("Empty DASH init body")
+                val copied = body.byteStream().copyTo(targetStream, DOWNLOAD_BUFFER_SIZE)
+                totalBytesWritten += copied
+            }
+            completedParts++
+            val initPercent = ((completedParts * 100) / totalParts).coerceIn(0, 100)
+            updateProgress(
+                DownloadProgress(
+                    key = downloadKey, title = title, artist = artist,
+                    progressPercent = initPercent,
+                    bytesDownloaded = totalBytesWritten,
+                    formatBadge = formatBadge,
+                )
+            )
+
+            // 2. Download media segments in order and append directly to the file
+            for (segIndex in 1..segmentCount) {
+                currentCoroutineContext().ensureActive()
+                val segUrl = mediaTemplate.replace("\$Number\$", segIndex.toString())
+                val segReq = Request.Builder()
+                    .url(segUrl)
+                    .apply {
+                        headers.forEach { (k, v) -> addHeader(k, v) }
+                        if (headers.keys.none { it.equals("User-Agent", ignoreCase = true) }) {
+                            addHeader("User-Agent", DOWNLOAD_USER_AGENT)
+                        }
+                    }
+                    .build()
+
+                downloadClient.newCall(segReq).execute().use { resp ->
+                    if (!resp.isSuccessful) throw IOException("Failed to download DASH segment $segIndex: HTTP ${resp.code}")
+                    val body = resp.body ?: throw IOException("Empty body for DASH segment $segIndex")
+                    val copied = body.byteStream().copyTo(targetStream, DOWNLOAD_BUFFER_SIZE)
+                    totalBytesWritten += copied
+                }
+
+                completedParts++
+                val percent = ((completedParts * 100) / totalParts).coerceIn(0, 100)
+                updateProgress(
+                    DownloadProgress(
+                        key = downloadKey, title = title, artist = artist,
+                        progressPercent = percent,
+                        bytesDownloaded = totalBytesWritten,
+                        totalBytes = -1L,
+                        formatBadge = formatBadge,
+                    )
+                )
+                if (percent % 10 == 0 || segIndex == segmentCount) {
+                    runCatching {
+                        showDownloadNotification(notificationId, downloadKey, title, artist, percent, false, formatBadge)
+                    }
+                }
+            }
+            targetStream.flush()
+            targetStream.fd.sync()
+            totalBytesWritten
+        } finally {
+            runCatching { targetStream.close() }
+        }
     }
 
     private suspend fun <T> retryInterruptedTransfer(

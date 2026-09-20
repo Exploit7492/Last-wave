@@ -91,6 +91,8 @@ data class MiscSettings(
     val losslessQuality: Int = 27,
     /** Preferred quality preset for downloads (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k, -1: YouTube Music). */
     val downloadQuality: Int = 27,
+    /** When true, queries both Tidal and Qobuz in parallel for Dolby Atmos / max resolution audio. */
+    val dolbyAtmosEnabled: Boolean = false,
     /** Optional studio-clarity curve. On by default; Bit-Perfect disables it. */
     val isStudioMasterClarityEnabled: Boolean = true,
     /** When true, completely bypasses DSP, EQ, tone effects, and software volume ducking for bit-exact audio. */
@@ -220,6 +222,7 @@ class SettingsPreferences @Inject constructor(
         val DOWNLOAD_FOLDER = stringPreferencesKey("lw_download_folder")
         val DOWNLOAD_TREE_URI = stringPreferencesKey("lw_download_tree_uri")
         val DOWNLOAD_STRUCTURE = stringPreferencesKey("lw_download_structure")
+        val DOLBY_ATMOS_ENABLED = booleanPreferencesKey("lw_dolby_atmos_enabled")
         val USE_ALBUM_ARTIST_FOLDERS = booleanPreferencesKey("lw_use_album_artist_folders")
         val PRIMARY_ARTIST_ONLY = booleanPreferencesKey("lw_primary_artist_only")
         val HIDDEN_HOME_SECTIONS = stringSetPreferencesKey("lw_hidden_home_sections")
@@ -236,6 +239,7 @@ class SettingsPreferences @Inject constructor(
                 preferProviderModules = p.readSafely(Keys.PREFER_PROVIDER_MODULES) ?: true,
                 losslessQuality = p.readSafely(Keys.LOSSLESS_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES } ?: 27,
                 downloadQuality = p.readSafely(Keys.DOWNLOAD_QUALITY)?.takeIf { it in DOWNLOAD_QUALITIES } ?: 27,
+                dolbyAtmosEnabled = p.readSafely(Keys.DOLBY_ATMOS_ENABLED) ?: false,
                 isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: true,
                 isBitPerfectEnabled = p.readSafely(Keys.BIT_PERFECT_ENABLED) ?: false,
                 lyricsUiVersion = LyricsUiVersion.fromId(p.readSafely(Keys.LYRICS_UI_VERSION)),
@@ -290,6 +294,10 @@ class SettingsPreferences @Inject constructor(
             val q = quality.takeIf { it in DOWNLOAD_QUALITIES } ?: 27
             it[Keys.DOWNLOAD_QUALITY] = q
         }
+    }
+
+    suspend fun setDolbyAtmosEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.DOLBY_ATMOS_ENABLED] = enabled }
     }
 
     suspend fun setStudioMasterClarity(enabled: Boolean) {
@@ -400,7 +408,7 @@ class SettingsPreferences @Inject constructor(
     }
 
     private companion object {
-        val LOSSLESS_QUALITIES = setOf(-1, 5, 6, 7, 27)
-        val DOWNLOAD_QUALITIES = setOf(-1, 5, 6, 7, 27)
+        val LOSSLESS_QUALITIES = setOf(-1, 4, 5, 6, 7, 27, 28)
+        val DOWNLOAD_QUALITIES = setOf(-1, 4, 5, 6, 7, 27, 28)
     }
 }
