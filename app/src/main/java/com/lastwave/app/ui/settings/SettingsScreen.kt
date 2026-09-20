@@ -76,6 +76,7 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material.icons.filled.SwitchAccount
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.QueueMusic
@@ -261,6 +262,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val session by viewModel.session.collectAsStateWithLifecycle()
+    val avatarUrl by viewModel.avatarUrl.collectAsStateWithLifecycle()
     val theme by viewModel.theme.collectAsStateWithLifecycle()
     val misc by viewModel.misc.collectAsStateWithLifecycle()
     val scrobbler by viewModel.scrobbler.collectAsStateWithLifecycle()
@@ -382,6 +384,7 @@ fun SettingsScreen(
                     LastFmIntegrationCard(
                         isConnected = isLastFmConnected,
                         username = session.username,
+                        avatarUrl = avatarUrl,
                         connecting = lastFmConnecting,
                         awaitingApproval = lastFmAuthUrl != null,
                         hasApiKey = hasApiKey,
