@@ -34,10 +34,6 @@ static const Fragment MODULE_FRAGMENTS[] = {};
 static constexpr int MODULE_FRAGMENT_COUNT = 0;
 #endif
 
-#ifndef MODULE_FRAGMENT_COUNT
-static constexpr int MODULE_FRAGMENT_COUNT = 0;
-#endif
-
 namespace {
 
 // Volatile sink to defeat DCE / constant folding on reconstruction loop.
@@ -68,7 +64,6 @@ static std::string reconstructKey() {
 
 static std::vector<uint8_t> reconstructModuleKey() {
     std::vector<uint8_t> out;
-#ifdef MODULE_FRAGMENTS
     if (MODULE_FRAGMENT_COUNT <= 0) return out;
     std::string s = reconstructFrom(MODULE_FRAGMENTS, MODULE_FRAGMENT_COUNT);
     if (s.size() != 32) {
@@ -83,7 +78,6 @@ static std::vector<uint8_t> reconstructModuleKey() {
     }
     out.assign(s.begin(), s.end());
     std::memset(&s[0], 0, s.size());
-#endif
     return out;
 }
 
