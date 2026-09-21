@@ -22,9 +22,11 @@ class NativeSecrets @Inject constructor(
     fun credentials(): BackendCredentials {
         val url = baseUrl()
         val key = apiKey()
+        android.util.Log.i("NativeSecrets", "nativeBaseUrl returned: length=${url.length}, blank=${url.isBlank()}; nativeApiKey returned: length=${key.length}, blank=${key.isBlank()}")
         return if (url.isNotBlank()) {
             BackendCredentials(baseUrl = url.trimEnd('/'), apiKey = key)
         } else {
+            android.util.Log.w("NativeSecrets", "Native secrets returned empty URL. Either GitHub CI secrets (URL, KEY) were not supplied during build or signature verification failed.")
             BackendCredentials()
         }
     }

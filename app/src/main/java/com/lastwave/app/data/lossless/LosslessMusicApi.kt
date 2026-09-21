@@ -217,7 +217,10 @@ class LosslessMusicApi @Inject constructor(
         val nativeCreds = runCatching { nativeSecrets.credentials() }.getOrNull()
         if (nativeCreds != null && nativeCreds.baseUrl.isNotBlank() && nativeCreds.apiKey.isNotBlank()) {
             cachedCredentials = nativeCreds
+            Log.i(TAG, "Backend credentials loaded from native secrets: baseUrl=${nativeCreds.baseUrl}")
             return@withContext nativeCreds
+        } else {
+            Log.w(TAG, "Native credentials missing or incomplete (baseUrl='${nativeCreds?.baseUrl}', apiKey blank=${nativeCreds?.apiKey.isNullOrBlank()})")
         }
 
         // 2. Fallback: .lwp module config
@@ -231,11 +234,13 @@ class LosslessMusicApi @Inject constructor(
                     if (key.isNotBlank()) {
                         val creds = BackendCredentials(baseUrl = url.trimEnd('/'), apiKey = key)
                         cachedCredentials = creds
+                        Log.i(TAG, "Backend credentials loaded from .lwp module config: baseUrl=${creds.baseUrl}")
                         return@withContext creds
                     }
                 }
             }
         }
+        Log.w(TAG, "No backend credentials found in native secrets or .lwp module configs")
         null
     }
 
@@ -247,10 +252,17 @@ class LosslessMusicApi @Inject constructor(
         preferredQuality: Int = QUALITY_MAX_HI_RES,
         excludedUrls: Set<String> = emptySet(),
     ): LosslessAudioStream? = withContext(Dispatchers.IO) {
-        if (preferredQuality == QUALITY_YOUTUBE || title.isBlank() || artist.isBlank()) return@withContext null
+        if (preferredQuality == QUALITY_YOUTUBE || title.isBlank() || artist.isBlank()) {
+            Log.d(TAG, "resolveStream skipped: preferredQuality=$preferredQuality, title='$title', artist='$artist'")
+            return@withContext null
+        }
 
-        val creds = getCredentials() ?: return@withContext null
-        if (creds.baseUrl.isBlank() || creds.apiKey.isBlank()) return@withContext null
+        val creds = getCredentials()
+        if (creds == null || creds.baseUrl.isBlank() || creds.apiKey.isBlank()) {
+            Log.w(TAG, "resolveStream aborted for '$title': credentials are null or blank")
+            return@withContext null
+        }
+        Log.i(TAG, "resolveStream starting for '$title' by '$artist' (preferredQuality=$preferredQuality)")
 
         try {
             // 1. Search Tidal via backend
@@ -261,13 +273,19 @@ class LosslessMusicApi @Inject constructor(
                 expectedAlbum = expectedAlbum,
                 creds = creds,
                 preferredQuality = preferredQuality,
-            ) ?: return@withContext null
+            )
+            if (candidate == null) {
+                Log.w(TAG, "resolveStream: No matching Tidal candidate found for '$title' by '$artist'")
+                return@withContext null
+            }
+            Log.i(TAG, "resolveStream: Matched Tidal track id=${candidate.id}, title='${candidate.title}', performer='${candidate.performerName}', atmos=${candidate.isAtmos}")
 
             // 2. Fetch Tidal direct streaming manifest
             val directStream = fetchTrackStreamUrl(candidate, preferredQuality, creds = creds)
             if (directStream != null && directStream.url !in excludedUrls &&
                 (preferredQuality == QUALITY_DOLBY_ATMOS || !isAtmosStreamUrl(directStream.url))
             ) {
+                Log.i(TAG, "resolveStream: Acquired stream for track ${candidate.id}: formatId=${directStream.formatId}, bitDepth=${directStream.bitDepth}, sampleRate=${directStream.samplingRate}kHz, bitrate=${directStream.bitrateKbps}kbps")
                 consecutiveFailures = 0
                 failureCooldownUntilMs = 0L
                 return@withContext directStream
@@ -439,11 +457,22 @@ class LosslessMusicApi @Inject constructor(
         if (creds.apiKey.isNotBlank()) reqBuilder.addHeader("X-API-Key", creds.apiKey)
 
         return try {
-            val body = resolutionClient.newCall(reqBuilder.build()).awaitSuccessfulBodyOrNull() ?: return null
+            val body = resolutionClient.newCall(reqBuilder.build()).awaitSuccessfulBodyOrNull()
+            if (body == null) {
+                Log.w(TAG, "fetchTrackStreamUrl: HTTP response null or failed for track ${candidate.id} ($url)")
+                return null
+            }
             val json = JSONObject(body)
-            val data = json.optJSONObject("data") ?: return null
+            val data = json.optJSONObject("data")
+            if (data == null) {
+                Log.w(TAG, "fetchTrackStreamUrl: 'data' object missing in response: ${body.take(160)}")
+                return null
+            }
             val manifest = data.optString("manifest")
-            if (manifest.isBlank()) return null
+            if (manifest.isBlank()) {
+                Log.w(TAG, "fetchTrackStreamUrl: manifest field is blank in response for track ${candidate.id}")
+                return null
+            }
 
             val bitDepth = data.optInt("bitDepth", 16)
             val sampleRate = data.optDouble("sampleRate", 44100.0)

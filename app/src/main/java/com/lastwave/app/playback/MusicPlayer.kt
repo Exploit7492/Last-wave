@@ -473,6 +473,17 @@ class MusicPlayer @Inject constructor(
             // active player owns auto-advance. Outgoing ENDED is expected
             // after a handoff and is cleaned by cancelCrossfade().
             if (player !== this@MusicPlayer.player) return
+            val stateName = when (playbackState) {
+                Player.STATE_IDLE -> "IDLE"
+                Player.STATE_BUFFERING -> "BUFFERING"
+                Player.STATE_READY -> "READY"
+                Player.STATE_ENDED -> "ENDED"
+                else -> "UNKNOWN($playbackState)"
+            }
+            android.util.Log.i("MusicPlayer", "Playback state changed: $stateName, isPlaying=${player.isPlaying}, currentPos=${player.currentPosition}ms / ${player.duration}ms, bufferedPos=${player.bufferedPosition}ms, track='${_state.value.current?.title}'")
+            if (playbackState == Player.STATE_BUFFERING) {
+                android.util.Log.w("MusicPlayer", "Track BUFFERING / STALLED: '${_state.value.current?.title}' at ${player.currentPosition}ms (buffered=${player.bufferedPosition}ms)")
+            }
             // Natural-end safety net: ExoPlayer auto-advances while a next
             // window exists, but when the queue truly ends — or the next
             // placeholder failed to open and ExoPlayer gave up — playback
@@ -481,6 +492,7 @@ class MusicPlayer @Inject constructor(
             // lossless-first advance; the call is debounced and a no-op
             // when ExoPlayer already moved on.
             if (playbackState == Player.STATE_ENDED) {
+                android.util.Log.i("MusicPlayer", "Playback STATE_ENDED for '${_state.value.current?.title}' -> advancing to next")
                 onMain { handleNaturalTrackEnd() }
             }
             refresh(player)
@@ -578,6 +590,7 @@ class MusicPlayer @Inject constructor(
             resolutionRequests.clear()
             val currentTrack = _state.value.current
             val currentPos = player.currentPosition.coerceAtLeast(0)
+            android.util.Log.e("MusicPlayer", "Playback ERROR on track '${currentTrack?.title}': code=${error.errorCodeName} (${error.errorCode}), msg=${error.message}, pos=${currentPos}ms", error)
             // A track that demonstrably played must never be auto-skipped as
             // "unavailable": mid-stream failures (throttled/rotated URLs,
             // network blips) are transient, while genuinely dead tracks fail
@@ -905,6 +918,7 @@ class MusicPlayer @Inject constructor(
                                     bitrateKbps = updated.bitrateKbps ?: bitrate ?: if (detectedCodec == "OPUS") 160 else null,
                                 )
                             }
+                            android.util.Log.i("MusicPlayer", "AudioInputFormatChanged: mime=${format.sampleMimeType}, rate=${rateHz}Hz, bitrate=${format.bitrate}, detectedCodec=$detectedCodec -> qualityPill=[codec=${updated.audioCodec}, bitrate=${updated.bitrateKbps}kbps, rate=${updated.samplingRateKHz}kHz]")
                             updated
                         }
                     }
@@ -3715,6 +3729,11 @@ class MusicPlayer @Inject constructor(
                 (track.artist.isBlank() || track.artist.equals("Unknown artist", ignoreCase = true)))
         ) return resolveYoutubeTrackAudioStream(track, videoId)
 
+        android.util.Log.i(
+            "MusicPlayer",
+            "resolveRemoteTrack: '${track.title}' by '${track.artist}' (wantLossless=$wantLossless, allowLossless=$allowLossless, preferLossless=${misc.preferLosslessStreaming}, isCoolingDown=${losslessMusicApi.isCoolingDown})",
+        )
+
         // Resolve YouTube in background as ultimate fallback
         val youtubeDeferred = applicationScope.async(Dispatchers.IO) {
             runCatching { resolveYoutubeTrackAudioStream(track, videoId) }.getOrNull()
@@ -3735,6 +3754,14 @@ class MusicPlayer @Inject constructor(
             val losslessStream: ResolvedStream? = if (losslessAttempt) {
                 withTimeoutOrNull(losslessTimeoutMs) { losslessDeferred.await() }
             } else null
+
+            if (losslessAttempt) {
+                if (losslessStream != null) {
+                    android.util.Log.i("MusicPlayer", "Lossless SUCCESS for '${track.title}': codec=${losslessStream.audioCodec}, bitrate=${losslessStream.bitrateKbps}kbps, rate=${losslessStream.samplingRateKHz}kHz")
+                } else {
+                    android.util.Log.w("MusicPlayer", "Lossless TIMED OUT or RETURNED NULL (${losslessTimeoutMs}ms limit) for '${track.title}', taking YouTube fallback")
+                }
+            }
 
             losslessStream
                 ?: youtubeDeferred.await()
@@ -3904,6 +3931,10 @@ class MusicPlayer @Inject constructor(
     }
 
     private fun publishResolvedQuality(resolved: ResolvedStream) {
+        android.util.Log.i(
+            "MusicPlayer",
+            "Quality Pill: publishResolvedQuality(codec=${resolved.audioCodec}, depth=${resolved.bitDepth}, rate=${resolved.samplingRateKHz}kHz, kbps=${resolved.bitrateKbps}, isLossless=${resolved.isLossless})",
+        )
         val seedMs = resolved.durationMs ?: resolved.youtubeCandidate?.durationMs
         _state.update {
             // Never let a generic-unknown stream ("AUDIO"/"LOCAL AUDIO" with
