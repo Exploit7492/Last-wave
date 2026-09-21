@@ -131,6 +131,23 @@ jobs:
           fi
           ls -lh final_apk/
 
+      - name: Verify APK signatures + publish checksums
+        run: |
+          # Never publish a package the installer will reject as invalid.
+          SDKROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          APKSIGNER=$(find "$SDKROOT/build-tools" -maxdepth 2 -name apksigner 2>/dev/null | head -n1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "::warning::apksigner not found under $SDKROOT, skipping signature verification"
+          else
+            for apk in final_apk/*.apk; do
+              echo "Verifying $apk ..."
+              "$APKSIGNER" verify --print-certs "$apk" > /dev/null || { echo "::error::APK failed signature verification: $apk"; exit 1; }
+            done
+            echo "All APK signatures valid."
+          fi
+          (cd final_apk && sha256sum *.apk > SHA256SUMS.txt)
+          cat final_apk/SHA256SUMS.txt
+
       - name: Prepare Release Notes & Compatibility Notice
         env:
           TAG: ${{ inputs.tag_name }}
@@ -169,7 +186,9 @@ jobs:
           tag_name: ${{ inputs.tag_name }}
           name: ${{ inputs.release_name }}
           body_path: release_body.md
-          files: final_apk/*.apk
+          files: |
+            final_apk/*.apk
+            final_apk/SHA256SUMS.txt
           draft: false
           prerelease: false
         env:

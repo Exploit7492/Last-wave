@@ -60,8 +60,8 @@ android {
         applicationId = "com.lastwave.app"
         minSdk = (project.findProperty("minSdk") as? String)?.toIntOrNull() ?: 29
         targetSdk = 35
-        versionCode = 18
-        versionName = "4.1.1"
+        versionCode = 20
+        versionName = "4.2.0"
 
         // All backend secrets (URL, API key, module key) live strictly in native .so via
         // SecretsBridge_generated.h (tools/generate_native_secrets.py).

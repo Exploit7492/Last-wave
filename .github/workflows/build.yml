@@ -142,9 +142,30 @@ jobs:
           fi
           ls -lh final_apk/
 
+      - name: Verify APK signatures + publish checksums
+        run: |
+          # Never ship a package the installer will reject as invalid: every
+          # staged APK must carry a valid v1+v2 signature. Unsigned fallbacks
+          # fail here loudly instead of reaching users.
+          SDKROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          APKSIGNER=$(find "$SDKROOT/build-tools" -maxdepth 2 -name apksigner 2>/dev/null | head -n1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "::warning::apksigner not found under $SDKROOT, skipping signature verification"
+          else
+            for apk in final_apk/*.apk; do
+              echo "Verifying $apk ..."
+              "$APKSIGNER" verify --print-certs "$apk" > /dev/null || { echo "::error::APK failed signature verification: $apk"; exit 1; }
+            done
+            echo "All APK signatures valid."
+          fi
+          # Checksums so truncated downloads (the other classic cause of
+          # "package appears to be invalid") are detectable by users.
+          (cd final_apk && sha256sum *.apk > SHA256SUMS.txt)
+          cat final_apk/SHA256SUMS.txt
+
       - name: Upload Release APKs
         uses: actions/upload-artifact@v4
         with:
           name: LastWave-v${{ steps.prep_apk.outputs.version }}-APKs
-          path: final_apk/*.apk
+          path: final_apk/*
           if-no-files-found: error
