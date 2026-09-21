@@ -290,12 +290,32 @@ class LosslessMusicApi @Inject constructor(
             throw e
         } catch (e: Exception) {
             Log.d(TAG, "Lossless Tidal resolution failed: ${e.message}")
-            consecutiveFailures++
-            if (consecutiveFailures >= 2) {
-                failureCooldownUntilMs = System.currentTimeMillis() + 60_000L
+            // Network blips/timeouts must not trigger the 60s backend
+            // cooldown: the backend is healthy, the radio isn't. Only real
+            // backend failures back off; transient IO just returns null and
+            // the next track tries again immediately.
+            if (!isNetworkException(e)) {
+                consecutiveFailures++
+                if (consecutiveFailures >= 2) {
+                    failureCooldownUntilMs = System.currentTimeMillis() + 60_000L
+                }
             }
             null
         }
+    }
+
+    private fun isNetworkException(error: Throwable): Boolean {
+        var cause: Throwable? = error
+        while (cause != null) {
+            if (cause is java.net.UnknownHostException ||
+                cause is java.net.ConnectException ||
+                cause is java.net.SocketTimeoutException ||
+                cause is java.net.NoRouteToHostException ||
+                (cause is java.io.IOException && cause.message?.contains("Unable to resolve host", ignoreCase = true) == true)
+            ) return true
+            cause = cause.cause
+        }
+        return false
     }
 
     private suspend fun findBestVerifiedMatch(
@@ -346,6 +366,10 @@ class LosslessMusicApi @Inject constructor(
                 .firstOrNull()
                 ?.first
                 ?.let { return it }
+            // Backend answered but scoring vetoed every candidate — log it:
+            // silent misses here are the #1 reason lossless degrades to
+            // YouTube with a generic badge.
+            Log.d(TAG, "no verified match for '$title' / '$artist' among ${items.size} backend candidates")
         }
 
         return null
@@ -531,7 +555,12 @@ class LosslessMusicApi @Inject constructor(
 
         val targetVariants = identityVariants(title, matchArtist)
         val candidateVariants = identityVariants(item.title, matchArtist)
-        if (targetVariants != candidateVariants) return null
+        // Version mismatch (remaster/live/acoustic on one side only) must
+        // NOT veto: YouTube-sourced titles carry display noise the clean
+        // Tidal title lacks, so a veto silently kills lossless for exactly
+        // the tracks users actually play. De-preference instead — a
+        // same-version candidate still outranks this one when present.
+        val variantMismatch = targetVariants != candidateVariants
 
         if (!isVerifiedArtistMatch(matchArtist, item.performerName, item.albumArtistName, item.performers)) return null
 
@@ -542,6 +571,7 @@ class LosslessMusicApi @Inject constructor(
 
         var score = 1_000 - titleDistance * 50
         if (artistExact) score += 300
+        if (variantMismatch) score -= 400
         expectedAlbum?.takeIf(String::isNotBlank)?.let { album ->
             if (normalizeTitle(album, "") == normalizeTitle(item.albumTitle, "")) score += 120
         }
