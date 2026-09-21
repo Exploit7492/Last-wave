@@ -3596,8 +3596,7 @@ class MusicPlayer @Inject constructor(
     ): ResolvedStream {
         val wantLossless = allowLossless &&
             misc.preferLosslessStreaming &&
-            misc.losslessQuality != com.lastwave.app.data.lossless.LosslessMusicApi.QUALITY_YOUTUBE &&
-            losslessMusicApi.isConfigured // Desktop-style: skip lossless entirely when unconfigured/cooldown
+            misc.losslessQuality != com.lastwave.app.data.lossless.LosslessMusicApi.QUALITY_YOUTUBE
 
         if (!wantLossless || (!videoId.isNullOrBlank() &&
                 (track.artist.isBlank() || track.artist.equals("Unknown artist", ignoreCase = true)))
