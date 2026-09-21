@@ -111,27 +111,35 @@ fun ModernLyricsPanel(
     // Keyed on the whole track: videoId is null for local/search tracks,
     // and a null key would leak the previous song's smoothing state.
     var smoothedPositionMs by remember(track) { mutableLongStateOf(progress.positionMs) }
-    var basePositionMs by remember(track) { mutableLongStateOf(progress.positionMs) }
-    var lastSyncTime by remember(track) { mutableLongStateOf(SystemClock.elapsedRealtime()) }
 
     LaunchedEffect(progress.positionMs, state.isPlaying) {
         val drift = kotlin.math.abs(smoothedPositionMs - progress.positionMs)
-        // Only re-anchor on seek (>500ms drift) or play-state change;
-        // normal playback lets the monotonic clock run undisturbed.
-        if (drift > 500 || !state.isPlaying) {
-            basePositionMs = progress.positionMs
-            lastSyncTime = SystemClock.elapsedRealtime()
+        // Hard snap on seek (>250ms drift) or when stopped/paused
+        if (drift > 250 || !state.isPlaying) {
             smoothedPositionMs = progress.positionMs
         }
     }
 
     LaunchedEffect(state.isPlaying) {
         if (!state.isPlaying) return@LaunchedEffect
+        var lastFrameTime = SystemClock.elapsedRealtime()
         while (isActive) {
             withFrameMillis {
-                val elapsed = SystemClock.elapsedRealtime() - lastSyncTime
+                val now = SystemClock.elapsedRealtime()
+                val dt = (now - lastFrameTime).coerceIn(0L, 50L)
+                lastFrameTime = now
+
+                val target = progress.positionMs
                 val dur = progress.durationMs.takeIf { it > 0 } ?: state.durationMs.takeIf { it > 0 } ?: Long.MAX_VALUE
-                smoothedPositionMs = (basePositionMs + elapsed).coerceIn(0L, dur)
+
+                var nextPos = smoothedPositionMs + dt
+                val drift = target - nextPos
+                if (kotlin.math.abs(drift) > 250) {
+                    nextPos = target
+                } else {
+                    nextPos += (drift * 0.15f).toLong()
+                }
+                smoothedPositionMs = nextPos.coerceAtLeast(smoothedPositionMs).coerceIn(0L, dur)
             }
         }
     }
@@ -320,7 +328,7 @@ private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine 
     val lineStart = timeMs.toInt()
     val lineEnd = if (durationMs > 0) (timeMs + durationMs).toInt()
     else if (syllables.isNotEmpty()) (syllables.last().timeMs + syllables.last().durationMs).toInt()
-    else lineStart + 4000  // reasonable fallback; backfilled by toSyncedLyrics
+    else lineStart + 4500  // reasonable fallback; backfilled by toSyncedLyrics
 
     val isLineRtl = isRtl || (isOverallRtl && (text.isBlank() || text == "♪"))
 
@@ -332,7 +340,12 @@ private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine 
         fun List<LyricSyllable>.toKaraokeSyllables(): List<KaraokeSyllable> {
             return mapIndexed { index, syl ->
                 val sStart = syl.timeMs.toInt()
-                val sEnd = (syl.timeMs + syl.durationMs).toInt().coerceAtLeast(sStart)
+                val minDur = if (syl.durationMs > 0) syl.durationMs.toInt() else {
+                    val nextSyl = getOrNull(index + 1)
+                    if (nextSyl != null && nextSyl.timeMs > syl.timeMs) (nextSyl.timeMs - syl.timeMs).toInt()
+                    else 150
+                }
+                val sEnd = (sStart + minDur).coerceAtLeast(sStart + 50)
                 val next = getOrNull(index + 1)
                 val separator = if (needsSpacing &&
                     index < lastIndex &&
@@ -350,12 +363,16 @@ private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine 
         }
 
         val mainSyllables = leadSyllables.toKaraokeSyllables()
+        val effectiveStart = if (mainSyllables.isNotEmpty()) minOf(lineStart, mainSyllables.first().start) else lineStart
+        val effectiveEnd = if (mainSyllables.isNotEmpty()) maxOf(lineEnd, mainSyllables.last().end) else lineEnd
+
         val accompaniment = if (bgSyllables.isNotEmpty()) {
-            val bgStart = bgSyllables.first().timeMs.toInt()
-            val bgEnd = (bgSyllables.last().timeMs + bgSyllables.last().durationMs).toInt().coerceAtLeast(bgStart)
+            val bgKaraokeSyllables = bgSyllables.toKaraokeSyllables()
+            val bgStart = bgKaraokeSyllables.first().start
+            val bgEnd = bgKaraokeSyllables.last().end.coerceAtLeast(bgStart + 50)
             listOf(
                 KaraokeLine.AccompanimentKaraokeLine(
-                    syllables = bgSyllables.toKaraokeSyllables(),
+                    syllables = bgKaraokeSyllables,
                     translation = null,
                     alignment = if (isLineRtl) KaraokeAlignment.Start else KaraokeAlignment.End,
                     start = bgStart,
@@ -372,14 +389,14 @@ private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine 
             translation = null,
             phonetic = transliteration,
             alignment = if (isLineRtl) KaraokeAlignment.End else KaraokeAlignment.Start,
-            start = lineStart,
-            end = lineEnd.coerceAtLeast(lineStart),
+            start = effectiveStart,
+            end = effectiveEnd.coerceAtLeast(effectiveStart + 100),
             accompanimentLines = accompaniment,
         )
     } else {
         SyncedLine(
             start = lineStart,
-            end = lineEnd.coerceAtLeast(lineStart),
+            end = lineEnd.coerceAtLeast(lineStart + 100),
             content = text,
             translation = transliteration,
         )
@@ -393,8 +410,12 @@ private fun List<LyricLine>.toSyncedLyrics(title: String, artist: String, isOver
         if (line.durationMs <= 0 && line.syllables.isEmpty() && i < lastIndex) {
             val nextStart = this[i + 1].timeMs
             if (nextStart > line.timeMs) {
-                line.copy(durationMs = nextStart - line.timeMs)
+                val gap = nextStart - line.timeMs
+                val dur = if (gap <= 6000L) gap else 4500L
+                line.copy(durationMs = dur)
             } else line
+        } else if (line.durationMs <= 0 && line.syllables.isEmpty() && i == lastIndex) {
+            line.copy(durationMs = 4500L)
         } else line
     }
     return SyncedLyrics(
