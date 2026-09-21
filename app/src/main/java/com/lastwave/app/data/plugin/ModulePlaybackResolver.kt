@@ -1,36 +1,20 @@
 package com.lastwave.app.data.plugin
 
-import android.util.Log
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
  * Resolves a track through installed provider modules — one call per song.
  *
- * Order per module: valid cached source (zero calls) -> cheap refresh of an
- * expired source (manifest only) -> full resolvePlayback (match + manifest).
- * First success wins; null (never an exception) so the normal fallback chain
- * proceeds. Concurrent identical player resolves are already deduplicated
- * upstream by the player's resolution cache.
+ * JSON-only (LWP2) world: modules carry config (URL + secret) that the app
+ * consumes natively in LosslessMusicApi, so there is nothing module-side to
+ * execute. The legacy QuickJS script runtime has been removed entirely, so
+ * this resolver always falls through to the normal chain (direct backend,
+ * then YouTube) and only maps quality tiers for callers. Signatures are kept
+ * so existing call sites compile untouched; every method is non-throwing.
  */
 @Singleton
-class ModulePlaybackResolver @Inject constructor(
-    private val manager: ModuleManager,
-    private val runner: ModuleRunner,
-    private val sourceCache: PlaybackSourceCache,
-) {
-    companion object {
-        private const val TAG = "ModulePlaybackResolver"
-    }
-
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
-
+class ModulePlaybackResolver @Inject constructor() {
     /** Repo quality tier (28/27/7/6/5/4) mapped to the module quality id. */
     fun moduleQuality(repoQuality: Int): String = when (repoQuality) {
         28 -> "ATMOS"
@@ -42,138 +26,15 @@ class ModulePlaybackResolver @Inject constructor(
         else -> "UHD"
     }
 
+    /** Always null: JSON modules resolve natively, script modules unsupported. */
     suspend fun resolve(title: String, artist: String, repoQuality: Int): SegmentedStreamDescriptor? =
-        withContext(Dispatchers.IO) {
-            if (title.isBlank() || artist.isBlank()) return@withContext null
-            val quality = moduleQuality(repoQuality)
-            val handles = runCatching { manager.enabledHandles() }.getOrDefault(emptyList())
-            Log.d(TAG, "resolve: title='$title', artist='$artist', quality=$quality, handles=${handles.map { it.id }}")
-            for (handle in handles) {
-                try {
-                    val descriptor = resolveVia(handle, title, artist, quality)
-                    if (descriptor != null) {
-                        Log.d(TAG, "resolve: success via ${handle.id}, quality=${descriptor.stream.quality}, codec=${descriptor.stream.codec}")
-                        return@withContext descriptor
-                    }
-                } catch (e: Throwable) {
-                    Log.e(TAG, "resolve error via ${handle.id}: ${e.message}", e)
-                }
-            }
-            null
-        }
+        null
 
-    private suspend fun resolveVia(
-        handle: ProviderHandle,
-        title: String,
-        artist: String,
-        quality: String,
-    ): SegmentedStreamDescriptor? {
-        // JSON-only addons carry config (url+secret); logic lives in app
-        // (LosslessMusicApi). Skip QuickJS entirely -> native fallback handles.
-        if (handle.manifest.entryPoint == "config.json") return null
-        val key = sourceCache.keyFor(handle.id, title, artist, quality)
+    /** Quality badge from the app fallback labels; modules carry no JS policy. */
+    suspend fun badgeFor(descriptor: SegmentedStreamDescriptor, fallback: String): String =
+        fallback
 
-        // 1. Valid cached source -> reuse, zero provider calls.
-        sourceCache.get(key)?.let { cached ->
-            decode(cached)?.let { return it }
-            sourceCache.invalidate(key)
-        }
-
-        // 2. Expired source -> cheap refresh (manifest only, no search).
-        sourceCache.peekExpired(key)?.let { stale ->
-            decode(stale)?.let { prior ->
-                val refreshed = runCatching {
-                    runner.refreshPlayback(
-                        handle, prior.trackId, quality,
-                        prior.title, prior.artist, prior.album, prior.durationSec,
-                    )
-                }.getOrNull()?.let { decode(it) }
-                if (refreshed != null && accept(refreshed)) {
-                    sourceCache.put(key, encode(refreshed), effectiveExpiry(refreshed))
-                    return refreshed
-                }
-                sourceCache.invalidate(key)
-            }
-        }
-
-        // 3. Full single-op resolve (match + manifest).
-        val raw = runner.resolvePlayback(handle, title, artist, 0, quality)
-        if (raw.isBlank() || raw == "null") return null
-        val descriptor = decode(raw) ?: return null
-        if (!accept(descriptor)) return null
-        sourceCache.put(key, raw, effectiveExpiry(descriptor))
-        return descriptor
-    }
-
-    /** Quality badge from the extension's own labels; fallback when unreachable. */
-    suspend fun badgeFor(descriptor: SegmentedStreamDescriptor, fallback: String): String {
-        currentCoroutineContext().ensureActive()
-        // JSON-only: no JS policy; use app fallback labels.
-        runCatching { manager.findHandleById(descriptor.provider) }
-            .getOrNull()?.let { if (it.manifest.entryPoint == "config.json") return fallback }
-        val handle = try {
-            manager.findHandleById(descriptor.provider)
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (_: Exception) {
-            null
-        } ?: return fallback
-        val labels = try {
-            runner.modulePolicy(handle)?.labels
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (_: Exception) {
-            null
-        } ?: return fallback
-        return labels[descriptor.stream.quality.uppercase()]
-            ?: labels[descriptor.stream.quality]
-            ?: fallback
-    }
-
-    /** Whether the extension wants its downloads transcoded (default yes). */
-    suspend fun shouldTranscode(descriptor: SegmentedStreamDescriptor): Boolean {
-        currentCoroutineContext().ensureActive()
-        // JSON-only: app decides (never transcode lossless).
-        runCatching { manager.findHandleById(descriptor.provider) }
-            .getOrNull()?.let { if (it.manifest.entryPoint == "config.json") return false }
-        val handle = try {
-            manager.findHandleById(descriptor.provider)
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (_: Exception) {
-            null
-        } ?: return true
-        return try {
-            runner.modulePolicy(handle)?.transcode != "never"
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (_: Exception) {
-            true
-        }
-    }
-    private fun accept(descriptor: SegmentedStreamDescriptor): Boolean {
-        if (descriptor.stream.baseUrl.isBlank()) return false
-        // Progressive clear streams and raw DASH manifests carry no segments; custom segmented ones must.
-        if (descriptor.stream.type != "progressive" &&
-            descriptor.stream.type != "dash_xml" &&
-            !descriptor.stream.baseUrl.startsWith("data:application/dash+xml") &&
-            descriptor.stream.segments.isEmpty()
-        ) return false
-        if (descriptor.isExpired()) {
-            Log.d(TAG, "descriptor expired, dropping")
-            return false
-        }
-        return true
-    }
-
-    /** Direct URLs without server expiry are cached bounded (6h), not forever. */
-    private fun effectiveExpiry(descriptor: SegmentedStreamDescriptor): Long =
-        if (descriptor.expiresAt > 0) descriptor.expiresAt
-        else System.currentTimeMillis() + 6 * 3600 * 1000L
-
-    private fun decode(raw: String): SegmentedStreamDescriptor? =
-        runCatching { json.decodeFromString<SegmentedStreamDescriptor>(raw) }.getOrNull()
-
-    private fun encode(descriptor: SegmentedStreamDescriptor): String =
-        json.encodeToString(SegmentedStreamDescriptor.serializer(), descriptor)
+    /** Whether the extension wants its downloads transcoded (JSON: never lossless). */
+    suspend fun shouldTranscode(descriptor: SegmentedStreamDescriptor): Boolean =
+        false
 }

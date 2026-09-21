@@ -60,23 +60,17 @@
 -keep class io.ktor.client.HttpClientKt { *; }
 -keep class io.ktor.client.engine.cio.** { *; }
 
-# Liquid glass (Liquify + squircle shapes): AGSL shader strings, RuntimeShader
-# bridges and Modifier.Node elements are reached via Compose runtime, not
-# direct calls R8 can trace — stripping them breaks glass in release builds
-# (black panes) or crashes on first blur. The AAR ships its own consumer
-# rules; these explicit keeps make it airtight.
--keep class com.hakim.liquify.** { *; }
--keep class com.kyant.shapes.** { *; }
--dontwarn com.hakim.liquify.**
--dontwarn com.kyant.shapes.**
+# TrueGlass (standalone AGSL lens + RenderThread): RuntimeShader strings and
+# graphicsLayer RenderEffect bridges are reached via Compose runtime, not
+# direct calls R8 can trace — keep the engine airtight in release builds.
+-keep class com.lastwave.trueglass.** { *; }
 
 # Silence R8 missing-class warnings for Kotlin 2.x standard library and IO additions
-# referenced by InnerTubeX and QuickJS runtime jars.
+# referenced by the InnerTubeX runtime jar.
 -dontwarn kotlin.**
 -dontwarn kotlinx.io.**
 -dontwarn kotlinx.coroutines.**
 -dontwarn kotlinx.serialization.**
--dontwarn com.dokar.quickjs.**
 -dontwarn com.metrolist.innertubex.**
 -dontwarn io.ktor.**
 

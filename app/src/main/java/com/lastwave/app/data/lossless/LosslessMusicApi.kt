@@ -84,6 +84,16 @@ class LosslessMusicApi @Inject constructor(
             return false
         }
 
+    /**
+     * True only while a recent backend failure is backing off. Unlike
+     * [isConfigured] (false on cold start before JNI loads — gating on it
+     * killed lossless entirely, see d625587), this is safe to skip on:
+     * the backend just failed, so attempting would only burn the resolve
+     * timeout before falling back to YouTube anyway.
+     */
+    val isCoolingDown: Boolean
+        get() = System.currentTimeMillis() < failureCooldownUntilMs
+
     companion object {
         // Quality presets
         const val QUALITY_DOLBY_ATMOS = 28 // Dolby Atmos Spatial Audio

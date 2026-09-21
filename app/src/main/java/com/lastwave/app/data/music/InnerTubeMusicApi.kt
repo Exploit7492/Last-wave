@@ -1844,11 +1844,64 @@ class InnerTubeMusicApi @Inject constructor(
         }
     }
 
+    /**
+     * limusic-style direct-URL fast path. Tries no-cipher clients in order
+     * with a tight per-client bound; returns the first direct-URL audio
+     * stream, or null (never throws) so the full chain below still runs.
+     */
+    private suspend fun resolveDirectUrlFastPath(
+        videoId: String,
+        authScope: String,
+    ): YouTubeAudioStream? {
+        for (name in DIRECT_FAST_CLIENT_ORDER) {
+            val client = PLAYER_CLIENTS.firstOrNull { it.name == name } ?: continue
+            if (System.currentTimeMillis() < (failedClientsUntil[clientFailureKey(videoId, client.key, authScope)] ?: 0L)) {
+                continue
+            }
+            val stream = try {
+                kotlinx.coroutines.withTimeoutOrNull(DIRECT_FAST_CLIENT_TIMEOUT_MS) {
+                    resolveDirectClientStream(
+                        videoId = videoId,
+                        client = client,
+                        visitorData = null,
+                        signatureTimestamp = null,
+                        playerPoToken = null,
+                        gvsPoToken = null,
+                        authScope = authScope,
+                        probeCandidates = false,
+                        allowCipherFormats = false,
+                    )
+                }
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                null
+            }
+            if (stream != null) {
+                lastSuccessfulClientName = client.name
+                return stream
+            }
+        }
+        return null
+    }
+
     private suspend fun resolveAudioStreamInternal(
         videoId: String,
         authScope: String,
     ): YouTubeAudioStream = kotlinx.coroutines.coroutineScope {
         val now = System.currentTimeMillis()
+
+        // 0. Direct-URL fast path (limusic-style): VISIONOS → ANDROID_VR →
+        // TVHTML5, one player POST each, first direct-URL audio format wins.
+        // No webConfig fetch, no signatureTimestamp, no poToken, no Rhino
+        // decipher, no probe — these clients serve ready URLs. Typical
+        // 1-3s. Miss falls through to the full chain below.
+        resolveDirectUrlFastPath(videoId, authScope)?.let { fast ->
+            cacheResolvedStream(fast, now)
+            lastResolvedStreams[resolutionKey(videoId, authScope)] = fast
+            logStreamEvent("direct-fast-resolved", fast)
+            return@coroutineScope fast
+        }
 
         // 1. Primary: InnerTubeX (Desktop-style — built-in YouTubeCipherService
         //    handles n-param deobfuscation internally, no Rhino JS overhead)
@@ -2066,6 +2119,8 @@ class InnerTubeMusicApi @Inject constructor(
         playerPoToken: String?,
         gvsPoToken: String?,
         authScope: String,
+        probeCandidates: Boolean = true,
+        allowCipherFormats: Boolean = true,
     ): YouTubeAudioStream {
         val body = buildJsonObject {
             put("context", buildJsonObject {
@@ -2142,8 +2197,12 @@ class InnerTubeMusicApi @Inject constructor(
         val candidates = formats.mapNotNull { (element, isAdaptive) ->
                 val format = element as? JsonObject ?: return@mapNotNull null
                 val url = format.string("url")
-                    ?: (format.string("signatureCipher") ?: format.string("cipher"))
-                        ?.let { streamExtractor.decipherStreamUrl(videoId, it) }
+                    ?: if (allowCipherFormats) {
+                        (format.string("signatureCipher") ?: format.string("cipher"))
+                            ?.let { streamExtractor.decipherStreamUrl(videoId, it) }
+                    } else {
+                        null
+                    }
                     ?: return@mapNotNull null
                 val mime = format.string("mimeType")
                 if (mime?.startsWith("audio/") != true) return@mapNotNull null
@@ -2167,10 +2226,18 @@ class InnerTubeMusicApi @Inject constructor(
                 )
             }
             .filter(::isCompatibleAudioCandidate)
+            // IOS-app formats only serve bounded-Range requests and 403 the
+            // open-ended opens ExoPlayer (and plain probes) use — never play
+            // them, on any path.
+            .filter { !it.clientProfile.startsWith("IOS@") }
             .sortedWith(
                 compareBy<YouTubeAudioStream> { it.isAdaptive }
                     .thenByDescending { it.bitrate },
             )
+        if (!probeCandidates) {
+            return candidates.firstOrNull()
+                ?: throw IOException("${client.key} returned no usable audio URL")
+        }
         for (candidate in candidates.take(MAX_FORMAT_PROBES_PER_CLIENT)) {
             if (probeStream(candidate, "client-probe")) return candidate
         }
@@ -3119,6 +3186,10 @@ class InnerTubeMusicApi @Inject constructor(
         const val WRITE_ACTIONS_PER_REQUEST = 50
 
         const val HEDGED_CLIENT_STAGGER_DELAY_MS = 300L
+        /** Per-client bound for the direct-URL fast path (single POST, no extras). */
+        const val DIRECT_FAST_CLIENT_TIMEOUT_MS = 4_000L
+        /** No-cipher clients tried first, in order (mirrors limusic's fallback order). */
+        val DIRECT_FAST_CLIENT_ORDER = listOf("VISIONOS", "ANDROID_VR", "TVHTML5")
         const val MAX_FORMAT_PROBES_PER_CLIENT = 2
         const val MAX_PLAYER_REQUEST_ATTEMPTS = 2
         const val CONFIG_REQUEST_TIMEOUT_MS = 4_000L
@@ -3166,9 +3237,9 @@ class InnerTubeMusicApi @Inject constructor(
         val PLAYER_CLIENTS = listOf(
             PlayerClient(
                 name = "ANDROID_VR",
-                version = "1.37",
+                version = "1.65.10",
                 apiKey = "AIzaSyD-p045F_WzU-vA_YgX20SCx4KAo",
-                userAgent = "com.google.android.apps.youtube.vr.oculus/1.37 (Linux; U; Android 12; en_US; Quest 3; Build/SQ3A.220605.009.A1; Cronet/107.0.5284.2)",
+                userAgent = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
                 osName = "Android",
                 osVersion = "12",
                 deviceMake = "Oculus",

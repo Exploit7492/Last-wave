@@ -526,6 +526,13 @@ class MusicPlayer @Inject constructor(
                         queue = if (currentQueue.isNotEmpty()) currentQueue else it.queue,
                         isBuffering = true,
                         error = null,
+                        // New item owns its badge (same reason as the
+                        // resolveAndPlayQueueItem reset above).
+                        audioCodec = null,
+                        bitrateKbps = null,
+                        isLossless = false,
+                        bitDepth = null,
+                        samplingRateKHz = null,
                     )
                 }
                 mediaItem.localConfiguration
@@ -2200,6 +2207,12 @@ class MusicPlayer @Inject constructor(
         val mediaItem = player.getMediaItemAt(index)
         val prepared = mediaItem.localConfiguration?.customCacheKey?.let(preparedStreams::get)
         if (mediaItem.localConfiguration?.uri?.scheme != "lastwave" && prepared?.isExpired() != true) {
+            // Already resolved: publish quality synchronously so the badge is
+            // correct from the first frame (no transition may fire for a
+            // same-item play to republish it later).
+            mediaItem.localConfiguration?.customCacheKey
+                ?.let(preparedStreams::get)
+                ?.let(::publishResolvedQuality)
             player.seekToDefaultPosition(index)
             if (player.playbackState == Player.STATE_IDLE) player.prepare()
             player.play()
@@ -2228,6 +2241,15 @@ class MusicPlayer @Inject constructor(
                 isPlaying = true,
                 isBuffering = true,
                 error = null,
+                // New track owns its badge: clear quality so the pill never
+                // shows the previous song's format, and never lets a stale
+                // explicit badge shield a generic publish via the
+                // same-track guard in publishResolvedQuality.
+                audioCodec = null,
+                bitrateKbps = null,
+                isLossless = false,
+                bitDepth = null,
+                samplingRateKHz = null,
             )
         }
         playRequest = applicationScope.launch(Dispatchers.IO) {
@@ -3455,6 +3477,9 @@ class MusicPlayer @Inject constructor(
             isLossless = !s.codec.equals("opus", ignoreCase = true),
             bitDepth = s.bitDepth.takeIf { it > 0 },
             samplingRateKHz = s.sampleRate.takeIf { it > 0 }?.div(1000.0),
+            // Seed the slider denominator: the MPD timeline alone may take a
+            // while to parse, and without this the bar sat dead until then.
+            durationMs = descriptor.durationSec.takeIf { it > 0 }?.times(1_000L),
             segmentedDrm = descriptor,
         )
     }
@@ -3664,14 +3689,20 @@ class MusicPlayer @Inject constructor(
         val youtubeDeferred = applicationScope.async(Dispatchers.IO) {
             runCatching { resolveYoutubeTrackAudioStream(track, videoId) }.getOrNull()
         }
+        // Skip the lossless attempt only while the backend is actively
+        // cooling down from a recent failure (it would just burn the timeout
+        // and fall back anyway). Deliberately NOT gated on isConfigured:
+        // that is false on cold start before JNI loads and gating on it
+        // skipped lossless entirely (d625587).
+        val losslessAttempt = wantLossless && !losslessMusicApi.isCoolingDown
         // Direct backend resolution using APK embedded secrets / native secrets
         val losslessDeferred = applicationScope.async(Dispatchers.IO) {
-            if (!wantLossless) null
+            if (!losslessAttempt) null
             else runCatching { resolveLosslessTrackAudioStream(track, misc, excludedLosslessUrls) }.getOrNull()
         }
         return try {
             val losslessTimeoutMs = if (!videoId.isNullOrBlank()) 1_200L else 2_500L
-            val losslessStream: ResolvedStream? = if (wantLossless) {
+            val losslessStream: ResolvedStream? = if (losslessAttempt) {
                 withTimeoutOrNull(losslessTimeoutMs) { losslessDeferred.await() }
             } else null
 
@@ -3845,22 +3876,52 @@ class MusicPlayer @Inject constructor(
     private fun publishResolvedQuality(resolved: ResolvedStream) {
         val seedMs = resolved.durationMs ?: resolved.youtubeCandidate?.durationMs
         _state.update {
-            it.copy(
-                bitrateKbps = resolved.bitrateKbps,
-                audioCodec = resolved.audioCodec,
-                isLossless = resolved.isLossless,
-                bitDepth = resolved.bitDepth,
-                samplingRateKHz = resolved.samplingRateKHz,
-                // Seed the progress denominator the moment the stream
-                // resolves instead of waiting for ExoPlayer to parse the
-                // container (which can lag 30-40s on throttled URLs and left
-                // the bar frozen at 0:00 with seeking disabled). The ticker
-                // swaps in the exact player duration once known.
-                durationMs = if (it.durationMs <= 0L) seedMs?.takeIf { ms -> ms > 0 } ?: it.durationMs else it.durationMs,
+            // Never let a generic-unknown stream ("AUDIO"/"LOCAL AUDIO" with
+            // only a measured bitrate, no depth/rate) clobber an explicit
+            // quality the same track already published (lossless depth/rate
+            // or an explicit YouTube OPUS/AAC). Late duplicate publishes
+            // (retry, transition republish, local retriever fallback) used to
+            // flip "24-bit / 192 kHz" to "AUDIO 1343 kbps". Honest explicit
+            // downgrades (e.g. retry falling back to YouTube OPUS) still apply.
+            val incomingExplicit = isExplicitQuality(
+                resolved.audioCodec, resolved.bitDepth, resolved.samplingRateKHz,
             )
+            val currentExplicit = isExplicitQuality(
+                it.audioCodec, it.bitDepth, it.samplingRateKHz,
+            )
+            if (currentExplicit && !incomingExplicit) {
+                it.copy(
+                    durationMs = if (it.durationMs <= 0L) seedMs?.takeIf { ms -> ms > 0 } ?: it.durationMs else it.durationMs,
+                )
+            } else {
+                it.copy(
+                    bitrateKbps = resolved.bitrateKbps,
+                    audioCodec = resolved.audioCodec,
+                    isLossless = resolved.isLossless,
+                    bitDepth = resolved.bitDepth,
+                    samplingRateKHz = resolved.samplingRateKHz,
+                    // Seed the progress denominator the moment the stream
+                    // resolves instead of waiting for ExoPlayer to parse the
+                    // container (which can lag 30-40s on throttled URLs and left
+                    // the bar frozen at 0:00 with seeking disabled). The ticker
+                    // swaps in the exact player duration once known.
+                    durationMs = if (it.durationMs <= 0L) seedMs?.takeIf { ms -> ms > 0 } ?: it.durationMs else it.durationMs,
+                )
+            }
         }
         rememberKnownDuration(_state.value.current?.mediaIdKey(), seedMs)
         updateBitPerfectState()
+    }
+
+    /**
+     * Explicit (honest) quality: a named format, or depth + rate that render
+     * the resolution branch. Generic "AUDIO"/"LOCAL AUDIO"/blank with only a
+     * measured bitrate is not explicit.
+     */
+    private fun isExplicitQuality(codec: String?, bitDepth: Int?, samplingRateKHz: Double?): Boolean {
+        if (bitDepth != null && samplingRateKHz != null) return true
+        val label = codec?.uppercase().orEmpty()
+        return label.isNotBlank() && label != "AUDIO" && label != "LOCAL AUDIO"
     }
 
     private suspend fun resolveTrackAudioStreamWithRetry(

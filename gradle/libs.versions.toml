@@ -26,8 +26,6 @@ newPipeExtractor = "v0.26.5"
 innerTubeX = "0.4.1"
 lyricsUi = "1.0.19"
 lyricsCore = "0.4.5"
-liquify = "1.1.0"
-kyantShapes = "1.2.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -40,8 +38,6 @@ androidx-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
 androidx-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
-liquify = { group = "io.github.3bdul7akim", name = "liquify", version.ref = "liquify" }
-kyant-shapes = { group = "io.github.kyant0", name = "shapes", version.ref = "kyantShapes" }
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }

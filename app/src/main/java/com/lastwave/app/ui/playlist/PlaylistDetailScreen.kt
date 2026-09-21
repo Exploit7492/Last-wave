@@ -98,7 +98,7 @@ import com.lastwave.app.ui.theme.LiquidGlassSurface
 import com.lastwave.app.ui.theme.liquidGlassChrome
 import com.lastwave.app.ui.theme.liquidGlassContainerColor
 import com.lastwave.app.ui.theme.LiquidGlassPreset
-import com.hakim.liquify.backdrops.rememberLayerBackdrop
+import com.lastwave.app.ui.theme.rememberLayerBackdrop
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip

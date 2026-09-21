@@ -75,8 +75,8 @@ import com.lastwave.app.ui.playlist.PlaylistScreen
 import com.lastwave.app.ui.theme.LiquidGlassPreset
 import com.lastwave.app.ui.theme.LocalLiquidGlass
 import com.lastwave.app.ui.theme.LocalLiquidGlassOverlayBackdrop
-import com.hakim.liquify.backdrops.LayerBackdrop
-import com.hakim.liquify.backdrops.rememberLayerBackdrop
+import com.lastwave.app.ui.theme.LayerBackdrop
+import com.lastwave.app.ui.theme.rememberLayerBackdrop
 import com.lastwave.app.ui.theme.isLiquidGlassBackdropSupported
 import com.lastwave.app.ui.theme.liquidGlassChrome
 import com.lastwave.app.ui.theme.liquidGlassContainerColor

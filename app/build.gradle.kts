@@ -208,10 +208,9 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
-    // Apple-style liquid glass (AGSL refraction + merging). Replaces Kyant backdrop.
-    // Shapes is the lightweight squircle geometry Liquify refracts through (no RenderEffect).
-    implementation(libs.liquify)
-    implementation(libs.kyant.shapes)
+    // True liquid glass (AGSL refraction + RenderThread). Replaces Liquify/Kyant.
+    // No per-view EGL, no bitmap capture, no GLSurfaceView — system compositor only.
+    implementation(project(":trueglass"))
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
@@ -254,9 +253,6 @@ dependencies {
     // MediaBrowserServiceCompat/MediaSessionCompat bridge used by Android
     // Auto to browse the LastWave library and control the same player.
     implementation("androidx.media:media:1.7.0")
-
-    // Provider-module QuickJS runtime (pinned to the cached 1.0.12 line).
-    implementation("io.github.dokar3:quickjs-kt-android:1.0.12")
 
     // GPLv3 Media3-matched FFmpeg software decoder (distribution must comply).
     // The renderer factory prefers FFmpeg for every codec it supports so all
@@ -303,9 +299,6 @@ configurations.all {
     resolutionStrategy.eachDependency {
         if (requested.group == "org.jetbrains.kotlin") {
             useVersion(libs.versions.kotlin.get())
-        }
-        if (requested.group == "io.github.dokar3" && requested.name.startsWith("quickjs-kt")) {
-            useVersion("1.0.12")
         }
     }
 }

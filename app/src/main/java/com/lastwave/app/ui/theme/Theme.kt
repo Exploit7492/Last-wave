@@ -11,10 +11,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.lastwave.app.data.repository.ThemeUiState
-import com.hakim.liquify.ProvideBackdrop
-import com.hakim.liquify.backdrops.rememberCanvasBackdrop
-import com.hakim.liquify.material.GlassMaterial
-import com.hakim.liquify.material.ProvideGlassMaterial
+import com.lastwave.trueglass.compose.rememberTrueGlassBackdrop
+import com.lastwave.trueglass.compose.trueGlassSource
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -25,7 +23,9 @@ val LocalIsDarkTheme = staticCompositionLocalOf { true }
 
 /**
  * Wraps the whole app. Supports System Default, Light, and Dark modes.
- * Dynamically updates system bar icons, background surface, and Liquid Glass layers.
+ * TrueGlass backdrop is a single GPU RenderNode layer (never a Bitmap, never
+ * EGL) shared app-wide; screens add their own sibling sibling sources for
+ * local content (nav bar, player, headers).
  */
 @Composable
 fun LastWaveTheme(
@@ -49,14 +49,6 @@ fun LastWaveTheme(
                 window.navigationBarColor = android.graphics.Color.TRANSPARENT
                 WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !isDark
                 WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !isDark
-                // Setting navigationBarColor to TRANSPARENT above is not enough on
-                // its own: Android 10+ automatically draws its own translucent
-                // black scrim over a transparent nav bar ("contrast enforcement")
-                // to keep the gesture pill visible against arbitrary content —
-                // THAT scrim is the visible black strip. Disabling enforcement
-                // here is what actually removes it; without this line the app
-                // background never reaches the true bottom of the display no
-                // matter what padding or Surface backgrounds are added elsewhere.
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                     window.isStatusBarContrastEnforced = false
                     window.isNavigationBarContrastEnforced = false
@@ -78,23 +70,16 @@ fun LastWaveTheme(
                 LocalLiquidGlass provides themeState.liquidGlass,
                 LocalIsDarkTheme provides isDark,
             ) {
-                // App-wide Apple glass recipe: nav bars, icons, sheets all follow this.
-                // Individual surfaces can still override via liquidGlassChrome preset.
-                ProvideGlassMaterial(GlassMaterial.Regular) {
-                    if (isLiquidGlassBackdropSupported()) {
-                        val backgroundColor = MaterialTheme.colorScheme.background
-                        val backgroundBackdrop = rememberCanvasBackdrop { drawRect(backgroundColor) }
-                        CompositionLocalProvider(
-                            LocalLiquidGlassBackdrop provides backgroundBackdrop,
-                            LocalLiquidGlassOverlayBackdrop provides backgroundBackdrop,
-                        ) {
-                            ProvideBackdrop(backgroundBackdrop) {
-                                content()
-                            }
-                        }
-                    } else {
+                if (isLiquidGlassBackdropSupported()) {
+                    val backgroundBackdrop = rememberTrueGlassBackdrop()
+                    CompositionLocalProvider(
+                        LocalLiquidGlassBackdrop provides backgroundBackdrop,
+                        LocalLiquidGlassOverlayBackdrop provides backgroundBackdrop,
+                    ) {
                         content()
                     }
+                } else {
+                    content()
                 }
             }
         }

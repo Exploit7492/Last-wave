@@ -226,8 +226,8 @@ import com.lastwave.app.ui.theme.LocalLiquidGlassBackdrop
 import com.lastwave.app.ui.theme.LocalLiquidGlassOverlayBackdrop
 import com.lastwave.app.ui.theme.LiquidGlassPreset
 import com.lastwave.app.ui.theme.BackdropBlur
-import com.hakim.liquify.Backdrop
-import com.hakim.liquify.backdrops.rememberLayerBackdrop
+import com.lastwave.app.ui.theme.Backdrop
+import com.lastwave.app.ui.theme.rememberLayerBackdrop
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlin.math.abs

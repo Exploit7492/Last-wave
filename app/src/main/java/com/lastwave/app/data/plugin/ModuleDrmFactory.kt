@@ -1,6 +1,5 @@
 package com.lastwave.app.data.plugin
 
-import android.util.Base64
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
@@ -10,12 +9,10 @@ import androidx.media3.exoplayer.drm.DrmSessionManager
 import androidx.media3.exoplayer.drm.ExoMediaDrm
 import androidx.media3.exoplayer.drm.FrameworkMediaDrm
 import androidx.media3.exoplayer.drm.MediaDrmCallback
-import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -23,17 +20,18 @@ import javax.inject.Singleton
 /**
  * Builds the Widevine session manager for a module-resolved stream.
  *
- * Decryptor authority stays inside the module: when the descriptor declares
- * `envelope: "module"`, the CDM challenge/response envelope is built and
- * parsed by module ops — the host only POSTs bytes and hands results to the
- * CDM. Anything else (or a missing module) falls back to a raw POST.
+ * JSON-only (LWP2) world: the legacy QuickJS module-license envelope
+ * ("module" envelope ops executed in an embedded JS engine) has been
+ * removed with the script runtime. License exchange is always a raw POST
+ * of the CDM challenge to the descriptor's license URL with the
+ * descriptor headers; decryption itself stays inside the CDM and keys
+ * never leave it. Anything else (or a missing license URL) falls back to
+ * raw POST. Offline key-set renewal reuses the same path.
  */
 @OptIn(UnstableApi::class)
 @Singleton
 class ModuleDrmFactory @Inject constructor(
     private val okHttp: OkHttpClient,
-    private val manager: ModuleManager,
-    private val runner: ModuleRunner,
 ) {
     fun sessionManagerFor(descriptor: SegmentedStreamDescriptor): DrmSessionManager {
         val drm = descriptor.drm ?: return DrmSessionManager.DRM_UNSUPPORTED
@@ -42,10 +40,7 @@ class ModuleDrmFactory @Inject constructor(
 
     /** Concrete manager (also used for offline license acquisition). */
     fun managerFor(descriptor: SegmentedStreamDescriptor): DefaultDrmSessionManager {
-        val handle = runCatching {
-            runBlocking { manager.findHandleById(descriptor.provider) }
-        }.getOrNull()
-        val callback = ModuleEnvelopeCallback(okHttp, runner, descriptor, handle)
+        val callback = ModuleEnvelopeCallback(okHttp, descriptor)
         return DefaultDrmSessionManager.Builder()
             .setUuidAndExoMediaDrmProvider(C.WIDEVINE_UUID, FrameworkMediaDrm.DEFAULT_PROVIDER)
             .build(callback)
@@ -54,9 +49,7 @@ class ModuleDrmFactory @Inject constructor(
     @UnstableApi
     private class ModuleEnvelopeCallback(
         private val okHttp: OkHttpClient,
-        private val runner: ModuleRunner,
         private val descriptor: SegmentedStreamDescriptor,
-        private val handle: ProviderHandle?,
     ) : MediaDrmCallback {
 
         override fun executeProvisionRequest(
@@ -72,28 +65,7 @@ class ModuleDrmFactory @Inject constructor(
             val drm = descriptor.drm ?: error("No DRM descriptor")
             val url = request.licenseServerUrl?.takeIf { it.isNotBlank() } ?: drm.licenseUrl
             require(url.isNotBlank()) { "DRM licenseUrl missing" }
-            val h = handle
-            // JSON-only addons have no JS license ops; raw POST only.
-            val jsonOnly = h?.manifest?.entryPoint == "config.json"
-            return if (h != null && !jsonOnly && drm.envelope == "module") {
-                // Module authority: build envelope -> POST -> parse (blocking
-                // CDM thread; engine lock lives on IO threads, no deadlock).
-                val challengeB64 = Base64.encodeToString(request.data, Base64.NO_WRAP)
-                val built = JSONObject(runBlocking {
-                    runner.buildLicenseRequest(h, challengeB64, url, descriptor.headers)
-                })
-                val respBytes = postBytes(
-                    url = built.optString("url", url).ifBlank { url },
-                    headers = jsonToMap(built.optJSONObject("headers")) + descriptor.headers,
-                    body = Base64.decode(built.getString("bodyB64"), Base64.DEFAULT),
-                )
-                val parsed = JSONObject(runBlocking {
-                    runner.parseLicenseResponse(h, Base64.encodeToString(respBytes, Base64.NO_WRAP))
-                })
-                Base64.decode(parsed.getString("licenseB64"), Base64.DEFAULT)
-            } else {
-                postBytes(url, descriptor.headers, request.data)
-            }
+            return postBytes(url, descriptor.headers, request.data)
         }
 
         private fun postBytes(url: String, headers: Map<String, String>, body: ByteArray): ByteArray {
@@ -115,11 +87,6 @@ class ModuleDrmFactory @Inject constructor(
                 }
                 return res.body?.bytes() ?: ByteArray(0)
             }
-        }
-
-        private fun jsonToMap(o: JSONObject?): Map<String, String> {
-            if (o == null) return emptyMap()
-            return o.keys().asSequence().associateWith { o.optString(it) }
         }
     }
 }
