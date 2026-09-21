@@ -76,6 +76,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.isActive
 import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.flow.StateFlow
@@ -374,6 +375,15 @@ class MusicPlayer @Inject constructor(
     private val healthTracker = StreamHealthTracker()
     private var lastHealthTrackKey: String? = null
     private var lastSignalPathMs = 0L
+    /**
+     * Last explicit seek target + when it was issued. ExoPlayer applies seeks
+     * asynchronously: for a few hundred ms after seekTo() it still reports
+     * the pre-seek position, which the ticker would flash onto the slider
+     * (jump back, then jump forward). [settleSeekPosition] masks those stale
+     * reads with the target until the window expires or the track changes.
+     */
+    @Volatile private var lastSeekTargetMs = -1L
+    @Volatile private var lastSeekAtElapsedMs = 0L
     private val _signalPath = MutableStateFlow(SignalPathReport.initial())
     /** Verified signal-path report; BIT-PERFECT shows only when all checks pass. */
     val signalPath: StateFlow<SignalPathReport> = _signalPath.asStateFlow()
@@ -488,6 +498,9 @@ class MusicPlayer @Inject constructor(
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             if (isCasting) return
             recordLocalListenSignal(reason)
+            // New item owns the clock from here: drop any seek-settle mask
+            // from the previous track so it can't pin this one.
+            lastSeekTargetMs = -1L
             // Natural advances (track end, repeat-all wrap, crossfade
             // handoff) are the only transitions the explicit next()/queue-tap
             // paths don't record — manual seeks arrive as SEEK, not AUTO.
@@ -659,6 +672,8 @@ class MusicPlayer @Inject constructor(
                                 logStreamEvent("player-retry", stream, retry = retry)
                                 cacheCurrentTrackStream(stream)
                                 player.replaceMediaItem(failedIndex, updated.toMediaItem(stream))
+                                lastSeekTargetMs = currentPos
+                                lastSeekAtElapsedMs = SystemClock.elapsedRealtime()
                                 player.seekTo(failedIndex, currentPos)
                                 player.prepare()
                                 player.play()
@@ -955,8 +970,9 @@ class MusicPlayer @Inject constructor(
                             // Never pin the position to a stale/approximate
                             // duration: clamping here froze the bar at the old
                             // value while audio played on. Display layers
-                            // already coerce the fraction into [0, 1].
-                            val pos = player.currentPosition.coerceAtLeast(0)
+                            // already coerce the fraction into [0, 1]. Mask
+                            // pre-seek reads so the bar never flashes back.
+                            val pos = settleSeekPosition(player.currentPosition.coerceAtLeast(0))
                             val buf = player.bufferedPosition.coerceAtLeast(0)
                             val sleepRemaining = remaining?.coerceAtLeast(0)
 
@@ -1000,8 +1016,14 @@ class MusicPlayer @Inject constructor(
                     // still be in flight and must never be skipped for speed.
                     if (player.playbackState == Player.STATE_ENDED) {
                         handleNaturalTrackEnd()
-                    } else if (dur > 0L &&
-                        pos >= dur - END_OF_TRACK_STALL_THRESHOLD_MS &&
+                    } else if (player.duration > 0L &&
+                        // Pinned-tail advance only on the TRUE ExoPlayer
+                        // duration: a seeded/approximate denominator can sit
+                        // below the real end and would otherwise "advance"
+                        // mid-track on any transient pause (freeze, then jump
+                        // to the next song). Genuine ends still arrive via the
+                        // STATE_ENDED branch above.
+                        pos >= player.duration - END_OF_TRACK_STALL_THRESHOLD_MS &&
                         player.playWhenReady &&
                         !player.isPlaying &&
                         player.playbackState == Player.STATE_READY &&
@@ -1582,8 +1604,26 @@ class MusicPlayer @Inject constructor(
         }
         cancelCrossfade()
         val target = positionMs.coerceAtLeast(0)
+        lastSeekTargetMs = target
+        lastSeekAtElapsedMs = SystemClock.elapsedRealtime()
         player.seekTo(target)
         _state.update { it.copy(positionMs = target) }
+    }
+
+    /**
+     * Masks pre-seek position reads with the seek target while ExoPlayer
+     * lands the seek. Self-healing: the window expires on its own and any
+     * track change clears it, so a failed seek can only pin the display for
+     * [SEEK_SETTLE_WINDOW_MS], never wedge it.
+     */
+    private fun settleSeekPosition(rawPosMs: Long): Long {
+        val target = lastSeekTargetMs
+        if (target < 0L) return rawPosMs
+        if (SystemClock.elapsedRealtime() - lastSeekAtElapsedMs > SEEK_SETTLE_WINDOW_MS) {
+            lastSeekTargetMs = -1L
+            return rawPosMs
+        }
+        return target
     }
 
     @MainThread
@@ -1613,11 +1653,17 @@ class MusicPlayer @Inject constructor(
             }
             return false
         }
-        if (!player.isPlaying || durationMs <= 0L || player.repeatMode == Player.REPEAT_MODE_ONE) return false
+        if (!player.isPlaying || player.repeatMode == Player.REPEAT_MODE_ONE) return false
+        // Time the handoff off the TRUE container duration only. A seeded
+        // (approximate) duration can undershoot the real end and would fire
+        // the handoff early: the old track keeps playing while the new-track
+        // state sits frozen at 0:00, then jumps. Unknown duration means no
+        // crossfade; the natural advance still works via STATE_ENDED.
+        val trueDurationMs = player.duration.takeIf { it > 0L } ?: return false
         val nextIndex = player.nextMediaItemIndex
         if (nextIndex == C.INDEX_UNSET || nextIndex == player.currentMediaItemIndex) return false
-        val fadeMs = minOf((crossfadeDurationMs * player.playbackParameters.speed).toLong(), durationMs / 3)
-        val remainingMs = durationMs - positionMs
+        val fadeMs = minOf((crossfadeDurationMs * player.playbackParameters.speed).toLong(), trueDurationMs / 3)
+        val remainingMs = trueDurationMs - positionMs
         if (remainingMs <= 0L || remainingMs > fadeMs + 15_000L) return false
         val nextItem = player.getMediaItemAt(nextIndex)
         if (nextItem.localConfiguration?.uri?.scheme == "lastwave") return false
@@ -3045,13 +3091,18 @@ class MusicPlayer @Inject constructor(
         // ENDED, or READY+playWhenReady pinned at the duration tail with a
         // next window available (auto-advance failed to fire). While
         // BUFFERING we deliberately wait — the next lossless resolve may
-        // still be in flight and must not be skipped for speed.
-        val dur = effectiveDuration(player.duration, player, _state.value.durationMs)
+        // still be in flight and must not be skipped for speed. The pinned
+        // branch trusts only the TRUE container duration: a seeded estimate
+        // below the real end would skip mid-track on a transient pause.
+        // Learn the exact duration into the seed cache as a side effect; the
+        // stuck check below uses only the true container duration.
+        effectiveDuration(player.duration, player, _state.value.durationMs)
+        val trueDurMs = player.duration
         val pos = runCatching { player.currentPosition }.getOrDefault(0L)
         val stuckAtEnd = player.playbackState == Player.STATE_ENDED ||
             (
-                dur > 0L &&
-                    pos >= dur - END_OF_TRACK_STALL_THRESHOLD_MS &&
+                trueDurMs > 0L &&
+                    pos >= trueDurMs - END_OF_TRACK_STALL_THRESHOLD_MS &&
                     player.playWhenReady &&
                     !player.isPlaying &&
                     player.playbackState == Player.STATE_READY &&
@@ -3658,9 +3709,33 @@ class MusicPlayer @Inject constructor(
                 android.util.Base64.decode(stream.url.substringAfter("base64,"), android.util.Base64.DEFAULT),
                 Charsets.UTF_8,
             )
+            // Content-addressed manifest: a re-resolve (expiry refresh, error
+            // retry) must never overwrite the file a playing item is still
+            // opening/reading. A torn or swapped manifest corrupts the DASH
+            // timeline — frozen/creeping position that later jumps while audio
+            // plays from the wrong point. Same scheme as the segdrm bridge.
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest(xml.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+                .take(16)
             val dir = File(appContext.cacheDir, "tidal_mpd").apply { mkdirs() }
-            val file = File(dir, "tidal_${stream.trackId}_${stream.formatId}.mpd")
-            file.writeText(xml, Charsets.UTF_8)
+            val prefix = "tidal_${stream.trackId}_${stream.formatId}_"
+            val file = File(dir, "$prefix$digest.mpd")
+            if (!file.exists()) {
+                runCatching {
+                    val tmp = File(dir, "${file.name}.tmp")
+                    tmp.writeText(xml, Charsets.UTF_8)
+                    if (!tmp.renameTo(file)) file.writeText(xml, Charsets.UTF_8)
+                }.getOrElse {
+                    file.writeText(xml, Charsets.UTF_8)
+                }
+                // Best-effort: drop superseded manifests for the same track so
+                // rotated manifests can't accumulate without bound.
+                runCatching {
+                    dir.listFiles { f -> f.name.startsWith(prefix) && f.name != file.name }
+                        ?.forEach { runCatching { it.delete() } }
+                }
+            }
             playUrl = Uri.fromFile(file).toString()
             mimeType = MimeTypes.APPLICATION_MPD
         } else {
@@ -4200,8 +4275,9 @@ class MusicPlayer @Inject constructor(
         val dur = effectiveDuration(player.duration, player, previous.durationMs)
         // Never pin the position to a possibly stale/approximate duration:
         // clamping here froze the bar at the old value while audio played on.
-        // Display layers already coerce the fraction into [0, 1].
-        val pos = player.currentPosition.coerceAtLeast(0)
+        // Display layers already coerce the fraction into [0, 1]. Mask
+        // pre-seek reads so event-driven refreshes can't flash the bar back.
+        val pos = settleSeekPosition(player.currentPosition.coerceAtLeast(0))
         _state.value = MusicPlayerState(
             current = current,
             queue = queue,
@@ -4243,6 +4319,8 @@ class MusicPlayer @Inject constructor(
         const val KEY_VOLUME_SAVED = "bitperfect_volume_saved"
         /** Ticker-driven session persistence cadence (explicit state changes persist immediately). */
         const val TICKER_PERSIST_INTERVAL_MS = 2_000L
+        /** Masks pre-seek position reads with the seek target while ExoPlayer lands. */
+        const val SEEK_SETTLE_WINDOW_MS = 400L
         /** Signal-path report + stream-health sampling cadence while playing. */
         const val SIGNAL_PATH_TICK_MS = 1_000L
         const val MAX_PLAYBACK_RETRIES = 3

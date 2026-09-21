@@ -36,6 +36,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -2326,6 +2327,7 @@ internal fun PlayerProgressSlider(
     valueRange: ClosedFloatingPointRange<Float>,
     enabled: Boolean,
     modifier: Modifier = Modifier,
+    interactionSource: MutableInteractionSource,
 ) {
     val primary = MaterialTheme.colorScheme.primary
     val tertiary = MaterialTheme.colorScheme.tertiary
@@ -2343,6 +2345,7 @@ internal fun PlayerProgressSlider(
         onValueChangeFinished = onValueChangeFinished,
         valueRange = valueRange,
         enabled = enabled,
+        interactionSource = interactionSource,
         modifier = modifier.drawBehind {
             val inset = 10.dp.toPx()
             val startX = inset
@@ -2412,8 +2415,17 @@ private fun SeekBar(
         return
     }
 
-    var dragging by remember(trackKey) { mutableStateOf(false) }
-    var dragFraction by remember(trackKey) { mutableFloatStateOf(0f) }
+    // Current-gesture fraction only; null = finger off, show live position.
+    // Nullable (never a stale 0f) so a press without movement seeks nowhere
+    // and a gesture that ends without onValueChangeFinished can't pin the bar.
+    val seekInteraction = remember(trackKey) { MutableInteractionSource() }
+    val frameworkDragging by seekInteraction.collectIsDraggedAsState()
+    var dragFraction by remember(trackKey) { mutableStateOf<Float?>(null) }
+    // Heal a gesture that ended without the finished callback: drop the dead
+    // value, resume live position. Never seeks; commit is only below.
+    LaunchedEffect(frameworkDragging, trackKey) {
+        if (!frameworkDragging) dragFraction = null
+    }
 
     val boundedDurationMs = progress.durationMs.coerceAtLeast(0L)
     val currentFraction = if (boundedDurationMs > 0L) {
@@ -2421,12 +2433,10 @@ private fun SeekBar(
     } else {
         0f
     }
-    val fraction = if (dragging) dragFraction else currentFraction
-    val shownMs = if (dragging) {
-        (dragFraction * boundedDurationMs).toLong().coerceIn(0L, boundedDurationMs)
-    } else {
-        progress.positionMs.coerceIn(0L, boundedDurationMs)
-    }
+    val fraction = (dragFraction ?: currentFraction).coerceIn(0f, 1f)
+    val shownMs = dragFraction?.let {
+        (it * boundedDurationMs).toLong().coerceIn(0L, boundedDurationMs)
+    } ?: progress.positionMs.coerceIn(0L, boundedDurationMs)
 
     val primaryColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary
     val inactiveColor = if (isTranslucent) {
@@ -2508,18 +2518,20 @@ private fun SeekBar(
             // Invisible Material interaction layer: custom visuals, reliable seeking semantics.
             Slider(
                 value = fraction,
-                onValueChange = {
-                    dragging = true
-                    dragFraction = it
-                },
+                onValueChange = { dragFraction = it },
                 onValueChangeFinished = {
-                    if (boundedDurationMs > 0L) {
-                        onSeek((dragFraction * boundedDurationMs).toLong().coerceIn(0L, boundedDurationMs))
+                    // Commit only this gesture's value; no value = no seek.
+                    val target = dragFraction?.let {
+                        (it * boundedDurationMs).toLong().coerceIn(0L, boundedDurationMs)
                     }
-                    dragging = false
+                    dragFraction = null
+                    if (target != null && boundedDurationMs > 0L) {
+                        onSeek(target)
+                    }
                 },
                 valueRange = 0f..1f,
                 enabled = boundedDurationMs > 0L,
+                interactionSource = seekInteraction,
                 modifier = Modifier.fillMaxSize(),
                 colors = SliderDefaults.colors(
                     thumbColor = Color.Transparent,

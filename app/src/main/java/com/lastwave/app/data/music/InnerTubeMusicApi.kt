@@ -3123,6 +3123,8 @@ class InnerTubeMusicApi @Inject constructor(
         const val MAX_PLAYER_REQUEST_ATTEMPTS = 2
         const val CONFIG_REQUEST_TIMEOUT_MS = 4_000L
         const val RELATED_REQUEST_TIMEOUT_MS = 8_000L
+        /** Per-probe socket timeout for the 0-1 byte stream validity check. */
+        const val STREAM_PROBE_TIMEOUT_MS = 4_000L
         const val HISTORY_PING_TIMEOUT_MS = 15_000L
         const val URL_EXPIRY_MARGIN_MS = 2 * 60 * 1000L
         const val REQUEST_RETRY_BASE_DELAY_MS = 250L

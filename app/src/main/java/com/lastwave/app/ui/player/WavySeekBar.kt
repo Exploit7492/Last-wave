@@ -23,8 +23,9 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -85,8 +86,22 @@ fun WavySeekBar(
     showTimeLabels: Boolean = true,
 ) {
     val interactionSource = remember(trackKey) { MutableInteractionSource() }
-    val dragging by interactionSource.collectIsDraggedAsState()
-    var dragPositionMs by remember(trackKey) { mutableFloatStateOf(0f) }
+    val frameworkDragging by interactionSource.collectIsDraggedAsState()
+    // Current-gesture drag value only; null = finger off, show live position.
+    // Nullable (never a stale 0f) so a press that yields no onValueChange can
+    // never seek anywhere, and a gesture that ends without
+    // onValueChangeFinished can never pin the slider to a dead value.
+    var dragPositionMs by remember(trackKey) { mutableStateOf<Float?>(null) }
+    // Heal: framework reports finger lifted but the finished callback never
+    // ran (cancelled/disposed gesture) -> drop the dead value and resume live
+    // position. This never seeks; the commit happens only in
+    // onValueChangeFinished below (which runs before the framework's
+    // drag-end emission reaches this collector, so a legit seek can't be
+    // lost here — worst case a raced clear drops one seek, never invents one).
+    LaunchedEffect(frameworkDragging, trackKey) {
+        if (!frameworkDragging) dragPositionMs = null
+    }
+    val dragging = frameworkDragging || dragPositionMs != null
 
     val boundedDurationMs = durationMs.coerceAtLeast(0L)
     val boundedPositionMs = if (boundedDurationMs > 0L) {
@@ -94,11 +109,7 @@ fun WavySeekBar(
     } else {
         0L
     }
-    val shownMs = if (dragging) {
-        dragPositionMs.toLong().coerceIn(0L, boundedDurationMs)
-    } else {
-        boundedPositionMs
-    }
+    val shownMs = (dragPositionMs?.toLong() ?: boundedPositionMs).coerceIn(0L, boundedDurationMs)
     val shownFraction = if (boundedDurationMs > 0L) {
         (shownMs.toDouble() / boundedDurationMs.toDouble()).toFloat().coerceIn(0f, 1f)
     } else {
@@ -384,10 +395,14 @@ fun WavySeekBar(
             }
 
             Slider(
-                value = shownMs.toFloat(),
+                value = shownMs.toFloat().coerceIn(0f, boundedDurationMs.coerceAtLeast(1L).toFloat()),
                 onValueChange = { dragPositionMs = it },
                 onValueChangeFinished = {
-                    onSeek(dragPositionMs.toLong().coerceIn(0L, boundedDurationMs))
+                    // Commit only this gesture's value; a finished callback
+                    // with no value (press without movement) seeks nowhere.
+                    val target = dragPositionMs?.toLong()?.coerceIn(0L, boundedDurationMs)
+                    dragPositionMs = null
+                    if (target != null) onSeek(target)
                 },
                 valueRange = 0f..boundedDurationMs.coerceAtLeast(1L).toFloat(),
                 enabled = boundedDurationMs > 0L,

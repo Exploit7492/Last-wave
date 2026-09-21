@@ -10,6 +10,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,7 +49,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -586,10 +586,20 @@ private fun ModernLyricsControls(
 
         if (isFullscreen) return@Column
 
-        var dragging by remember { mutableStateOf(false) }
-        var dragValue by remember { mutableFloatStateOf(0f) }
+        // Current-gesture value only; null = finger off, show live position.
+        // Keyed by track so a previous song's drag can never leak into this
+        // one, and nullable so a press without movement seeks nowhere while a
+        // gesture that ends without onValueChangeFinished can't pin the bar.
+        val lyricsTrackKey = state.current?.let { it.videoId ?: "${it.artist}|${it.title}" }
+        val seekInteraction = remember(lyricsTrackKey) { MutableInteractionSource() }
+        val frameworkDragging by seekInteraction.collectIsDraggedAsState()
+        var dragValue by remember(lyricsTrackKey) { mutableStateOf<Float?>(null) }
+        LaunchedEffect(frameworkDragging, lyricsTrackKey) {
+            if (!frameworkDragging) dragValue = null
+        }
         val end = totalDurationMs.coerceAtLeast(1).toFloat()
-        val shown = if (dragging) dragValue else currentPositionMs.coerceIn(0, totalDurationMs.coerceAtLeast(0)).toFloat()
+        val shown = (dragValue ?: currentPositionMs.coerceIn(0, totalDurationMs.coerceAtLeast(0)).toFloat())
+            .coerceIn(0f, end)
 
         if (wavySeekbarEnabled) {
             WavySeekBar(
@@ -604,12 +614,18 @@ private fun ModernLyricsControls(
             )
         } else {
             PlayerProgressSlider(
-                value = shown.coerceIn(0f, end),
-                onValueChange = { dragging = true; dragValue = it },
-                onValueChangeFinished = { player.seekTo(dragValue.toLong()); dragging = false },
+                value = shown,
+                onValueChange = { dragValue = it },
+                onValueChangeFinished = {
+                    // Commit only this gesture's value; no value = no seek.
+                    val target = dragValue?.toLong()
+                    dragValue = null
+                    if (target != null) player.seekTo(target)
+                },
                 valueRange = 0f..end,
                 enabled = totalDurationMs > 0,
                 modifier = Modifier.fillMaxWidth(),
+                interactionSource = seekInteraction,
             )
         }
 

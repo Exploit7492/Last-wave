@@ -14,7 +14,9 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,6 +34,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -56,12 +59,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import com.lastwave.app.ui.theme.LiquidGlassSurface
 import com.lastwave.app.ui.theme.liquidGlassChrome
@@ -967,10 +970,20 @@ private fun LyricsPlaybackControls(
 
         if (isFullscreen) return@Column
 
-        var dragging by remember { mutableStateOf(false) }
-        var dragValue by remember { mutableFloatStateOf(0f) }
+        // Current-gesture value only; null = finger off, show live position.
+        // Keyed by track so a previous song's drag can never leak into this
+        // one, and nullable so a press without movement seeks nowhere while a
+        // gesture that ends without onValueChangeFinished can't pin the bar.
+        val lyricsTrackKey = state.current?.let { it.videoId ?: "${it.artist}|${it.title}" }
+        val seekInteraction = remember(lyricsTrackKey) { MutableInteractionSource() }
+        val frameworkDragging by seekInteraction.collectIsDraggedAsState()
+        var dragValue by remember(lyricsTrackKey) { mutableStateOf<Float?>(null) }
+        LaunchedEffect(frameworkDragging, lyricsTrackKey) {
+            if (!frameworkDragging) dragValue = null
+        }
         val end = totalDurationMs.coerceAtLeast(1).toFloat()
-        val shown = if (dragging) dragValue else currentPositionMs.coerceIn(0, totalDurationMs.coerceAtLeast(0)).toFloat()
+        val shown = (dragValue ?: currentPositionMs.coerceIn(0, totalDurationMs.coerceAtLeast(0)).toFloat())
+            .coerceIn(0f, end)
 
         if (wavySeekbarEnabled) {
             WavySeekBar(
@@ -985,12 +998,18 @@ private fun LyricsPlaybackControls(
             )
         } else {
             PlayerProgressSlider(
-                value = shown.coerceIn(0f, end),
-                onValueChange = { dragging = true; dragValue = it },
-                onValueChangeFinished = { player.seekTo(dragValue.toLong()); dragging = false },
+                value = shown,
+                onValueChange = { dragValue = it },
+                onValueChangeFinished = {
+                    // Commit only this gesture's value; no value = no seek.
+                    val target = dragValue?.toLong()
+                    dragValue = null
+                    if (target != null) player.seekTo(target)
+                },
                 valueRange = 0f..end,
                 enabled = totalDurationMs > 0,
                 modifier = Modifier.fillMaxWidth(),
+                interactionSource = seekInteraction,
             )
         }
 
@@ -1073,5 +1092,29 @@ private fun LyricsPlaybackControls(
                 color = Color.White.copy(alpha = 0.85f),
             )
         }
+    }
+}
+
+/**
+ * Animated pixel scroll for [LazyListState], which only ships instant
+ * [LazyListState.scrollBy] and indexed [LazyListState.animateScrollToItem].
+ * Ease-out-cubic frame loop so the active-line follow stays smooth instead
+ * of jumping. Callers already guard with runCatching.
+ */
+private suspend fun LazyListState.animateScrollBy(pixels: Float) {
+    if (pixels == 0f) return
+    var consumed = 0f
+    var startNanos = -1L
+    var done = false
+    while (!done) {
+        val target = withFrameNanos { now ->
+            if (startNanos < 0L) startNanos = now
+            val t = ((now - startNanos) / 350_000_000f).coerceIn(0f, 1f)
+            done = t >= 1f
+            val eased = 1f - (1f - t) * (1f - t) * (1f - t)
+            pixels * eased
+        }
+        val delta = target - consumed
+        consumed += delta - scrollBy(delta)
     }
 }
