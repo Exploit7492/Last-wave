@@ -1826,9 +1826,22 @@ class InnerTubeMusicApi @Inject constructor(
     ): YouTubeAudioStream = kotlinx.coroutines.coroutineScope {
         val now = System.currentTimeMillis()
 
-        // InnerTubeX owns the current player/cipher/client fallback strategy.
-        // Probe its result before handing it to Media3; the older direct and
-        // NewPipe paths below remain compatibility fallbacks.
+        // 1. Primary: NewPipe (battle-tested, unthrottled via Rhino JS n-param deobfuscation, 4.0.0 speed)
+        try {
+            val npStream = streamExtractor.resolveAudioStream(videoId)
+            if (probeStream(npStream, "newpipe-primary")) {
+                cacheResolvedStream(npStream, now)
+                lastResolvedStreams[resolutionKey(videoId, authScope)] = npStream
+                logStreamEvent("newpipe-resolved", npStream)
+                return@coroutineScope npStream
+            }
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+            throw cancellation
+        } catch (failure: Throwable) {
+            logClientFailure(videoId, "NEWPIPE-PRIMARY", failure)
+        }
+
+        // 2. Secondary fallback: InnerTubeX with throttling deobfuscation
         val innerTubeXCandidate = try {
             val visitorData = try {
                 getWebConfig().visitorData
@@ -1846,11 +1859,15 @@ class InnerTubeMusicApi @Inject constructor(
         }
         if (innerTubeXCandidate != null) {
             val compatible = innerTubeXCandidate.isAdaptive || isCompatibleAudioCandidate(innerTubeXCandidate)
-            if (compatible) {
-                cacheResolvedStream(innerTubeXCandidate, now)
-                lastResolvedStreams[resolutionKey(videoId, authScope)] = innerTubeXCandidate
-                logStreamEvent("innertubex-resolved", innerTubeXCandidate)
-                return@coroutineScope innerTubeXCandidate
+            val unthrottled = if (compatible && innerTubeXCandidate.url.isNotBlank()) {
+                val deobfuscated = streamExtractor.deobfuscateThrottlingParameter(videoId, innerTubeXCandidate.url)
+                innerTubeXCandidate.copy(url = deobfuscated)
+            } else innerTubeXCandidate
+            if (compatible && probeStream(unthrottled, "innertubex-probe")) {
+                cacheResolvedStream(unthrottled, now)
+                lastResolvedStreams[resolutionKey(videoId, authScope)] = unthrottled
+                logStreamEvent("innertubex-resolved", unthrottled)
+                return@coroutineScope unthrottled
             }
             logStreamEvent("innertubex-rejected", innerTubeXCandidate, detail = "compatible=$compatible")
             // A candidate that fails validation must not make the same
@@ -2171,11 +2188,12 @@ class InnerTubeMusicApi @Inject constructor(
             .url(stream.url)
             .header("Accept-Encoding", "identity")
             .apply {
-                if (!isHls && !stream.isAdaptive) header("Range", "bytes=0-1")
+                if (!isHls) header("Range", "bytes=0-1")
                 stream.requestHeaders.forEach { (name, value) -> header(name, value) }
             }
         val request = requestBuilder.build()
         val call = http.newCall(request)
+        call.timeout().timeout(STREAM_PROBE_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
         val cancellationHandle = currentCoroutineContext()[kotlinx.coroutines.Job]
             ?.invokeOnCompletion { cause ->
                 if (cause is kotlinx.coroutines.CancellationException) call.cancel()

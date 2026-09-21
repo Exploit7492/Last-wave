@@ -3580,8 +3580,9 @@ class MusicPlayer @Inject constructor(
             else runCatching { resolveLosslessTrackAudioStream(track, misc, excludedLosslessUrls) }.getOrNull()
         }
         return try {
+            val losslessTimeoutMs = if (!videoId.isNullOrBlank()) 1_200L else 2_500L
             val losslessStream: ResolvedStream? = if (wantLossless) {
-                withTimeoutOrNull(4_000L) { losslessDeferred.await() }
+                withTimeoutOrNull(losslessTimeoutMs) { losslessDeferred.await() }
             } else null
 
             losslessStream
@@ -3669,7 +3670,7 @@ class MusicPlayer @Inject constructor(
                         innerTube.findBestMatch(
                             title = track.title,
                             artist = searchArtist,
-                            prefetchStreams = true,
+                            prefetchStreams = false,
                             excludedVideoIds = rejectedVideoIds,
                         ).videoId
                     } else null

@@ -114,6 +114,13 @@ class YouTubeStreamExtractor @Inject constructor(
         }.getOrDefault(resolvedUrl)
     }
 
+    fun deobfuscateThrottlingParameter(videoId: String, url: String): String {
+        initialize()
+        return runCatching {
+            YoutubeJavaScriptPlayerManager.getUrlWithThrottlingParameterDeobfuscated(videoId, url)
+        }.getOrDefault(url)
+    }
+
     /** A rejected signed URL usually means NewPipe's cached player script is
      * stale. Clear that state locally so playback can recover without an app
      * force-stop. */
