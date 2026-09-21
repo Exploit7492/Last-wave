@@ -107,7 +107,7 @@ class SegmentedDashBridge @Inject constructor(
                 "UHD", "HI_RES_96" -> "UHD FLAC"
                 "HD" -> "HD FLAC"
                 "SD" -> if (codec.contains("mp3")) "320k MP3" else "AAC 320"
-                "LOW" -> "HE-AAC"
+                "LOW" -> if (codec.contains("opus")) "OPUS" else "HE-AAC"
                 else -> when {
                     codec.contains("flac") -> if ((descriptor.stream.bitDepth) > 16 || (descriptor.stream.sampleRate) > 48000) "UHD FLAC" else "HD FLAC"
                     codec.contains("mp3") -> "320k MP3"

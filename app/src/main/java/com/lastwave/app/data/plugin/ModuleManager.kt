@@ -135,9 +135,9 @@ class ModuleManager @Inject constructor(
                     return@withContext ModuleInstallResult.Rejected("Refused: config cannot be decrypted")
                 }
                 key.fill(0)
-            } catch (_: Throwable) {
+            } catch (error: Throwable) {
                 key.fill(0)
-                throw it
+                throw error
             }
             val dir = modulesDirFor(manifest.id).apply { mkdirs() }
             File(dir, "module.lwp").apply {

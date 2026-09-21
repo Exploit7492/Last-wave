@@ -3,7 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-sdk
-        tools:overrideLibrary="com.mocharealm.accompanist.lyrics.ui, com.mocharealm.accompanist.lyrics.core" />
+        tools:overrideLibrary="com.mocharealm.accompanist.lyrics.ui, com.mocharealm.accompanist.lyrics.core, com.decent.usbaudio, com.decent.usbaudio.media3" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
@@ -98,6 +98,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- USB DAC attach: claim the device before the kernel driver binds -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/usb_audio_device_filter" />
 
             <!-- Music app discovery and external playback requests -->
             <intent-filter>

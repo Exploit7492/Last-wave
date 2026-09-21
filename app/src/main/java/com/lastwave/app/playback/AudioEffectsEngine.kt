@@ -7,6 +7,7 @@ import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import com.lastwave.app.data.local.EQ_BAND_FREQS_HZ
 import com.lastwave.app.data.local.EQ_MAX_GAIN_DB
 import com.lastwave.app.data.local.EqualizerPreferences
@@ -30,12 +31,24 @@ import kotlinx.coroutines.sync.withLock
  * cannot run. It is mutually exclusive with [NativeProcessingAudioSink]: the
  * platform effects are released whenever native Float32 processing is active,
  * preventing doubled EQ, gain, or limiting.
+ *
+ * Loudness normalization (ReplayGain tags via [LoudnessNormalizer]) is applied
+ * here as a uniform tone-stage offset on top of the EQ curve. It stays OFF by
+ * default and is bypassed whenever bit-perfect or USB-exclusive output is
+ * active. Per-track feed contract for the player (read-only, no player
+ * restructuring required): on track change, call [setReplayGainFromFormat]
+ * with the new track's ExoPlayer [Format] (or [setReplayGainTags] with tags
+ * parsed from file metadata via [LoudnessNormalizer.parseFromMap]); when the
+ * direct USB path takes over, call [setUsbExclusiveActive].
  */
 @Singleton
 class AudioEffectsEngine @Inject constructor(
     equalizerPreferences: EqualizerPreferences,
     settingsPreferences: SettingsPreferences,
     applicationScope: CoroutineScope,
+    // Optional so manually constructed standby engines keep compiling without
+    // the prefs binding; null simply leaves loudness normalization OFF.
+    loudnessPrefs: LoudnessPrefs? = null,
 ) {
     private val effectMutex = Mutex()
     private val applyRequests = Channel<Unit>(Channel.CONFLATED)
@@ -45,6 +58,11 @@ class AudioEffectsEngine @Inject constructor(
     @Volatile private var equalizerSettings = EqualizerSettings()
     @Volatile private var studioClarityEnabled = false
     @Volatile private var bitPerfectActive = false
+    @Volatile private var usbExclusiveActive = false
+    @Volatile private var loudnessMode: LoudnessMode = LoudnessMode.OFF
+    @Volatile private var loudnessPreampDb = 0f
+    @Volatile private var replayGainTags: ReplayGainTags? = null
+    @Volatile private var loudnessGainDb = 0f
 
     private var attachedSessionId = C.AUDIO_SESSION_ID_UNSET
     private var toneEffect: ToneEffect? = null
@@ -64,6 +82,14 @@ class AudioEffectsEngine @Inject constructor(
         applicationScope.launch(Dispatchers.Default) {
             settingsPreferences.settings.collect { settings ->
                 studioClarityEnabled = settings.isStudioMasterClarityEnabled
+                requestApply()
+            }
+        }
+        applicationScope.launch(Dispatchers.Default) {
+            loudnessPrefs?.settings?.collect { settings ->
+                loudnessMode = settings.mode
+                loudnessPreampDb = settings.preampDb
+                refreshLoudnessGain()
                 requestApply()
             }
         }
@@ -90,6 +116,32 @@ class AudioEffectsEngine @Inject constructor(
         requestApply()
     }
 
+    /** Suppresses all processing (including loudness gain) while the direct USB path owns output. */
+    fun setUsbExclusiveActive(active: Boolean) {
+        if (usbExclusiveActive == active) return
+        usbExclusiveActive = active
+        requestApply()
+    }
+
+    /**
+     * Feeds the current track's ReplayGain tags. Intended to be called by the
+     * player on track change; passing null clears the correction.
+     */
+    fun setReplayGainTags(tags: ReplayGainTags?) {
+        replayGainTags = tags
+        refreshLoudnessGain()
+        requestApply()
+    }
+
+    /**
+     * Convenience feed that extracts ReplayGain tags from an ExoPlayer audio
+     * [Format]'s container metadata. Safe to call with null or with formats
+     * that expose no tags: the correction then falls back to 0 dB.
+     */
+    fun setReplayGainFromFormat(format: Format?) {
+        setReplayGainTags(LoudnessNormalizer.parseFromFormat(format))
+    }
+
     fun detach() {
         requestedSessionId = C.AUDIO_SESSION_ID_UNSET
         fallbackRequired = false
@@ -106,21 +158,33 @@ class AudioEffectsEngine @Inject constructor(
             releaseAllInternal()
             attachedSessionId = targetSessionId
         }
-        if (bitPerfectActive || !fallbackRequired || attachedSessionId == C.AUDIO_SESSION_ID_UNSET) {
+        if (bitPerfectActive || usbExclusiveActive || !fallbackRequired || attachedSessionId == C.AUDIO_SESSION_ID_UNSET) {
             releaseAllInternal()
             return
         }
 
         val userEqEnabled = equalizerSettings.enabled
-        val needsTone = userEqEnabled || studioClarityEnabled
+        val loudnessActive = loudnessMode != LoudnessMode.OFF && loudnessGainDb != 0f
+        val needsTone = userEqEnabled || studioClarityEnabled || loudnessActive
         if (needsTone) {
-            applyToneEffect(buildCombinedCurve(userEqEnabled))
+            applyToneEffect(buildCombinedCurve(userEqEnabled, loudnessActive))
         } else {
             releaseToneInternal()
         }
     }
 
-    private fun buildCombinedCurve(userEqEnabled: Boolean): FloatArray =
+    private fun refreshLoudnessGain() {
+        // The fallback stage has no true peak limiter of its own, so the
+        // peak guard always stays engaged here (limiterEngaged = false).
+        loudnessGainDb = LoudnessNormalizer.gainForTags(
+            tags = replayGainTags,
+            mode = loudnessMode,
+            preampDb = loudnessPreampDb,
+            limiterEngaged = false,
+        )
+    }
+
+    private fun buildCombinedCurve(userEqEnabled: Boolean, loudnessActive: Boolean): FloatArray =
         FloatArray(EQ_BAND_FREQS_HZ.size) { index ->
             val studioGain = if (studioClarityEnabled) {
                 EqualizerPresets.STUDIO_MASTER.gainsDb.getOrElse(index) { 0f }
@@ -129,7 +193,17 @@ class AudioEffectsEngine @Inject constructor(
                 equalizerSettings.gainsDb.getOrElse(index) { 0f }
             } else 0f
             val combined = studioGain + userGain
-            if (combined.isFinite()) combined.coerceIn(-EQ_MAX_GAIN_DB, EQ_MAX_GAIN_DB) else 0f
+            val base = if (combined.isFinite()) combined.coerceIn(-EQ_MAX_GAIN_DB, EQ_MAX_GAIN_DB) else 0f
+            if (!loudnessActive || loudnessGainDb == 0f) {
+                base
+            } else {
+                val total = base + loudnessGainDb
+                if (total.isFinite()) {
+                    total.coerceIn(-LOUDNESS_STAGE_MAX_GAIN_DB, LOUDNESS_STAGE_MAX_GAIN_DB)
+                } else {
+                    base
+                }
+            }
         }
 
     private fun applyToneEffect(gainsDb: FloatArray) {
@@ -277,6 +351,9 @@ class AudioEffectsEngine @Inject constructor(
         const val MAX_BOOST_PERCENT = 200
         const val MAX_BOOST_MILLIBELS = 602
         const val MAX_PRE_LIMITER_BOOST_DB = 1.0f
+        // Platform-safe per-band ceiling once the uniform loudness offset is
+        // added on top of the EQ curve.
+        const val LOUDNESS_STAGE_MAX_GAIN_DB = 15f
 
         fun calculateHeadroomDb(gainsDb: FloatArray): Float {
             val maximumBoost = (gainsDb.maxOrNull() ?: 0f).coerceAtLeast(0f)

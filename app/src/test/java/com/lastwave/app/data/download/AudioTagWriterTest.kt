@@ -28,11 +28,11 @@ class AudioTagWriterTest {
         val sampleArtwork = byteArrayOf(
             0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte(),
             0x0D.toByte(), 0x0A.toByte(), 0x1A.toByte(), 0x0A.toByte(),
-            0x00, 0x00, 0x00, 0x0D,
+            0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x0D.toByte(),
             'I'.code.toByte(), 'H'.code.toByte(), 'D'.code.toByte(), 'R'.code.toByte(),
-            0x00, 0x00, 0x00, 0x10,
-            0x00, 0x00, 0x00, 0x10,
-            0x08, 0x06, 0x00, 0x00, 0x00,
+            0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x10.toByte(),
+            0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x10.toByte(),
+            0x08.toByte(), 0x06.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
         )
 
         val id3Bytes = writer.buildId3v2Tag(
@@ -72,7 +72,7 @@ class AudioTagWriterTest {
         out.write(34)
         out.write(ByteArray(34)) // 34 zero bytes for streaminfo
         // Fake audio frame bytes
-        out.write(byteArrayOf(0xFF.toByte(), 0xF8.toByte(), 0x00, 0x00, 0x01, 0x02, 0x03))
+        out.write(byteArrayOf(0xFF.toByte(), 0xF8.toByte(), 0x00.toByte(), 0x00.toByte(), 0x01.toByte(), 0x02.toByte(), 0x03.toByte()))
         flacFile.writeBytes(out.toByteArray())
 
         val success = writer.embedMetadata(
@@ -148,7 +148,7 @@ class AudioTagWriterTest {
         out.write(moovBodyBytes)
 
         // 3. mdat box
-        val mdatBody = byteArrayOf(0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08)
+        val mdatBody = byteArrayOf(0x01.toByte(), 0x02.toByte(), 0x03.toByte(), 0x04.toByte(), 0x05.toByte(), 0x06.toByte(), 0x07.toByte(), 0x08.toByte())
         val mdatSize = 8 + mdatBody.size
         out.write(mdatSize ushr 24 and 0xFF)
         out.write(mdatSize ushr 16 and 0xFF)

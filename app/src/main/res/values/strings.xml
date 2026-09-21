@@ -271,6 +271,7 @@
     <string name="signal_detail_mixer_ok">No platform SRC — mixer at %1$d Hz</string>
     <string name="signal_detail_bit_perfect_unavailable">Nominal mixer rate %1$d Hz — bit-perfect mode not configured</string>
     <string name="signal_detail_bit_perfect_configured">Android accepted the bit-perfect USB output configuration</string>
+    <string name="signal_detail_usb_exclusive">USB exclusive — mixer bypassed, DAC owns the clock</string>
     <string name="signal_detail_route_unverified">DAC routing requested; actual output route is not verified</string>
     <string name="settings_bit_perfect_on_detail">DSP bypassed; requests bit-perfect USB output on supported Android 14+ devices</string>
     <string name="settings_bit_perfect_off_detail">Bypass DSP and request supported bit-perfect USB output</string>

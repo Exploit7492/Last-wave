@@ -154,7 +154,7 @@ class CsvPlaylistImporter @Inject constructor(
             return parseM3u(text.lineSequence().map(String::trim).toList())
         }
         if (filename.endsWith(".txt", true) && lines.none { '\t' in it } &&
-            lines.first().split(',', ';').map(::normalize).none { it in TITLE_HEADERS || it in ARTIST_HEADERS || it in URL_HEADERS }) {
+            lines.first().split(',', ';').map(::normalize).all { it in TITLE_HEADERS || it in ARTIST_HEADERS || it in URL_HEADERS }.not()) {
             return lines.map(::parseTextTrack)
         }
         val delimiter = listOf(',', ';', '\t').maxBy { candidate ->
@@ -177,7 +177,9 @@ class CsvPlaylistImporter @Inject constructor(
         val artistColumn = if (artistIndex >= 0) {
             artistIndex
         } else if (hasHeader) {
-            (0 until first.size).firstOrNull { it != titleColumn && it != albumIndex && it != urlIndex } ?: 1
+            // No artist header: never guess another column (e.g. the album
+            // cell) as the artist. -1 reads as empty via getOrNull.
+            -1
         } else 1
         return records.drop(if (hasHeader) 1 else 0).mapNotNull { row ->
             if (hasHeader && row.map(::normalize) == headers) return@mapNotNull null

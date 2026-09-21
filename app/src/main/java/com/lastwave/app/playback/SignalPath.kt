@@ -54,6 +54,8 @@ data class SignalPathInput(
     val glitchCount: Long,
     val isPlaying: Boolean,
     val platformBitPerfectConfigured: Boolean = false,
+    /** True while the direct USB-exclusive sink owns output (mixer bypassed by construction). */
+    val usbExclusiveActive: Boolean = false,
 )
 
 /**
@@ -242,8 +244,12 @@ fun evaluateSignalPath(i: SignalPathInput): SignalPathReport {
     }
 
     // 7 — Platform mixer (AudioFlinger resamples when rates differ).
+    // USB-exclusive output never passes the mixer at all.
     val plat = i.platformMixerRateHz.takeIf { it > 0 }
-    if (i.platformBitPerfectConfigured) {
+    if (i.usbExclusiveActive) {
+        checks += PathCheck(R.string.signal_label_mixer,
+            R.string.signal_detail_usb_exclusive, passed = true)
+    } else if (i.platformBitPerfectConfigured) {
         checks += PathCheck(R.string.signal_label_mixer,
             R.string.signal_detail_bit_perfect_configured, passed = true)
     } else if (app != null && plat != null) {

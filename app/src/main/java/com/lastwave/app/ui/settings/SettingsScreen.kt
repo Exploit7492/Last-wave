@@ -71,6 +71,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Language
@@ -164,6 +165,8 @@ import com.lastwave.app.data.local.EQ_BAND_FREQS_HZ
 import com.lastwave.app.data.local.EQ_MAX_GAIN_DB
 import com.lastwave.app.data.local.EqualizerPresets
 import com.lastwave.app.data.local.EqualizerSettings
+import com.lastwave.app.playback.ClarityPresets
+import com.lastwave.app.playback.LoudnessMode
 import com.lastwave.app.data.local.eqBandLabel
 import com.lastwave.app.ui.common.ConnectedButtonGroup
 import com.lastwave.app.ui.common.ConnectedButtonItem
@@ -281,6 +284,8 @@ fun SettingsScreen(
     val ytChannels by viewModel.ytChannels.collectAsStateWithLifecycle()
     val ytChannelsLoading by viewModel.ytChannelsLoading.collectAsStateWithLifecycle()
     val eq by viewModel.equalizer.collectAsStateWithLifecycle()
+    val usbExclusiveEnabled by viewModel.usbExclusiveEnabled.collectAsStateWithLifecycle()
+    val loudness by viewModel.loudness.collectAsStateWithLifecycle()
     val updateInfo by viewModel.updateInfo.collectAsStateWithLifecycle()
     val isLastFmConnected by viewModel.isLastFmConnected.collectAsStateWithLifecycle()
     val hasApiKey by viewModel.hasApiKey.collectAsStateWithLifecycle()
@@ -306,6 +311,8 @@ fun SettingsScreen(
     var showEqSheet by remember { mutableStateOf(false) }
     var showLyricsAnimationSheet by remember { mutableStateOf(false) }
     var showLyricsProviderDialog by remember { mutableStateOf(false) }
+    var showLoudnessDialog by remember { mutableStateOf(false) }
+    var showClarityPresetDialog by remember { mutableStateOf(false) }
     var showSyncPlaylistsSheet by remember { mutableStateOf(false) }
     var showYtLibraryVisibilitySheet by remember { mutableStateOf(false) }
     var showYtChannelSheet by remember { mutableStateOf(false) }
@@ -1056,6 +1063,70 @@ fun SettingsScreen(
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionLabel("Output & Loudness")
+                    val clarityPreset = remember(misc.clarityPreset) { ClarityPresets.fromIndex(misc.clarityPreset) }
+                    val loudnessSubtitle = when (loudness.mode) {
+                        LoudnessMode.TRACK -> "Track \u2022 Match every track to -14 LUFS"
+                        LoudnessMode.ALBUM -> "Album \u2022 Keep intentional album dynamics"
+                        else -> "Off \u2022 Play tagged tracks at original level"
+                    }
+                    SettingsGroup(rowCount = 4) { index, position ->
+                        when (index) {
+                            0 -> SettingsToggleCard(
+                                icon = Icons.Filled.Usb,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                title = "USB Exclusive Output",
+                                subtitle = if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
+                                    "Requires Android 10 or newer"
+                                } else if (usbExclusiveEnabled) {
+                                    "Direct DAC access \u2022 bypasses the Android mixer"
+                                } else {
+                                    "Off \u2022 Needs a USB DAC attached to take effect"
+                                },
+                                checked = usbExclusiveEnabled,
+                                onCheckedChange = viewModel::setUsbExclusiveEnabled,
+                                position = position,
+                            )
+                            1 -> SettingsActionCard(
+                                icon = Icons.Filled.VolumeUp,
+                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                title = "Loudness Normalization",
+                                subtitle = loudnessSubtitle,
+                                onClick = { showLoudnessDialog = true },
+                                position = position,
+                            )
+                            2 -> SettingsActionCard(
+                                icon = Icons.Filled.Tune,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = "Clarity Output Preset",
+                                subtitle = "${clarityPreset.displayName} \u2022 ${clarityPreset.description}",
+                                onClick = { showClarityPresetDialog = true },
+                                position = position,
+                            )
+                            else -> SettingsToggleCard(
+                                icon = Icons.Filled.GraphicEq,
+                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                title = "Clarity Spatial Bypass",
+                                subtitle = if (misc.clarityAtmosBypass) {
+                                    "Clarity bypasses on multichannel/spatial sources"
+                                } else {
+                                    "Off \u2022 Clarity processes every source"
+                                },
+                                checked = misc.clarityAtmosBypass,
+                                onCheckedChange = viewModel::setClarityAtmosBypass,
+                                position = position,
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel(stringResource(R.string.settings_section_imports))
                     SettingsGroup(rowCount = 2) { index, position ->
                         when (index) {
@@ -1528,6 +1599,28 @@ fun SettingsScreen(
                 showLyricsProviderDialog = false
             },
             onDismiss = { showLyricsProviderDialog = false },
+        )
+    }
+
+    if (showLoudnessDialog) {
+        LoudnessModeDialog(
+            current = loudness.mode,
+            onSelect = {
+                viewModel.setLoudnessMode(it)
+                showLoudnessDialog = false
+            },
+            onDismiss = { showLoudnessDialog = false },
+        )
+    }
+
+    if (showClarityPresetDialog) {
+        ClarityPresetDialog(
+            currentIndex = misc.clarityPreset,
+            onSelect = {
+                viewModel.setClarityPreset(it)
+                showClarityPresetDialog = false
+            },
+            onDismiss = { showClarityPresetDialog = false },
         )
     }
 
@@ -4033,6 +4126,128 @@ private fun LyricsProviderDialog(
                             )
                             Text(
                                 provider.subtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_done)) }
+        },
+    )
+}
+
+private fun loudnessModeTitle(mode: LoudnessMode): String = when (mode) {
+    LoudnessMode.TRACK -> "Track"
+    LoudnessMode.ALBUM -> "Album"
+    else -> "Off"
+}
+
+private fun loudnessModeSubtitle(mode: LoudnessMode): String = when (mode) {
+    LoudnessMode.TRACK -> "Match every track to -14 LUFS (needs ReplayGain tags)"
+    LoudnessMode.ALBUM -> "Keep intentional album dynamics (falls back to track tags)"
+    else -> "Play tracks at their original level"
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LoudnessModeDialog(
+    current: LoudnessMode,
+    onSelect: (LoudnessMode) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Loudness Normalization") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    "Evens out volume jumps between tracks. Bypassed in Bit-Perfect and USB exclusive modes.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                LoudnessMode.entries.forEach { mode ->
+                    val selected = mode == current
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onSelect(mode) }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = selected, onClick = { onSelect(mode) })
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                loudnessModeTitle(mode),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                            )
+                            Text(
+                                loudnessModeSubtitle(mode),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_done)) }
+        },
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ClarityPresetDialog(
+    currentIndex: Int,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Clarity Output Preset") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    "Tunes the Studio Master Clarity chain to the output. Reference is the unmodified shipping curve.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                ClarityPresets.ALL.forEach { preset ->
+                    val selected = preset.index == currentIndex
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onSelect(preset.index) }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = selected, onClick = { onSelect(preset.index) })
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                preset.displayName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                            )
+                            Text(
+                                preset.description,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

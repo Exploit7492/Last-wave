@@ -285,6 +285,10 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.12.2")
     testImplementation("io.mockk:mockk:1.13.10")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+
+    // Bit-perfect USB exclusive output (default OFF; see playback.usb.UsbExclusivePrefs).
+    implementation(project(":audio:decent-usb-audio-driver"))
+    implementation(project(":audio:decent-usb-audio-wrapper-media3"))
 }
 
 kotlin {

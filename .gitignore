@@ -58,6 +58,8 @@ tools/
 provider.js
 # Single raw provider source at repo base only (plaintext JSON, encrypted at build)
 provider.json
+# Local Kotlin daemon state
+.kotlin/
 # Native generated secrets (CI only, never commit)
 app/src/main/cpp/SecretsBridge_generated.h
 

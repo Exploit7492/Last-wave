@@ -1,4 +1,5 @@
 #include "AudioEngine.h"
+#include "DspProcessor.h"
 
 #include <jni.h>
 
@@ -120,6 +121,53 @@ Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetStudioMasterClarity(
     if (auto* engine = fromHandle(handle); engine != nullptr) {
         engine->setStudioMasterClarity(enabled == JNI_TRUE);
     }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetClarityWet(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jfloat wet) {
+    if (fromHandle(handle) == nullptr) return;
+    lastwave::audio::DspProcessor::broadcastClarityWet(wet);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetClarityTrims(
+    JNIEnv* env,
+    jobject,
+    jlong handle,
+    jfloatArray trimsDb) {
+    if (fromHandle(handle) == nullptr || trimsDb == nullptr ||
+        env->GetArrayLength(trimsDb) !=
+            static_cast<jsize>(lastwave::audio::DspProcessor::kClarityTrimCount)) {
+        return;
+    }
+    std::array<float, lastwave::audio::DspProcessor::kClarityTrimCount> trims{};
+    env->GetFloatArrayRegion(trimsDb, 0, static_cast<jsize>(trims.size()), trims.data());
+    if (env->ExceptionCheck()) return;
+    lastwave::audio::DspProcessor::broadcastClarityTrims(trims.data(), trims.size());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetClarityPreset(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint preset) {
+    if (fromHandle(handle) == nullptr) return;
+    lastwave::audio::DspProcessor::broadcastClarityPreset(preset);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetClarityAtmosBypass(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jboolean enabled) {
+    if (fromHandle(handle) == nullptr) return;
+    lastwave::audio::DspProcessor::broadcastClarityAtmosBypass(enabled == JNI_TRUE);
 }
 
 extern "C" JNIEXPORT void JNICALL

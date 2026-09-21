@@ -1268,7 +1268,15 @@ class AudioTagWriter @Inject constructor(
         metaBody.write(hdlrBox)
         metaBody.write(removeTopLevelBoxes(existingMeta, setOf("hdlr", "ilst")))
         metaBody.write(ilstBox)
-        val udtaBox = wrapBox("udta", removeTopLevelBoxes(existingUdta, setOf("meta")) + wrapBox("meta", metaBody.toByteArray()))
+        // Rebuild udta from the fresh meta plus any old non-meta children —
+        // but only when the old payload parses as real boxes. Unparseable
+        // bytes are dropped instead of resurrected inside new metadata.
+        val oldUdtaKept = if (hasCompleteBoxes(existingUdta)) {
+            removeTopLevelBoxes(existingUdta, setOf("meta"))
+        } else {
+            byteArrayOf()
+        }
+        val udtaBox = wrapBox("udta", oldUdtaKept + wrapBox("meta", metaBody.toByteArray()))
 
 
         // Clean out any existing udta boxes so we don't produce duplicate udta boxes
@@ -1379,6 +1387,32 @@ class AudioTagWriter @Inject constructor(
             return out.toByteArray()
         }
         return bytes
+    }
+
+    /**
+     * Strict box walk: true only when [bytes] parses top-to-bottom as
+     * complete boxes (same size rules as [removeTopLevelBoxes], which
+     * fail-open preserves its input on any parse failure). Used to avoid
+     * carrying unparseable old container bytes into freshly written
+     * metadata: garbage that cannot be proven safe is dropped, never kept.
+     */
+    private fun hasCompleteBoxes(bytes: ByteArray): Boolean {
+        if (bytes.isEmpty()) return true
+        var offset = 0
+        while (offset + 8 <= bytes.size) {
+            val size32 = readBeUInt32(bytes, offset)
+            if (size32 == 1L) {
+                if (offset + 16 > bytes.size) return false
+                val large = readBeUInt64(bytes, offset + 8) ?: return false
+                if (large < 16 || offset + large > bytes.size) return false
+                offset += large.toInt()
+            } else {
+                val boxSize = if (size32 == 0L) (bytes.size - offset).toLong() else size32
+                if (boxSize < 8 || offset + boxSize > bytes.size) return false
+                offset += boxSize.toInt()
+            }
+        }
+        return offset == bytes.size
     }
 
     private fun patchMp4ChunkOffsets(

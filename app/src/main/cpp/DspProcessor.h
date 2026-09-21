@@ -14,6 +14,7 @@ public:
     static constexpr std::size_t kEqualizerBandCount = 15;
 
     DspProcessor() noexcept;
+    ~DspProcessor();
 
     void configure(double sampleRate) noexcept;
     void reset() noexcept;
@@ -24,6 +25,36 @@ public:
         bool enabled,
         const float* gainsDb,
         std::size_t gainCount) noexcept;
+    // Studio Master Clarity parameterization. All setters are lock-free
+    // control-thread calls; the audio thread only performs atomic loads, so
+    // process() stays allocation- and lock-free. Neutral defaults (wet 1.0,
+    // all trims 0 dB, no Atmos bypass) reproduce the shipping curve
+    // sample-exactly.
+    static constexpr std::size_t kClarityTrimCount = 8;
+    static constexpr int kClarityPresetReference = 0;
+    static constexpr int kClarityPresetSpeaker = 1;
+    static constexpr int kClarityPresetHeadphone = 2;
+    static constexpr int kClarityPresetDac = 3;
+    // Per-stage trim order: 0 sub-bass high-pass, 1 bass foundation,
+    // 2 low-mid separation, 3 boxiness control, 4 presence detail,
+    // 5 air shelf, 6 mono-bass high-pass, 7 exciter high-pass.
+    // Peaking/shelf trims offset the stage design gain; high-pass trims
+    // apply a linear post gain. Values are clamped to +-12 dB.
+    void setClarityWet(float wet) noexcept;
+    void setClarityTrims(const float* trimsDb, std::size_t trimCount) noexcept;
+    void setClarityPreset(int preset) noexcept;
+    // Atmos-aware bypass: while set, the clarity chain fully bypasses
+    // independent of the on/off toggle. The toggle state itself is kept,
+    // so clearing the flag restores the previous mix without clicks.
+    void setClarityAtmosBypass(bool bypass) noexcept;
+    // Process-wide broadcast helpers for the JNI layer, which owns the
+    // engine handle but not the individual DSP instances. Each call
+    // forwards to every live instance (playback and media paths). Control
+    // thread only; process() itself takes no locks.
+    static void broadcastClarityWet(float wet);
+    static void broadcastClarityTrims(const float* trimsDb, std::size_t trimCount);
+    static void broadcastClarityPreset(int preset);
+    static void broadcastClarityAtmosBypass(bool bypass);
     void process(
         float* interleaved,
         std::int32_t frameCount,
@@ -62,6 +93,11 @@ private:
             double sampleRate,
             double frequency,
             double q,
+            double gainDb) noexcept;
+        void setHighShelf(
+            double sampleRate,
+            double frequency,
+            double slope,
             double gainDb) noexcept;
 
         [[nodiscard]] inline float tick(float input, std::size_t channel) noexcept {
@@ -150,6 +186,23 @@ private:
     std::int32_t microFadeFrameCount_{96};
     std::int32_t microFadePosition_{0};
     bool clarityChainActive_{false};
+    // Clarity parameterization (see the setters above). Targets are atomic;
+    // currents ease toward them with the existing ramps (wet follows the
+    // 50 ms enable crossfade step, trims follow the equalizer gain easing
+    // at the coefficient-refresh cadence). Neutral defaults keep the
+    // shipping curve bit-identical: the mix factor stays exactly 1.0 and
+    // no coefficient is ever rebuilt while trims are zero.
+    std::atomic<float> targetClarityWet_{1.0F};
+    float currentClarityWet_{1.0F};
+    std::array<std::atomic<float>, kClarityTrimCount> targetClarityTrimsDb_{};
+    std::array<float, kClarityTrimCount> currentClarityTrimsDb_{};
+    std::array<float, kClarityTrimCount> appliedClarityTrimsDb_{};
+    std::array<float, kClarityTrimCount> clarityTrimLinear_{
+        1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F};
+    // Effective exciter level. Mirrors kAirExciterAmount in DspProcessor.cpp
+    // while the exciter trim is neutral, so the default path is exact.
+    float clarityExciterAmount_{0.18F};
+    std::atomic<bool> atmosBypassEnabled_{false};
     Biquad subBassHighPass_{};
     Biquad bassFoundation_{};
     Biquad lowMidSeparation_{};
@@ -159,6 +212,12 @@ private:
     Biquad monoBassFilter_{};
     Biquad airExciterFilter_{};
     Crossfeed crossfeed_{};
+
+    // Rebuilds one trimmed stage from its design spec plus the smoothed
+    // trim value. Peaking/shelf stages keep filter state (coefficients
+    // only, like the equalizer path); high-pass stages update their linear
+    // post gain. Control-rate only, called from the coefficient tick.
+    void applyClarityTrim(std::size_t stage, float trimDb) noexcept;
 };
 
 }  // namespace lastwave::audio

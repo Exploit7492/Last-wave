@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <mutex>
+#include <vector>
 
 namespace lastwave::audio {
 namespace {
@@ -28,32 +30,113 @@ constexpr float kEqualizerPreLimiterBoostDb = 1.0F;
 constexpr float kClarityMakeupGain = 1.04F;
 constexpr float kClarityStereoWidth = 1.22F;
 constexpr float kAirExciterAmount = 0.18F;
+// Studio Master Clarity design gains (dB). Single source for configure()
+// and trim rebuilds; per-stage trims add to these values.
+constexpr double kClarityBassGainDb = 3.2;
+constexpr double kClarityLowMidGainDb = -3.0;
+constexpr double kClarityBoxinessGainDb = -1.4;
+constexpr double kClarityPresenceGainDb = 3.8;
+constexpr double kClarityAirGainDb = 4.8;
+constexpr float kClarityTrimMinDb = -12.0F;
+constexpr float kClarityTrimMaxDb = 12.0F;
+// Native preset trim vectors in header-documented stage order 0..7.
+// Mirrored as data in ClarityPresets.kt; REFERENCE is all zeros.
+constexpr std::array<float, DspProcessor::kClarityTrimCount> kClarityPresetReferenceTrims{
+    0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
+// SPEAKER: reduced sub-bass lift for small drivers, slightly gentler air.
+constexpr std::array<float, DspProcessor::kClarityTrimCount> kClarityPresetSpeakerTrims{
+    0.0F, -1.5F, 0.0F, 0.0F, 0.0F, -0.5F, 0.0F, 0.0F};
+// HEADPHONE: close-coupled drivers exaggerate bass and presence.
+constexpr std::array<float, DspProcessor::kClarityTrimCount> kClarityPresetHeadphoneTrims{
+    0.0F, -0.5F, 0.0F, 0.0F, -1.0F, 0.0F, 0.0F, 0.0F};
+// DAC: revealing downstream chain, gentler top octave.
+constexpr std::array<float, DspProcessor::kClarityTrimCount> kClarityPresetDacTrims{
+    0.0F, 0.0F, 0.0F, 0.0F, 0.0F, -1.5F, 0.0F, -1.0F};
 
 double safeFrequency(double sampleRate, double frequency) noexcept {
     return std::clamp(frequency, 1.0, sampleRate * 0.45);
+}
+
+float sanitizedClarityTrim(float trimDb) noexcept {
+    if (!std::isfinite(trimDb)) return 0.0F;
+    return std::clamp(trimDb, kClarityTrimMinDb, kClarityTrimMaxDb);
+}
+
+float clarityTrimLinearGain(float trimDb) noexcept {
+    // Exact unity for the neutral default, so untouched stages stay
+    // bit-identical without needing a bypass branch in the audio loop.
+    if (trimDb == 0.0F) return 1.0F;
+    return std::pow(10.0F, trimDb / 20.0F);
+}
+
+// Live-instance registry backing the JNI broadcast helpers. Control thread
+// only (construction, destruction, JNI setters); the audio thread never
+// touches it.
+std::mutex& clarityRegistryMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::vector<DspProcessor*>& clarityRegistry() {
+    static std::vector<DspProcessor*> instances;
+    return instances;
 }
 
 }  // namespace
 
 DspProcessor::DspProcessor() noexcept {
     for (auto& gain : targetEqGainsDb_) gain.store(0.0F, std::memory_order_relaxed);
+    for (auto& trim : targetClarityTrimsDb_) trim.store(0.0F, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> registryLock(clarityRegistryMutex());
+    clarityRegistry().push_back(this);
+}
+
+DspProcessor::~DspProcessor() {
+    std::lock_guard<std::mutex> registryLock(clarityRegistryMutex());
+    auto& instances = clarityRegistry();
+    instances.erase(
+        std::remove(instances.begin(), instances.end(), this),
+        instances.end());
 }
 
 void DspProcessor::configure(double sampleRate) noexcept {
     sampleRate_ = std::max(sampleRate, 8000.0);
+    // Snap clarity parameterization set before the stream opened. Neutral
+    // trims add exactly 0.0 to the design gains below, so the default
+    // coefficients are unchanged from the previous fixed chain.
+    currentClarityWet_ = std::clamp(
+        targetClarityWet_.load(std::memory_order_acquire), 0.0F, 1.0F);
+    for (std::size_t stage = 0; stage < kClarityTrimCount; ++stage) {
+        const float trim = sanitizedClarityTrim(
+            targetClarityTrimsDb_[stage].load(std::memory_order_acquire));
+        currentClarityTrimsDb_[stage] = trim;
+        appliedClarityTrimsDb_[stage] = trim;
+        clarityTrimLinear_[stage] = clarityTrimLinearGain(trim);
+    }
+    clarityExciterAmount_ = kAirExciterAmount * clarityTrimLinear_[7];
     // Studio Master Clarity Acoustic Contouring:
     // 1. Subsonic highpass: tight 24 Hz cutoff removes rumble and saves amp headroom
     subBassHighPass_ = Biquad::highPass(sampleRate_, 24.0, 0.7071067811865476);
     // 2. Bass foundation: punchy 72 Hz body with controlled bandwidth
-    bassFoundation_ = Biquad::peaking(sampleRate_, 72.0, 0.80, 3.2);
+    bassFoundation_ = Biquad::peaking(
+        sampleRate_, 72.0, 0.80,
+        kClarityBassGainDb + static_cast<double>(currentClarityTrimsDb_[1]));
     // 3. Low-mid anti-mud: surgical 280 Hz dip removes boxiness and unmasks vocals
-    lowMidSeparation_ = Biquad::peaking(sampleRate_, 280.0, 0.90, -3.0);
+    lowMidSeparation_ = Biquad::peaking(
+        sampleRate_, 280.0, 0.90,
+        kClarityLowMidGainDb + static_cast<double>(currentClarityTrimsDb_[2]));
     // 4. Boxiness & resonance control: smooth 750 Hz control
-    boxinessControl_ = Biquad::peaking(sampleRate_, 750.0, 0.85, -1.4);
+    boxinessControl_ = Biquad::peaking(
+        sampleRate_, 750.0, 0.85,
+        kClarityBoxinessGainDb + static_cast<double>(currentClarityTrimsDb_[3]));
     // 5. Vocal presence & instrument detail: articulate 3400 Hz lift
-    presenceDetail_ = Biquad::peaking(sampleRate_, 3400.0, 0.85, 3.8);
+    presenceDetail_ = Biquad::peaking(
+        sampleRate_, 3400.0, 0.85,
+        kClarityPresenceGainDb + static_cast<double>(currentClarityTrimsDb_[4]));
     // 6. Silky air shelf: pristine 10.5 kHz high-frequency extension
-    airDetail_ = Biquad::highShelf(sampleRate_, 10500.0, 0.85, 4.8);
+    airDetail_ = Biquad::highShelf(
+        sampleRate_, 10500.0, 0.85,
+        kClarityAirGainDb + static_cast<double>(currentClarityTrimsDb_[5]));
     // 7. Mono-Bass filter: 130 Hz highpass for Side channel (locks low-end to center, zero blur)
     monoBassFilter_ = Biquad::highPass(sampleRate_, 130.0, 0.7071067811865476);
     // 8. Harmonic air exciter: 6000 Hz highpass to isolate highs for tape-style harmonic sheen
@@ -160,13 +243,121 @@ void DspProcessor::setEqualizer(
     targetEqualizerRevision_.fetch_add(1, std::memory_order_release);
 }
 
+void DspProcessor::setClarityWet(float wet) noexcept {
+    if (!std::isfinite(wet)) wet = 1.0F;
+    targetClarityWet_.store(std::clamp(wet, 0.0F, 1.0F), std::memory_order_release);
+}
+
+void DspProcessor::setClarityTrims(const float* trimsDb, std::size_t trimCount) noexcept {
+    if (trimsDb != nullptr && trimCount == kClarityTrimCount) {
+        for (std::size_t stage = 0; stage < kClarityTrimCount; ++stage) {
+            targetClarityTrimsDb_[stage].store(
+                sanitizedClarityTrim(trimsDb[stage]),
+                std::memory_order_release);
+        }
+    }
+}
+
+void DspProcessor::setClarityPreset(int preset) noexcept {
+    const float* trims = nullptr;
+    switch (preset) {
+        case kClarityPresetReference:
+            trims = kClarityPresetReferenceTrims.data();
+            break;
+        case kClarityPresetSpeaker:
+            trims = kClarityPresetSpeakerTrims.data();
+            break;
+        case kClarityPresetHeadphone:
+            trims = kClarityPresetHeadphoneTrims.data();
+            break;
+        case kClarityPresetDac:
+            trims = kClarityPresetDacTrims.data();
+            break;
+        default:
+            return;
+    }
+    setClarityTrims(trims, kClarityTrimCount);
+}
+
+void DspProcessor::setClarityAtmosBypass(bool bypass) noexcept {
+    atmosBypassEnabled_.store(bypass, std::memory_order_release);
+}
+
+void DspProcessor::broadcastClarityWet(float wet) {
+    std::lock_guard<std::mutex> registryLock(clarityRegistryMutex());
+    for (auto* instance : clarityRegistry()) {
+        if (instance != nullptr) instance->setClarityWet(wet);
+    }
+}
+
+void DspProcessor::broadcastClarityTrims(const float* trimsDb, std::size_t trimCount) {
+    std::lock_guard<std::mutex> registryLock(clarityRegistryMutex());
+    for (auto* instance : clarityRegistry()) {
+        if (instance != nullptr) instance->setClarityTrims(trimsDb, trimCount);
+    }
+}
+
+void DspProcessor::broadcastClarityPreset(int preset) {
+    std::lock_guard<std::mutex> registryLock(clarityRegistryMutex());
+    for (auto* instance : clarityRegistry()) {
+        if (instance != nullptr) instance->setClarityPreset(preset);
+    }
+}
+
+void DspProcessor::broadcastClarityAtmosBypass(bool bypass) {
+    std::lock_guard<std::mutex> registryLock(clarityRegistryMutex());
+    for (auto* instance : clarityRegistry()) {
+        if (instance != nullptr) instance->setClarityAtmosBypass(bypass);
+    }
+}
+
+void DspProcessor::applyClarityTrim(std::size_t stage, float trimDb) noexcept {
+    const double trim = static_cast<double>(trimDb);
+    switch (stage) {
+        case 1:
+            bassFoundation_.setPeaking(
+                sampleRate_, 72.0, 0.80, kClarityBassGainDb + trim);
+            break;
+        case 2:
+            lowMidSeparation_.setPeaking(
+                sampleRate_, 280.0, 0.90, kClarityLowMidGainDb + trim);
+            break;
+        case 3:
+            boxinessControl_.setPeaking(
+                sampleRate_, 750.0, 0.85, kClarityBoxinessGainDb + trim);
+            break;
+        case 4:
+            presenceDetail_.setPeaking(
+                sampleRate_, 3400.0, 0.85, kClarityPresenceGainDb + trim);
+            break;
+        case 5:
+            airDetail_.setHighShelf(
+                sampleRate_, 10500.0, 0.85, kClarityAirGainDb + trim);
+            break;
+        case 0:
+        case 6:
+        case 7:
+            clarityTrimLinear_[stage] = clarityTrimLinearGain(trimDb);
+            clarityExciterAmount_ = kAirExciterAmount * clarityTrimLinear_[7];
+            break;
+        default:
+            break;
+    }
+}
+
 void DspProcessor::process(
     float* samples,
     std::int32_t frameCount,
     std::int32_t channelCount) noexcept {
     if (samples == nullptr || frameCount <= 0 || (channelCount != 1 && channelCount != 2)) return;
     if (bitPerfectEnabled_.load(std::memory_order_acquire)) return;
-    const float target = targetEnabled_.load(std::memory_order_acquire) ? 1.0F : 0.0F;
+    // Atmos-aware bypass forces the clarity chain off independent of the
+    // on/off toggle, keeping multichannel/spatial content untouched while
+    // preserving the toggle state for stereo afterwards.
+    const bool atmosBypassed = atmosBypassEnabled_.load(std::memory_order_acquire);
+    const float target = (targetEnabled_.load(std::memory_order_acquire) && !atmosBypassed)
+        ? 1.0F
+        : 0.0F;
     const bool peakProtectionEnabled = peakProtectionEnabled_.load(std::memory_order_acquire);
     const auto equalizerRevision = targetEqualizerRevision_.load(std::memory_order_acquire);
     if (equalizerRevision != appliedEqualizerRevision_) {
@@ -211,6 +402,15 @@ void DspProcessor::process(
             currentWet_ = std::min(target, currentWet_ + rampPerFrame_);
         } else if (currentWet_ > target) {
             currentWet_ = std::max(target, currentWet_ - rampPerFrame_);
+        }
+        // Clarity wet/dry mix follows the same 50 ms ramp so mix and preset
+        // moves never click. At the default 1.0 the factor stays exactly
+        // 1.0, keeping the output bit-identical.
+        const float targetClarityMix = targetClarityWet_.load(std::memory_order_acquire);
+        if (currentClarityWet_ < targetClarityMix) {
+            currentClarityWet_ = std::min(targetClarityMix, currentClarityWet_ + rampPerFrame_);
+        } else if (currentClarityWet_ > targetClarityMix) {
+            currentClarityWet_ = std::max(targetClarityMix, currentClarityWet_ - rampPerFrame_);
         }
 
         if (equalizerUpdateCountdown_-- <= 0) {
@@ -288,6 +488,23 @@ void DspProcessor::process(
                     : currentPreampDb_ + preampDelta * equalizerGainSmoothing_;
                 currentPreampGain_ = std::pow(10.0F, currentPreampDb_ / 20.0F);
             }
+            // Per-stage clarity trims ease with the same refresh interval
+            // and smoothing factor as the equalizer, so trim and preset
+            // moves crossfade instead of clicking. Neutral trims never
+            // trigger a rebuild, leaving every coefficient untouched.
+            for (std::size_t stage = 0; stage < kClarityTrimCount; ++stage) {
+                const float trimTarget =
+                    targetClarityTrimsDb_[stage].load(std::memory_order_acquire);
+                float& trimCurrent = currentClarityTrimsDb_[stage];
+                trimCurrent += (trimTarget - trimCurrent) * equalizerGainSmoothing_;
+                if (std::abs(trimTarget - trimCurrent) < 0.0005F) {
+                    trimCurrent = trimTarget;
+                }
+                if (trimCurrent != appliedClarityTrimsDb_[stage]) {
+                    appliedClarityTrimsDb_[stage] = trimCurrent;
+                    applyClarityTrim(stage, trimCurrent);
+                }
+            }
             equalizerUpdateCountdown_ = kEqCoefficientIntervalFrames - 1;
         }
 
@@ -331,9 +548,12 @@ void DspProcessor::process(
         float outputLeft = dryLeft;
         float outputRight = dryRight;
         if (clarityChainActive_) {
-            float wetLeft = subBassHighPass_.tick(dryLeft, 0);
+            // Effective wet amount: enable crossfade times the clarity mix.
+            // At the default mix of 1.0 this equals currentWet_ exactly.
+            const float clarityMix = currentWet_ * currentClarityWet_;
+            float wetLeft = subBassHighPass_.tick(dryLeft, 0) * clarityTrimLinear_[0];
             float wetRight = channelCount == 2
-                ? subBassHighPass_.tick(dryRight, 1)
+                ? subBassHighPass_.tick(dryRight, 1) * clarityTrimLinear_[0]
                 : wetLeft;
             wetLeft = bassFoundation_.tick(wetLeft, 0);
             wetRight = channelCount == 2
@@ -363,14 +583,14 @@ void DspProcessor::process(
                 : exciterInLeft;
             const float excitedLeft = exciterInLeft - (exciterInLeft * exciterInLeft * exciterInLeft * 0.25F);
             const float excitedRight = exciterInRight - (exciterInRight * exciterInRight * exciterInRight * 0.25F);
-            wetLeft += excitedLeft * kAirExciterAmount;
-            wetRight += excitedRight * kAirExciterAmount;
+            wetLeft += excitedLeft * clarityExciterAmount_;
+            wetRight += excitedRight * clarityExciterAmount_;
 
             if (channelCount == 2) {
                 const float mid = (wetLeft + wetRight) * 0.5F;
                 const float rawSide = (wetLeft - wetRight) * 0.5F;
                 // Mono-Bass (Anti-Blur): pass side through 130 Hz highpass so bass stays centered mono
-                const float sideHigh = monoBassFilter_.tick(rawSide, 0);
+                const float sideHigh = monoBassFilter_.tick(rawSide, 0) * clarityTrimLinear_[6];
                 const float wideSide = sideHigh * kClarityStereoWidth;
                 wetLeft = mid + wideSide;
                 wetRight = mid - wideSide;
@@ -380,8 +600,8 @@ void DspProcessor::process(
             // Headphone crossfeed is intentionally not applied globally: on
             // phone speakers and some OEM spatializers it can create phasey,
             // device-dependent coloration that listeners report as distortion.
-            outputLeft += (wetLeft - dryLeft) * currentWet_;
-            outputRight += (wetRight - dryRight) * currentWet_;
+            outputLeft += (wetLeft - dryLeft) * clarityMix;
+            outputRight += (wetRight - dryRight) * clarityMix;
         }
 
         // Analog soft-knee saturation: provides clean headroom without squashing the track
@@ -515,6 +735,19 @@ void DspProcessor::Biquad::setPeaking(
     double q,
     double gainDb) noexcept {
     const Biquad coefficients = peaking(sampleRate, frequency, q, gainDb);
+    b0 = coefficients.b0;
+    b1 = coefficients.b1;
+    b2 = coefficients.b2;
+    a1 = coefficients.a1;
+    a2 = coefficients.a2;
+}
+
+void DspProcessor::Biquad::setHighShelf(
+    double sampleRate,
+    double frequency,
+    double slope,
+    double gainDb) noexcept {
+    const Biquad coefficients = highShelf(sampleRate, frequency, slope, gainDb);
     b0 = coefficients.b0;
     b1 = coefficients.b1;
     b2 = coefficients.b2;

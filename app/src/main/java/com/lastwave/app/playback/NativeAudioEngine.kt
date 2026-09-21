@@ -57,6 +57,18 @@ class NativeAudioEngine @Inject constructor(
                     .collect(::setStudioMasterClarity)
             }
             applicationScope.launch(Dispatchers.Default) {
+                settingsPreferences.settings
+                    .map { it.clarityPreset }
+                    .distinctUntilChanged()
+                    .collect { setClarityPreset(ClarityPresets.fromIndex(it)) }
+            }
+            applicationScope.launch(Dispatchers.Default) {
+                settingsPreferences.settings
+                    .map { it.clarityAtmosBypass }
+                    .distinctUntilChanged()
+                    .collect(::setClarityAtmosBypass)
+            }
+            applicationScope.launch(Dispatchers.Default) {
                 equalizerPreferences.settings.collect { settings ->
                     setEqualizer(settings.enabled, settings.gainsDb.toFloatArray())
                 }
@@ -119,6 +131,38 @@ class NativeAudioEngine @Inject constructor(
             if (gain.isFinite()) gain.coerceIn(-EQ_MAX_GAIN_DB, EQ_MAX_GAIN_DB) else 0f
         }
         withHandle(Unit) { nativeSetEqualizer(it, enabled, safeGains) }
+    }
+
+    /**
+     * Clarity wet/dry mix in 0..1. Defaults to 1.0, which reproduces the
+     * shipping curve sample-exactly; lower values blend toward dry.
+     * Thread-safe; smoothed on the native 50 ms ramp.
+     */
+    fun setClarityWet(wet: Float) {
+        withHandle(Unit) { nativeSetClarityWet(it, wet.coerceIn(0f, 1f)) }
+    }
+
+    /** Per-stage clarity trims in dB ([ClarityPresets.TRIM_COUNT] stages, +-12 dB). */
+    fun setClarityTrims(trimsDb: FloatArray) {
+        require(trimsDb.size == ClarityPresets.TRIM_COUNT) { "Expected 8 clarity trims" }
+        val safeTrims = FloatArray(trimsDb.size) { index ->
+            val trim = trimsDb[index]
+            if (trim.isFinite()) trim.coerceIn(-CLARITY_TRIM_MAX_DB, CLARITY_TRIM_MAX_DB) else 0f
+        }
+        withHandle(Unit) { nativeSetClarityTrims(it, safeTrims) }
+    }
+
+    /** Applies a [ClarityPreset] by index; see [ClarityPresets] for the trim data. */
+    fun setClarityPreset(preset: ClarityPreset) {
+        withHandle(Unit) { nativeSetClarityPreset(it, preset.index) }
+    }
+
+    /**
+     * Atmos-aware bypass: while true the native clarity chain fully bypasses
+     * (multichannel-safe), independent of the on/off toggle.
+     */
+    fun setClarityAtmosBypass(bypass: Boolean) {
+        withHandle(Unit) { nativeSetClarityAtmosBypass(it, bypass) }
     }
 
     internal fun configureMediaProcessor(
@@ -320,6 +364,10 @@ class NativeAudioEngine @Inject constructor(
     private external fun nativeSetBitPerfect(handle: Long, enabled: Boolean)
     private external fun nativeIsBitPerfect(handle: Long): Boolean
     private external fun nativeSetEqualizer(handle: Long, enabled: Boolean, gainsDb: FloatArray)
+    private external fun nativeSetClarityWet(handle: Long, wet: Float)
+    private external fun nativeSetClarityTrims(handle: Long, trimsDb: FloatArray)
+    private external fun nativeSetClarityPreset(handle: Long, preset: Int)
+    private external fun nativeSetClarityAtmosBypass(handle: Long, bypass: Boolean)
     private external fun nativeConfigureMediaProcessor(
         handle: Long,
         inputSampleRate: Int,
@@ -373,6 +421,7 @@ class NativeAudioEngine @Inject constructor(
     private companion object {
         const val TAG = "NativeAudioEngine"
         const val EQUALIZER_BAND_COUNT = 15
+        const val CLARITY_TRIM_MAX_DB = 12f
 
         val libraryLoaded = try {
             System.loadLibrary("lastwave_audio")

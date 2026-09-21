@@ -102,6 +102,49 @@ class LosslessMusicApi @Inject constructor(
             return (listOf(preferredQuality) + above + below).distinct()
         }
 
+        private val MANIFEST_CODECS = Regex("""codecs="([^"]+)"""")
+        private val SIX_CHANNELS = Regex("""value=["']6["']""")
+
+        /**
+         * True only when DASH manifest XML really carries E-AC-3 spatial
+         * audio on a 6-channel declaration. The atmos endpoint answers
+         * stereo-only tracks with a plain FLAC/AAC rendition, so claiming
+         * Atmos from anything less would badge stereo as DOLBY ATMOS.
+         * Fails closed (false) on anything unparseable.
+         */
+        fun isAtmosManifest(mpdXml: String): Boolean {
+            if (mpdXml.isBlank()) return false
+            val lower = mpdXml.lowercase()
+            val spatial = lower.contains("ec-3") || lower.contains("eac3") || lower.contains("ec3")
+            if (!spatial) return false
+            return lower.contains("audiochannelconfiguration") && SIX_CHANNELS.containsMatchIn(lower)
+        }
+
+        /** First `codecs=` value inside a base64 DASH data URL, or null when unreadable. */
+        fun manifestCodecOf(dataUrl: String): String? {
+            val b64 = dataUrl.substringAfter("base64,", "").trim()
+            if (b64.isEmpty()) return null
+            return runCatching {
+                val xml = String(
+                    android.util.Base64.decode(b64, android.util.Base64.DEFAULT),
+                    Charsets.UTF_8,
+                ).lowercase()
+                MANIFEST_CODECS.find(xml)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+            }.getOrNull()
+        }
+
+        /** True for E-AC-3 spatial codec labels. Pure; safe to unit-test on JVM. */
+        fun isAtmosCodec(codec: String?): Boolean {
+            val c = codec?.trim()?.lowercase().orEmpty()
+            return c.startsWith("ec-3") || c.startsWith("eac3") || c.startsWith("ac-3")
+        }
+
+        /** True when the stream bytes are E-AC-3 spatial. Fail-open (false) when unreadable. */
+        fun isAtmosStreamUrl(url: String): Boolean {
+            if (!url.startsWith("data:application/dash+xml")) return false
+            return isAtmosCodec(manifestCodecOf(url))
+        }
+
         private const val TAG = "LosslessMusicApi"
         private const val MAX_DURATION_DIFFERENCE_SECONDS = 8
         private val DIACRITICS = Regex("\\p{M}+")
@@ -198,7 +241,9 @@ class LosslessMusicApi @Inject constructor(
 
             // 2. Fetch Tidal direct streaming manifest
             val directStream = fetchTrackStreamUrl(candidate, preferredQuality, creds = creds)
-            if (directStream != null && directStream.url !in excludedUrls) {
+            if (directStream != null && directStream.url !in excludedUrls &&
+                (preferredQuality == QUALITY_DOLBY_ATMOS || !isAtmosStreamUrl(directStream.url))
+            ) {
                 return@withContext directStream
             }
 
@@ -206,7 +251,11 @@ class LosslessMusicApi @Inject constructor(
             for (quality in qualitiesToTry) {
                 currentCoroutineContext().ensureActive()
                 val stream = fetchTrackStreamUrl(candidate, quality, creds = creds)
-                if (stream != null && stream.url !in excludedUrls) return@withContext stream
+                if (stream == null || stream.url in excludedUrls) continue
+                // Never leak an Atmos (E-AC-3) mix into a stereo request:
+                // devices without an EC-3 decoder fail on it outright.
+                if (preferredQuality != QUALITY_DOLBY_ATMOS && isAtmosStreamUrl(stream.url)) continue
+                return@withContext stream
             }
             null
         } catch (e: CancellationException) {
@@ -388,6 +437,14 @@ class LosslessMusicApi @Inject constructor(
             // Fetch MPD XML directly
             val mpdReq = Request.Builder().url(mpdUri).get().build()
             val mpdXml = resolutionClient.newCall(mpdReq).awaitSuccessfulBodyOrNull() ?: return null
+            // Ground truth: the endpoint answers stereo-only tracks with a
+            // plain rendition (atmos_available=false). Claiming those as
+            // Atmos would badge stereo as DOLBY ATMOS, so fail to null and
+            // let the caller fall back to honest stereo tiers instead.
+            if (!isAtmosManifest(mpdXml)) {
+                Log.d(TAG, "Atmos manifest lacks E-AC-3/6ch for track ${candidate.id}; falling back")
+                return null
+            }
             val b64 = android.util.Base64.encodeToString(mpdXml.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
 
             LosslessAudioStream(

@@ -95,6 +95,10 @@ data class MiscSettings(
     val dolbyAtmosEnabled: Boolean = false,
     /** Optional studio-clarity curve. On by default; Bit-Perfect disables it. */
     val isStudioMasterClarityEnabled: Boolean = true,
+    /** Clarity output preset index (0 Reference, 1 Speaker, 2 Headphone, 3 DAC). */
+    val clarityPreset: Int = 0,
+    /** When true, the clarity chain bypasses on multichannel/spatial sources. */
+    val clarityAtmosBypass: Boolean = false,
     /** When true, completely bypasses DSP, EQ, tone effects, and software volume ducking for bit-exact audio. */
     val isBitPerfectEnabled: Boolean = false,
     /** Lyrics UI layout version (Classic or Modern). */
@@ -209,6 +213,8 @@ class SettingsPreferences @Inject constructor(
         val LOSSLESS_QUALITY = intPreferencesKey("lw_lossless_quality")
         val DOWNLOAD_QUALITY = intPreferencesKey("lw_download_quality")
         val MUSIC_ENHANCER = booleanPreferencesKey("lw_music_enhancer")
+        val CLARITY_PRESET = intPreferencesKey("lw_clarity_preset")
+        val CLARITY_ATMOS_BYPASS = booleanPreferencesKey("lw_clarity_atmos_bypass")
         val BIT_PERFECT_ENABLED = booleanPreferencesKey("lw_bit_perfect_enabled")
         val LYRICS_UI_VERSION = stringPreferencesKey("lw_lyrics_ui_version")
         val WORD_BY_WORD_LYRICS = booleanPreferencesKey("lw_word_by_word_lyrics")
@@ -241,6 +247,8 @@ class SettingsPreferences @Inject constructor(
                 downloadQuality = p.readSafely(Keys.DOWNLOAD_QUALITY)?.takeIf { it in DOWNLOAD_QUALITIES } ?: 27,
                 dolbyAtmosEnabled = p.readSafely(Keys.DOLBY_ATMOS_ENABLED) ?: false,
                 isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: true,
+                clarityPreset = p.readSafely(Keys.CLARITY_PRESET)?.takeIf { it in 0..3 } ?: 0,
+                clarityAtmosBypass = p.readSafely(Keys.CLARITY_ATMOS_BYPASS) ?: false,
                 isBitPerfectEnabled = p.readSafely(Keys.BIT_PERFECT_ENABLED) ?: false,
                 lyricsUiVersion = LyricsUiVersion.fromId(p.readSafely(Keys.LYRICS_UI_VERSION)),
                 wordByWordLyrics = p.readSafely(Keys.WORD_BY_WORD_LYRICS) ?: true,
@@ -302,6 +310,14 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setStudioMasterClarity(enabled: Boolean) {
         dataStore.edit { it[Keys.MUSIC_ENHANCER] = enabled }
+    }
+
+    suspend fun setClarityPreset(preset: Int) {
+        dataStore.edit { it[Keys.CLARITY_PRESET] = preset.coerceIn(0, 3) }
+    }
+
+    suspend fun setClarityAtmosBypass(enabled: Boolean) {
+        dataStore.edit { it[Keys.CLARITY_ATMOS_BYPASS] = enabled }
     }
 
     suspend fun setLyricsUiVersion(version: LyricsUiVersion) {
