@@ -742,14 +742,20 @@ class MusicPlayer @Inject constructor(
                     runBlocking(Dispatchers.IO) {
                         val bypassLossless = track.mediaIdKey() in losslessBypassMediaIds
                         resolveTrackAudioStreamWithRetry(track, track.videoId, allowLossless = !bypassLossless).also { resolved ->
-                            applicationScope.launch(Dispatchers.Main.immediate) { registerPreparedStream(resolved) }
+                            applicationScope.launch(Dispatchers.Main.immediate) {
+                                registerPreparedStream(resolved)
+                                publishResolvedQuality(resolved)
+                            }
                         }
                     }
                 }.recoverCatching {
                     runBlocking(Dispatchers.IO) {
                         losslessBypassMediaIds += track.mediaIdKey()
                         resolveTrackAudioStreamWithRetry(track, track.videoId, allowLossless = false).also { resolved ->
-                            applicationScope.launch(Dispatchers.Main.immediate) { registerPreparedStream(resolved) }
+                            applicationScope.launch(Dispatchers.Main.immediate) {
+                                registerPreparedStream(resolved)
+                                publishResolvedQuality(resolved)
+                            }
                         }
                     }
                 }.getOrNull()
@@ -878,12 +884,28 @@ class MusicPlayer @Inject constructor(
                     ) {
                         runCatching { effects.setReplayGainFromFormat(format) }
                         val rateHz = format.sampleRate
-                        if (rateHz > 0) {
-                            _state.update { snapshot ->
+                        val sampleMime = format.sampleMimeType?.lowercase().orEmpty()
+                        val detectedCodec = when {
+                            sampleMime.contains("opus") -> "OPUS"
+                            sampleMime.contains("flac") -> "FLAC"
+                            sampleMime.contains("mp4a") || sampleMime.contains("aac") -> "AAC"
+                            sampleMime.contains("mp3") || sampleMime.contains("mpeg") -> "MP3"
+                            else -> null
+                        }
+                        val bitrate = format.bitrate.takeIf { it > 0 }?.let { (it + 500) / 1000 }
+                        _state.update { snapshot ->
+                            var updated = snapshot
+                            if (rateHz > 0) {
                                 val kHz = rateHz / 1000.0
-                                if (snapshot.samplingRateKHz == kHz) snapshot
-                                else snapshot.copy(samplingRateKHz = kHz)
+                                if (updated.samplingRateKHz != kHz) updated = updated.copy(samplingRateKHz = kHz)
                             }
+                            if ((updated.audioCodec == null || updated.audioCodec == "AUDIO") && detectedCodec != null) {
+                                updated = updated.copy(
+                                    audioCodec = detectedCodec,
+                                    bitrateKbps = updated.bitrateKbps ?: bitrate ?: if (detectedCodec == "OPUS") 160 else null,
+                                )
+                            }
+                            updated
                         }
                     }
                 })
@@ -3709,7 +3731,7 @@ class MusicPlayer @Inject constructor(
             else runCatching { resolveLosslessTrackAudioStream(track, misc, excludedLosslessUrls) }.getOrNull()
         }
         return try {
-            val losslessTimeoutMs = if (!videoId.isNullOrBlank()) 1_200L else 2_500L
+            val losslessTimeoutMs = if (!videoId.isNullOrBlank()) 3_500L else 4_500L
             val losslessStream: ResolvedStream? = if (losslessAttempt) {
                 withTimeoutOrNull(losslessTimeoutMs) { losslessDeferred.await() }
             } else null
