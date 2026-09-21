@@ -2555,6 +2555,38 @@ class MusicPlayer @Inject constructor(
         val nextItem = player.getMediaItemAt(nextIndex)
         if (nextItem.localConfiguration?.uri?.scheme != "lastwave") return
         preloadNextTrack(nextIndex, nextItem.toPlayableTrack())
+        // Desktop-style +2 neighbor prefetch
+        val nextNext = nextIndex + 1
+        if (nextNext in 0 until player.mediaItemCount) {
+            val nn = player.getMediaItemAt(nextNext)
+            if (nn.localConfiguration?.uri?.scheme == "lastwave") {
+                preloadNeighborTrack(nextNext, nn.toPlayableTrack())
+            }
+        }
+    }
+
+    private var neighborPreloadJob: Job? = null
+
+    /** Prefetch +2 neighbor (fire-and-forget, no byte cache). */
+    private fun preloadNeighborTrack(index: Int, track: PlayableTrack?) {
+        if (track == null || track.playbackUrl != null) return
+        warmArtwork(track)
+        val key = track.queueKey()
+        neighborPreloadJob?.cancel()
+        neighborPreloadJob = applicationScope.launch(Dispatchers.IO) {
+            delay(NEXT_TRACK_PREFETCH_DELAY_MS * 2) // slightly after +1
+            if (!_state.value.isPlaying) return@launch
+            val resolved = runCatching {
+                resolveTrackAudioStreamWithRetry(track, track.videoId, allowLossless = true)
+            }.getOrNull() ?: return@launch
+            withContext(Dispatchers.Main.immediate) {
+                val q = (if (index in 0 until player.mediaItemCount) player.getMediaItemAt(index).toPlayableTrack() else null)
+                    ?: return@withContext
+                if (q.queueKey() != key || index == player.currentMediaItemIndex) return@withContext
+                registerPreparedStream(resolved)
+                player.replaceMediaItem(index, q.toMediaItem(resolved))
+            }
+        }
     }
 
     private fun preloadNextTrack(nextIndex: Int, nextTrack: PlayableTrack?) {
@@ -3564,7 +3596,8 @@ class MusicPlayer @Inject constructor(
     ): ResolvedStream {
         val wantLossless = allowLossless &&
             misc.preferLosslessStreaming &&
-            misc.losslessQuality != com.lastwave.app.data.lossless.LosslessMusicApi.QUALITY_YOUTUBE
+            misc.losslessQuality != com.lastwave.app.data.lossless.LosslessMusicApi.QUALITY_YOUTUBE &&
+            losslessMusicApi.isConfigured // Desktop-style: skip lossless entirely when unconfigured/cooldown
 
         if (!wantLossless || (!videoId.isNullOrBlank() &&
                 (track.artist.isBlank() || track.artist.equals("Unknown artist", ignoreCase = true)))
@@ -3662,6 +3695,17 @@ class MusicPlayer @Inject constructor(
         val rejectedVideoIds = mutableSetOf<String>()
         var lastFailure: Throwable? = null
         var resolved: YouTubeAudioStream? = null
+        // Desktop-style: if videoId is known, resolve directly without search
+        if (!videoId.isNullOrBlank()) {
+            // Instant peek cache hit (0ms)
+            val peeked = innerTube.peekCachedStream(videoId)
+            if (peeked != null) {
+                resolved = peeked
+            } else {
+                resolved = runCatching { innerTube.resolveAudioStream(videoId) }.getOrNull()
+            }
+        }
+        if (resolved == null) {
         for (attempt in 0 until 3) {
             try {
                 val targetVideoId = videoId?.takeIf { attempt == 0 && it.isNotBlank() }
@@ -3686,6 +3730,7 @@ class MusicPlayer @Inject constructor(
                 if (!canSearch && (videoId.isNullOrBlank() || attempt > 0)) throw failure
             }
         }
+        } // end if (resolved == null)
         val ytStream = resolved ?: throw (lastFailure ?: java.io.IOException("No playable match found"))
         val trueBitrate = ytStream.bitrate.takeIf { it > 0 }?.let { (it + 500) / 1_000 }
         val rawCodec = ytStream.codec?.substringBefore(',')?.trim()?.uppercase()?.ifBlank {
@@ -4219,7 +4264,7 @@ class MusicPlayer @Inject constructor(
         const val PLAYBACK_RETRY_JITTER_MS = 250L
         const val MEDIA_STREAM_CACHE_BYTES = 64L * 1024 * 1024
         const val NEXT_TRACK_PREFETCH_BYTES = 1L * 1024 * 1024
-        const val NEXT_TRACK_PREFETCH_DELAY_MS = 10_000L
+        const val NEXT_TRACK_PREFETCH_DELAY_MS = 500L
         /** Delayed start keeps current-track caching off the startup path. */
         const val CURRENT_TRACK_CACHE_START_DELAY_MS = 6_000L
         /** Bounded windows: progressive ahead-cache, never a full predownload. */

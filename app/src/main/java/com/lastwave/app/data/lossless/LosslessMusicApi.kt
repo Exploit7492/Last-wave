@@ -64,6 +64,25 @@ class LosslessMusicApi @Inject constructor(
 
     @Volatile
     private var cachedCredentials: BackendCredentials? = null
+    @Volatile
+    private var consecutiveFailures = 0
+    @Volatile
+    private var failureCooldownUntilMs = 0L
+
+    val isConfigured: Boolean
+        get() {
+            if (System.currentTimeMillis() < failureCooldownUntilMs) return false
+            val cached = cachedCredentials
+            if (cached != null) {
+                return cached.baseUrl.isNotBlank() && cached.apiKey.isNotBlank()
+            }
+            val nativeCreds = runCatching { nativeSecrets.credentials() }.getOrNull()
+            if (nativeCreds != null && nativeCreds.baseUrl.isNotBlank() && nativeCreds.apiKey.isNotBlank()) {
+                cachedCredentials = nativeCreds
+                return true
+            }
+            return false
+        }
 
     companion object {
         // Quality presets
@@ -177,6 +196,8 @@ class LosslessMusicApi @Inject constructor(
 
     fun invalidateCredentialsCache() {
         cachedCredentials = null
+        consecutiveFailures = 0
+        failureCooldownUntilMs = 0L
     }
 
     suspend fun getCredentials(): BackendCredentials? = withContext(Dispatchers.IO) {
@@ -237,6 +258,8 @@ class LosslessMusicApi @Inject constructor(
             if (directStream != null && directStream.url !in excludedUrls &&
                 (preferredQuality == QUALITY_DOLBY_ATMOS || !isAtmosStreamUrl(directStream.url))
             ) {
+                consecutiveFailures = 0
+                failureCooldownUntilMs = 0L
                 return@withContext directStream
             }
 
@@ -248,6 +271,8 @@ class LosslessMusicApi @Inject constructor(
                 // Never leak an Atmos (E-AC-3) mix into a stereo request:
                 // devices without an EC-3 decoder fail on it outright.
                 if (preferredQuality != QUALITY_DOLBY_ATMOS && isAtmosStreamUrl(stream.url)) continue
+                consecutiveFailures = 0
+                failureCooldownUntilMs = 0L
                 return@withContext stream
             }
             null
@@ -255,6 +280,10 @@ class LosslessMusicApi @Inject constructor(
             throw e
         } catch (e: Exception) {
             Log.d(TAG, "Lossless Tidal resolution failed: ${e.message}")
+            consecutiveFailures++
+            if (consecutiveFailures >= 2) {
+                failureCooldownUntilMs = System.currentTimeMillis() + 60_000L
+            }
             null
         }
     }

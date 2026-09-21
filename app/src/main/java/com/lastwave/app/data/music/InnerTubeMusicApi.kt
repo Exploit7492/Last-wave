@@ -1757,9 +1757,33 @@ class InnerTubeMusicApi @Inject constructor(
         null
     }
 
+    /** Instant in-memory stream peek for 0ms playback (Desktop way). Returns null if not cached/fresh. */
+    fun peekCachedStream(videoId: String): YouTubeAudioStream? {
+        if (videoId.isBlank()) return null
+        val now = System.currentTimeMillis()
+        val authScope = playbackAuthScope()
+        val entry = streamCache.entries
+            .asSequence()
+            .filter { it.key.videoId == videoId && it.key.authScope == authScope }
+            .sortedByDescending { it.value.cachedAtEpochMs }
+            .firstOrNull() ?: return null
+        val cached = entry.value
+        return if (cached.stream.isFresh(cached.cachedAtEpochMs, now)) {
+            cached.stream
+        } else {
+            null
+        }
+    }
+
     /** Resolves and byte-probes an expiring googlevideo URL immediately before use. */
     suspend fun resolveAudioStream(videoId: String): YouTubeAudioStream = withContext(Dispatchers.IO) {
         require(videoId.isNotBlank()) { "Missing YouTube Music video id" }
+        peekCachedStream(videoId)?.let { stream ->
+            val authScope = playbackAuthScope()
+            lastResolvedStreams[resolutionKey(videoId, authScope)] = stream
+            logStreamEvent("cache-hit", stream)
+            return@withContext stream
+        }
         val now = System.currentTimeMillis()
         val authScope = playbackAuthScope()
 
@@ -1826,22 +1850,8 @@ class InnerTubeMusicApi @Inject constructor(
     ): YouTubeAudioStream = kotlinx.coroutines.coroutineScope {
         val now = System.currentTimeMillis()
 
-        // 1. Primary: NewPipe (battle-tested, unthrottled via Rhino JS n-param deobfuscation, 4.0.0 speed)
-        try {
-            val npStream = streamExtractor.resolveAudioStream(videoId)
-            if (probeStream(npStream, "newpipe-primary")) {
-                cacheResolvedStream(npStream, now)
-                lastResolvedStreams[resolutionKey(videoId, authScope)] = npStream
-                logStreamEvent("newpipe-resolved", npStream)
-                return@coroutineScope npStream
-            }
-        } catch (cancellation: kotlinx.coroutines.CancellationException) {
-            throw cancellation
-        } catch (failure: Throwable) {
-            logClientFailure(videoId, "NEWPIPE-PRIMARY", failure)
-        }
-
-        // 2. Secondary fallback: InnerTubeX with throttling deobfuscation
+        // 1. Primary: InnerTubeX (Desktop-style — built-in YouTubeCipherService
+        //    handles n-param deobfuscation internally, no Rhino JS overhead)
         val innerTubeXCandidate = try {
             val visitorData = try {
                 getWebConfig().visitorData
@@ -1859,19 +1869,15 @@ class InnerTubeMusicApi @Inject constructor(
         }
         if (innerTubeXCandidate != null) {
             val compatible = innerTubeXCandidate.isAdaptive || isCompatibleAudioCandidate(innerTubeXCandidate)
-            val unthrottled = if (compatible && innerTubeXCandidate.url.isNotBlank()) {
-                val deobfuscated = streamExtractor.deobfuscateThrottlingParameter(videoId, innerTubeXCandidate.url)
-                innerTubeXCandidate.copy(url = deobfuscated)
-            } else innerTubeXCandidate
-            if (compatible && probeStream(unthrottled, "innertubex-probe")) {
-                cacheResolvedStream(unthrottled, now)
-                lastResolvedStreams[resolutionKey(videoId, authScope)] = unthrottled
-                logStreamEvent("innertubex-resolved", unthrottled)
-                return@coroutineScope unthrottled
+            // InnerTubeX's cipher service already deobfuscates n-param;
+            // do NOT pipe through NewPipe's deobfuscateThrottlingParameter (redundant + slow Rhino)
+            if (compatible && probeStream(innerTubeXCandidate, "innertubex-probe")) {
+                cacheResolvedStream(innerTubeXCandidate, now)
+                lastResolvedStreams[resolutionKey(videoId, authScope)] = innerTubeXCandidate
+                logStreamEvent("innertubex-resolved", innerTubeXCandidate)
+                return@coroutineScope innerTubeXCandidate
             }
             logStreamEvent("innertubex-rejected", innerTubeXCandidate, detail = "compatible=$compatible")
-            // A candidate that fails validation must not make the same
-            // InnerTubeX profile win the next resolution again.
             innerTubeXExtractor.reportPlaybackFailure(
                 videoId = videoId,
                 authScope = authScope,
@@ -1879,6 +1885,8 @@ class InnerTubeMusicApi @Inject constructor(
             )
         }
 
+        // 2. Parallel fallback: race direct InnerTube clients vs NewPipe
+        //    (NewPipe is no longer primary — it's a parallel racer, first to finish wins)
         val configDeferred = async(Dispatchers.IO) {
             getWebConfig()
         }
@@ -1901,37 +1909,7 @@ class InnerTubeMusicApi @Inject constructor(
             if (remainingResolvers.decrementAndGet() == 0) channel.close()
         }
 
-        jobs += launch(Dispatchers.IO) {
-            var lastFailure: Throwable? = null
-            try {
-                for (attempt in 0..1) {
-                    try {
-                        val stream = streamExtractor.resolveAudioStream(videoId)
-                        if (!probeStream(stream, "newpipe-probe", attempt)) {
-                            throw IOException("NewPipe returned a rejected media URL for $videoId")
-                        }
-                        channel.trySend(stream)
-                        return@launch
-                    } catch (cancellation: kotlinx.coroutines.CancellationException) {
-                        throw cancellation
-                    } catch (error: Throwable) {
-                        lastFailure = error
-                        if (attempt == 0 && error.confirmedUnavailableReasonOrNull() == null) {
-                            streamExtractor.invalidatePlayerState(videoId)
-                            delay(NEWPIPE_RETRY_BASE_DELAY_MS + Random.nextLong(NEWPIPE_RETRY_JITTER_MS + 1L))
-                        } else {
-                            break
-                        }
-                    }
-                }
-                val confirmedReason = lastFailure?.confirmedUnavailableReasonOrNull()
-                if (confirmedReason != null) confirmedUnavailableReasons += confirmedReason
-                else transientFailures += "NewPipe: ${lastFailure?.message.orEmpty()}"
-            } finally {
-                resolverFinished()
-            }
-        }
-
+        // 2a. Direct InnerTube clients (hedged parallel, no Rhino dependency)
         jobs += launch(Dispatchers.IO) {
             try {
                 val config = configDeferred.await()
@@ -1997,6 +1975,38 @@ class InnerTubeMusicApi @Inject constructor(
             }
         }
 
+        // 2b. NewPipe racer (parallel with direct clients — NOT primary, just a racer)
+        jobs += launch(Dispatchers.IO) {
+            var lastFailure: Throwable? = null
+            try {
+                for (attempt in 0..1) {
+                    try {
+                        val stream = streamExtractor.resolveAudioStream(videoId)
+                        if (!probeStream(stream, "newpipe-probe", attempt)) {
+                            throw IOException("NewPipe returned a rejected media URL for $videoId")
+                        }
+                        channel.trySend(stream)
+                        return@launch
+                    } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                        throw cancellation
+                    } catch (error: Throwable) {
+                        lastFailure = error
+                        if (attempt == 0 && error.confirmedUnavailableReasonOrNull() == null) {
+                            streamExtractor.invalidatePlayerState(videoId)
+                            delay(NEWPIPE_RETRY_BASE_DELAY_MS + Random.nextLong(NEWPIPE_RETRY_JITTER_MS + 1L))
+                        } else {
+                            break
+                        }
+                    }
+                }
+                val confirmedReason = lastFailure?.confirmedUnavailableReasonOrNull()
+                if (confirmedReason != null) confirmedUnavailableReasons += confirmedReason
+                else transientFailures += "NewPipe: ${lastFailure?.message.orEmpty()}"
+            } finally {
+                resolverFinished()
+            }
+        }
+
         try {
             val winner = channel.receiveCatching().getOrNull()
             if (winner != null) {
@@ -2017,6 +2027,7 @@ class InnerTubeMusicApi @Inject constructor(
             if (e is kotlinx.coroutines.CancellationException) throw e
             if (e is ConfirmedUnplayableMediaException) throw e
             jobs.forEach { it.cancel() }
+            // 3. Last resort: NewPipe with fresh state
             streamExtractor.invalidatePlayerState(videoId)
             val npStream = try {
                 streamExtractor.resolveAudioStream(videoId)
