@@ -68,6 +68,9 @@ class ModulePlaybackResolver @Inject constructor(
         artist: String,
         quality: String,
     ): SegmentedStreamDescriptor? {
+        // JSON-only addons carry config (url+secret); logic lives in app
+        // (LosslessMusicApi). Skip QuickJS entirely -> native fallback handles.
+        if (handle.manifest.entryPoint == "config.json") return null
         val key = sourceCache.keyFor(handle.id, title, artist, quality)
 
         // 1. Valid cached source -> reuse, zero provider calls.
@@ -105,6 +108,9 @@ class ModulePlaybackResolver @Inject constructor(
     /** Quality badge from the extension's own labels; fallback when unreachable. */
     suspend fun badgeFor(descriptor: SegmentedStreamDescriptor, fallback: String): String {
         currentCoroutineContext().ensureActive()
+        // JSON-only: no JS policy; use app fallback labels.
+        runCatching { manager.findHandleById(descriptor.provider) }
+            .getOrNull()?.let { if (it.manifest.entryPoint == "config.json") return fallback }
         val handle = try {
             manager.findHandleById(descriptor.provider)
         } catch (cancellation: CancellationException) {
@@ -127,6 +133,9 @@ class ModulePlaybackResolver @Inject constructor(
     /** Whether the extension wants its downloads transcoded (default yes). */
     suspend fun shouldTranscode(descriptor: SegmentedStreamDescriptor): Boolean {
         currentCoroutineContext().ensureActive()
+        // JSON-only: app decides (never transcode lossless).
+        runCatching { manager.findHandleById(descriptor.provider) }
+            .getOrNull()?.let { if (it.manifest.entryPoint == "config.json") return false }
         val handle = try {
             manager.findHandleById(descriptor.provider)
         } catch (cancellation: CancellationException) {

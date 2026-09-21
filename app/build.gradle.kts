@@ -51,20 +51,13 @@ android {
         versionCode = 18
         versionName = "4.1.1"
 
+        // Module key is NO LONGER in DEX. It lives only in native .so via
+        // SecretsBridge_generated.h (CI: tools/generate_native_secrets.py from
+        // PROVIDER_MODULE_KEY). DEX fields kept empty for compat; ModuleCrypto
+        // reads NativeModuleKey only. Static XOR was trivially reversible.
+        buildConfigField("byte[]", "PROVIDER_MODULE_KEY_BYTES", "new byte[] {}")
         val secretMask = listOf(0x5A, 0x3F, 0x7E, 0x1B, 0x92, 0x4C, 0xA1, 0x6D)
-        fun obfuscateSecret(plainText: String): String {
-            if (plainText.isEmpty()) return "new byte[] {}"
-            val bytes = plainText.toByteArray(Charsets.UTF_8)
-            val obfuscated = bytes.mapIndexed { idx, b -> (b.toInt() xor secretMask[idx % secretMask.size]).toByte() }
-            return "new byte[] { " + obfuscated.joinToString(", ") { "(byte) $it" } + " }"
-        }
         val maskLiteral = "new byte[] { " + secretMask.joinToString(", ") { "(byte) $it" } + " }"
-
-        // Provider-module code key (AES-256, base64 of 32 bytes). Provisioned
-        // per build via env / gradle property / local.properties / .env as
-        // PROVIDER_MODULE_KEY.
-        val providerModuleKey = resolveSecret("PROVIDER_MODULE_KEY")
-        buildConfigField("byte[]", "PROVIDER_MODULE_KEY_BYTES", obfuscateSecret(providerModuleKey))
 
         // No shared Last.fm key: bring-your-own-key model. Everyone creates
         // their own key at last.fm/api/account/create and pastes it in
@@ -314,5 +307,22 @@ configurations.all {
 
 tasks.withType<Test> {
     maxHeapSize = "2048m"
+}
+
+// Generate native secrets header before CMake configures.
+// CI provides PROVIDER_MODULE_KEY / TIDAL_API_KEY / TIDAL_BASE_URL /
+// RELEASE_CERT_SHA256 via env/secrets. Public forks get empty header ->
+// native returns empty -> YouTube fallback, no leak.
+val generateNativeSecrets by tasks.registering(Exec::class) {
+    workingDir = rootProject.projectDir
+    val py = org.gradle.internal.os.OperatingSystem.current().let {
+        if (it.isWindows) "python" else "python3"
+    }
+    commandLine(py, "tools/generate_native_secrets.py")
+    // Never fail public builds when secrets absent; script emits empty header.
+    isIgnoreExitValue = true
+}
+tasks.matching { it.name.startsWith("preBuild") || it.name.startsWith("configureCMake") }.configureEach {
+    dependsOn(generateNativeSecrets)
 }
 

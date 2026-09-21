@@ -136,6 +136,7 @@ class TrackDownloadManager @Inject constructor(
     private val offlineLicense: ModuleOfflineLicense,
     private val moduleManager: ModuleManager,
     private val flacTranscoder: ModuleFlacTranscoder,
+    private val losslessMusicApi: LosslessMusicApi,
 ) {
     companion object {
         const val CHANNEL_ID = "lastwave_downloads"
@@ -550,7 +551,53 @@ class TrackDownloadManager @Inject constructor(
 
                 if (!isYouTubeRequested) {
                     try {
-                        val desc = runCatching {
+                        val losslessStream = runCatching {
+                            losslessMusicApi.resolveStream(title, artist, preferredQuality = downloadQuality)
+                        }.getOrNull()
+
+                        if (losslessStream != null && losslessStream.url.isNotBlank()) {
+                            if (losslessStream.url.startsWith("data:application/dash+xml")) {
+                                val parsedDash = parseTidalDashManifest(losslessStream.url)
+                                if (parsedDash != null) {
+                                    val manifestCodec = parsedDash.codec.ifBlank { "flac" }
+                                    val isAtmosStream = losslessStream.formatId == LosslessMusicApi.QUALITY_DOLBY_ATMOS ||
+                                        manifestCodec.startsWith("ec-3") ||
+                                        manifestCodec.startsWith("eac3") ||
+                                        manifestCodec.startsWith("ac-3")
+                                    val isFlacStream = manifestCodec.contains("flac")
+                                    isDashModuleDownload = true
+                                    dashInitUrl = parsedDash.initUrl
+                                    dashMediaTemplate = parsedDash.mediaTemplate
+                                    dashSegmentCount = parsedDash.segmentCount
+                                    dashManifestCodec = manifestCodec
+                                    dashIsFlacInMp4 = isFlacStream
+                                    resolvedUrl = parsedDash.initUrl
+                                    extension = "m4a"
+                                    mimeType = "audio/mp4"
+                                    formatBadge = when {
+                                        isAtmosStream -> "DOLBY ATMOS"
+                                        isFlacStream ->
+                                            if (losslessStream.bitDepth > 16 || losslessStream.samplingRate > 48.0) "24-BIT FLAC" else "CD LOSSLESS"
+                                        manifestCodec.startsWith("mp4a.40.5") -> "HE-AAC"
+                                        manifestCodec.startsWith("mp4a") -> "AAC 320"
+                                        else -> "AAC"
+                                    }
+                                    isLossless = isAtmosStream || isFlacStream
+                                    durationMs = (losslessStream.durationSeconds * 1000L).takeIf { it > 0 } ?: 0L
+                                }
+                            } else {
+                                resolvedUrl = losslessStream.url
+                                mimeType = losslessStream.mimeType.ifBlank { "audio/flac" }
+                                extension = if (mimeType.contains("mp3")) "mp3" else "flac"
+                                isLossless = !extension.equals("mp3", ignoreCase = true)
+                                formatBadge = if (isLossless) {
+                                    if (losslessStream.bitDepth > 16 || losslessStream.samplingRate > 48.0) "HI-RES FLAC" else "LOSSLESS FLAC"
+                                } else "MP3"
+                                durationMs = (losslessStream.durationSeconds * 1000L).takeIf { it > 0 } ?: 0L
+                            }
+                        }
+
+                        val desc = if (resolvedUrl != null) null else runCatching {
                             moduleResolver.resolve(title, artist, downloadQuality)
                         }.getOrNull()
                         if (desc != null && desc.stream.baseUrl.isNotBlank()) {

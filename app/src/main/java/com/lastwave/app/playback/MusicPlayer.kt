@@ -175,6 +175,7 @@ data class PlaybackProgressState(
 class MusicPlayer @Inject constructor(
     @ApplicationContext context: Context,
     private val innerTube: InnerTubeMusicApi,
+    private val losslessMusicApi: LosslessMusicApi,
     private val moduleResolver: ModulePlaybackResolver,
     private val moduleDrmFactory: ModuleDrmFactory,
     private val moduleManager: com.lastwave.app.data.plugin.ModuleManager,
@@ -3321,99 +3322,82 @@ class MusicPlayer @Inject constructor(
         val youtubeDeferred = applicationScope.async(Dispatchers.IO) {
             runCatching { resolveYoutubeTrackAudioStream(track, videoId) }.getOrNull()
         }
-        // Provider module (.lwp engine) resolution
-        val moduleDeferred = applicationScope.async(Dispatchers.IO) {
+        // Native lossless backend resolution (credentials supplied by active module)
+        val losslessDeferred = applicationScope.async(Dispatchers.IO) {
             if (!allowLossless || !misc.preferLosslessStreaming || !misc.preferProviderModules || !hasActiveModules) null
-            else runCatching { resolveModuleTrackAudioStream(track, misc, excludedLosslessUrls) }.getOrNull()
+            else runCatching { resolveLosslessTrackAudioStream(track, misc, excludedLosslessUrls) }.getOrNull()
         }
         return try {
-            val wantModule = allowLossless && misc.preferLosslessStreaming && misc.preferProviderModules && hasActiveModules
-            val moduleStream: ResolvedStream? = if (wantModule) {
-                withTimeoutOrNull(MODULE_RESOLVE_TIMEOUT_MS) { moduleDeferred.await() }
+            val wantLossless = allowLossless && misc.preferLosslessStreaming && misc.preferProviderModules && hasActiveModules
+            val losslessStream: ResolvedStream? = if (wantLossless) {
+                losslessDeferred.await()
             } else null
 
-            moduleStream
+            losslessStream
                 ?: youtubeDeferred.await()
                 ?: runCatching { resolveYoutubeTrackAudioStream(track, videoId) }.getOrNull()
                 ?: resolveYoutubeTrackAudioStream(track, null)
         } finally {
             youtubeDeferred.cancel()
-            moduleDeferred.cancel()
+            losslessDeferred.cancel()
         }
     }
 
-    private suspend fun resolveModuleTrackAudioStream(
+    private suspend fun resolveLosslessTrackAudioStream(
         track: PlayableTrack,
         misc: MiscSettings,
         excludedLosslessUrls: Set<String> = emptySet(),
     ): ResolvedStream? {
-        val effectiveQuality = if (misc.dolbyAtmosEnabled) 28 else misc.losslessQuality
-        val descriptor = moduleResolver.resolve(track.title, track.artist, effectiveQuality)
-            ?: return null
-        val s = descriptor.stream
-        if (s.baseUrl.isNotBlank() && s.baseUrl in excludedLosslessUrls) return null
-        if (s.baseUrl.isBlank() && s.segments.isEmpty()) return null
+        val effectiveQuality = if (misc.dolbyAtmosEnabled) LosslessMusicApi.QUALITY_DOLBY_ATMOS else misc.losslessQuality
+        val stream = losslessMusicApi.resolveStream(
+            title = track.title,
+            artist = track.artist,
+            expectedAlbum = track.album,
+            preferredQuality = effectiveQuality,
+            excludedUrls = excludedLosslessUrls,
+        ) ?: return null
 
-        // Progressive clear module streams play directly like backend URLs.
-        if ((s.type == "progressive" || (s.baseUrl.isNotBlank() && s.segments.isEmpty())) && !s.baseUrl.startsWith("data:application/dash+xml") && s.type != "dash_xml") {
-            val lossless = !s.codec.equals("opus", ignoreCase = true) &&
-                !s.codec.equals("mp3", ignoreCase = true) &&
-                !s.codec.equals("aac", ignoreCase = true)
-            return ResolvedStream(
-                url = s.baseUrl,
-                mimeType = s.mimeType.ifBlank { "audio/flac" },
-                bitrateKbps = s.bandwidth.takeIf { it > 0 }?.div(1000),
-                audioCodec = if (lossless) {
-                    if ((s.bitDepth) > 16 || (s.sampleRate) > 48000) "HI-RES FLAC" else "LOSSLESS"
-                } else s.codec.uppercase(),
-                cacheKey = "lossless:${track.mediaIdKey()}:${descriptor.stream.quality}",
-                requestHeaders = descriptor.headers,
-                isLossless = lossless,
-                bitDepth = s.bitDepth.takeIf { it > 0 },
-                samplingRateKHz = s.sampleRate.takeIf { it > 0 }?.div(1000.0),
+        if (stream.url.isBlank() || stream.url in excludedLosslessUrls) return null
+
+        val isLossless = stream.formatId != LosslessMusicApi.QUALITY_MP3_320 &&
+            stream.formatId != LosslessMusicApi.QUALITY_DATA_SAVER &&
+            !stream.mimeType.contains("mp3", ignoreCase = true) &&
+            !stream.mimeType.contains("aac", ignoreCase = true)
+
+        val badge = when {
+            stream.formatId == LosslessMusicApi.QUALITY_DOLBY_ATMOS -> "DOLBY ATMOS"
+            stream.bitDepth > 16 || stream.samplingRate > 48.0 -> "HI-RES FLAC"
+            stream.formatId == LosslessMusicApi.QUALITY_MP3_320 -> "MP3 320k"
+            stream.formatId == LosslessMusicApi.QUALITY_DATA_SAVER -> "HE-AAC"
+            else -> "LOSSLESS"
+        }
+
+        val playUrl: String
+        val mimeType: String
+        if (stream.url.startsWith("data:application/dash+xml;base64,")) {
+            val xml = String(
+                android.util.Base64.decode(stream.url.substringAfter("base64,"), android.util.Base64.DEFAULT),
+                Charsets.UTF_8,
             )
+            val dir = File(appContext.cacheDir, "tidal_mpd").apply { mkdirs() }
+            val file = File(dir, "tidal_${stream.trackId}_${stream.formatId}.mpd")
+            file.writeText(xml, Charsets.UTF_8)
+            playUrl = Uri.fromFile(file).toString()
+            mimeType = MimeTypes.APPLICATION_MPD
+        } else {
+            playUrl = stream.url
+            mimeType = stream.mimeType.ifBlank { "audio/flac" }
         }
-        val moduleBadge = try {
-            moduleResolver.badgeFor(descriptor, segBridge.audioBadge(descriptor))
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (_: Exception) {
-            segBridge.audioBadge(descriptor)
-        }
-        // The addon's descriptor can claim flac/UHD even when the manifest it
-        // fetched is AAC (Tidal silently answers the HIGH tier with mp4a.40.2),
-        // so the manifest's own codecs= attribute decides the lossless verdict
-        // here — the same source of truth the download path uses.
-        val manifestCodec = segBridge.declaredManifestCodec(descriptor)
-        val aacBitrateKbps = when {
-            manifestCodec?.startsWith("mp4a.40.5") == true -> 96
-            manifestCodec?.startsWith("mp4a") == true -> 320
-            else -> null
-        }
-        val dashBadge = if (aacBitrateKbps != null) {
-            if (aacBitrateKbps == 96) "HE-AAC" else "AAC"
-        } else moduleBadge
-        // Trace the spatial/Dolby decision so a lost Atmos mix is visible in
-        // logcat (codec=atmos must surface as a DOLBY ATMOS badge).
-        val manifestInfo = manifestCodec?.let { " manifest=$it" } ?: ""
-        android.util.Log.d(
-            "MusicPlayer",
-            "module DASH resolved: quality=${s.quality} codec=${s.codec}$manifestInfo -> badge=$dashBadge",
-        )
+
         return ResolvedStream(
-            url = segBridge.mpdUri(descriptor).toString(),
-            mimeType = MimeTypes.APPLICATION_MPD,
-            bitrateKbps = aacBitrateKbps ?: s.bandwidth.takeIf { it > 0 }?.div(1000),
-            audioCodec = dashBadge,
-            cacheKey = descriptor.stableCacheKey(),
-            isLossless = if (aacBitrateKbps != null) {
-                false
-            } else {
-                !s.codec.equals("opus", ignoreCase = true)
-            },
-            bitDepth = s.bitDepth.takeIf { it > 0 },
-            samplingRateKHz = s.sampleRate.takeIf { it > 0 }?.div(1000.0),
-            segmentedDrm = descriptor,
+            url = playUrl,
+            mimeType = mimeType,
+            bitrateKbps = stream.bitrateKbps,
+            audioCodec = badge,
+            cacheKey = "lossless:${track.mediaIdKey()}:${stream.formatId}",
+            isLossless = isLossless,
+            bitDepth = stream.bitDepth.takeIf { it > 0 },
+            samplingRateKHz = stream.samplingRate.takeIf { it > 0.0 },
         )
     }
 
@@ -3911,8 +3895,6 @@ class MusicPlayer @Inject constructor(
         /** Cap for the explicit shuffle-Previous listening history. */
         const val MAX_PLAY_HISTORY = 100
         const val RESOLVED_URL_EXPIRY_MARGIN_MS = 2 * 60 * 1000L
-        /** Module lookups must never stall the YouTube fallback behind them. */
-        const val MODULE_RESOLVE_TIMEOUT_MS = 6_000L
         /** Offline license renewal attempt before giving up to streaming. */
         const val OFFLINE_LICENSE_RENEW_TIMEOUT_MS = 8_000L
         val PERMANENT_PLAYBACK_ERROR_CODES = setOf(

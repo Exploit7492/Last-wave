@@ -17,13 +17,14 @@ sealed interface ModuleInstallResult {
 }
 
 /**
- * Installs / lists / removes provider modules (.lwp packages).
+ * Installs / lists / removes provider modules (.lwp packages) — JSON-only.
  *
- * Layout: filesDir/provider_modules/<moduleId>/module.lwp + store/ (per-module
- * JS storage). Registry at provider_modules/registry.json. A package is
- * accepted only if: valid zip, manifest.json parses, id/entryPoint present,
- * encrypted==true with enc.keyId matching this build's module key, and the
- * entry point exists inside the zip. Plaintext (unencrypted) code is refused.
+ * Addon holds ONLY encrypted config.json (url+secret, LWP2); all logic in app.
+ * No JS eval. Layout: filesDir/provider_modules/<moduleId>/module.lwp + store/.
+ * Accepted only if: valid zip, manifest parses, id present, entryPoint ==
+ * "config.json", encrypted==true with enc.keyId matching native module key,
+ * config.json exists + decrypts (AAD-bound) to JSON with baseUrl. Plaintext
+ * and legacy provider.js packages are refused.
  */
 @Singleton
 class ModuleManager @Inject constructor(
@@ -92,31 +93,51 @@ class ModuleManager @Inject constructor(
     }
 
     suspend fun install(uri: Uri): ModuleInstallResult = withContext(Dispatchers.IO) {
-        val key = crypto.appKey()
-            ?: return@withContext ModuleInstallResult.Rejected("Module key not provisioned in this build")
-        val expectedKeyId = crypto.appKeyId()
+        // Key gated by native signature check; public forks get null -> reject.
         val tmp = File(context.cacheDir, "module_import_${System.currentTimeMillis()}.lwp")
         try {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 tmp.outputStream().use { input.copyTo(it) }
             } ?: return@withContext ModuleInstallResult.Rejected("Cannot read selected file")
+            if (tmp.length() > 12 * 1024 * 1024) {
+                return@withContext ModuleInstallResult.Rejected("Refused: package too large")
+            }
             val manifest = readManifest(tmp)
                 ?: return@withContext ModuleInstallResult.Rejected("Not a valid module: manifest.json missing or broken")
             if (manifest.id.isBlank() || manifest.entryPoint.isBlank()) {
                 return@withContext ModuleInstallResult.Rejected("Module manifest missing id/entryPoint")
             }
+            // JSON-only: legacy JS addons refused.
+            if (manifest.entryPoint != "config.json") {
+                return@withContext ModuleInstallResult.Rejected("Refused: legacy JS addon, need config.json")
+            }
             if (!manifest.encrypted || manifest.enc?.keyId.isNullOrBlank()) {
-                return@withContext ModuleInstallResult.Rejected("Refused: module code is not encrypted")
+                return@withContext ModuleInstallResult.Rejected("Refused: config is not encrypted")
             }
-            if (manifest.enc?.keyId != expectedKeyId) {
-                return@withContext ModuleInstallResult.Rejected("Refused: module key does not match this build")
+            if (manifest.enc?.alg != "AES-256-GCM" || manifest.enc?.format != "LWP2") {
+                return@withContext ModuleInstallResult.Rejected("Refused: need LWP2 config")
             }
-            if (!zipHasEntry(tmp, manifest.entryPoint)) {
-                return@withContext ModuleInstallResult.Rejected("Entry point ${manifest.entryPoint} missing in package")
+            if (manifest.enc?.files?.contains("config.json") != true) {
+                return@withContext ModuleInstallResult.Rejected("Refused: config.json not in enc.files")
             }
-            // Code must actually decrypt before we trust the package.
-            if (!canDecryptEntry(tmp, manifest.entryPoint, key)) {
-                return@withContext ModuleInstallResult.Rejected("Refused: code cannot be decrypted with this build's key")
+            // loadKey constant-time binds keyId; null = wrong build / repack.
+            val keyId = manifest.enc?.keyId
+            val key = crypto.loadKey(keyId)
+                ?: return@withContext ModuleInstallResult.Rejected("Refused: module key does not match this build")
+            try {
+                if (!zipHasEntry(tmp, "config.json")) {
+                    key.fill(0)
+                    return@withContext ModuleInstallResult.Rejected("config.json missing in package")
+                }
+                // Config must decrypt (LWP2 AAD-bound) to JSON with baseUrl.
+                if (!canDecryptConfig(tmp, key)) {
+                    key.fill(0)
+                    return@withContext ModuleInstallResult.Rejected("Refused: config cannot be decrypted")
+                }
+                key.fill(0)
+            } catch (_: Throwable) {
+                key.fill(0)
+                throw it
             }
             val dir = modulesDirFor(manifest.id).apply { mkdirs() }
             File(dir, "module.lwp").apply {
@@ -146,10 +167,45 @@ class ModuleManager @Inject constructor(
         })
     }
 
-    fun readEntryBytes(handle: ProviderHandle, name: String): ByteArray {        ZipFile(File(handle.dir, "module.lwp")).use { zip ->
+    fun readEntryBytes(handle: ProviderHandle, name: String): ByteArray {
+        require(!name.contains("..") && !name.startsWith("/") && !name.startsWith("\\")) { "Bad entry" }
+        ZipFile(File(handle.dir, "module.lwp")).use { zip ->
             val entry = zip.getEntry(name) ?: error("Missing $name in module")
+            require(!entry.isDirectory && entry.size <= 8 * 1024 * 1024) { "Bad entry size" }
             return zip.getInputStream(entry).use { it.readBytes() }
         }
+    }
+
+    fun readDecryptedEntry(handle: ProviderHandle, name: String): ByteArray? {
+        if (name.contains("..") || name.startsWith("/") || name.startsWith("\\")) return null
+        val keyId = handle.manifest.enc?.keyId ?: return null
+        val key = crypto.loadKey(keyId) ?: return null
+        return try {
+            val raw = runCatching { readEntryBytes(handle, name) }.getOrNull()
+                ?: run { key.fill(0); return null }
+            if (raw.size > 8 * 1024 * 1024 + 64) { key.fill(0); return null }
+            val pt = crypto.decryptEntry(raw, key, name)
+            key.fill(0)
+            pt
+        } catch (_: Exception) {
+            key.fill(0)
+            null
+        }
+    }
+
+    /** JSON-only: decrypts config.json (AAD-bound) and requires baseUrl. */
+    fun readDecryptedConfig(handle: ProviderHandle): org.json.JSONObject? {
+        val bytes = readDecryptedEntry(handle, "config.json") ?: return null
+        val text = bytes.toString(Charsets.UTF_8).trim()
+        if (text.length > 64 * 1024) return null
+        return runCatching {
+            if (!text.startsWith("{")) return@runCatching null
+            val o = org.json.JSONObject(text)
+            val url = o.optString("baseUrl").ifBlank {
+                o.optJSONObject("tidal")?.optString("baseUrl").orEmpty()
+            }
+            if (url.isBlank()) null else o
+        }.getOrNull()
     }
 
     // -- store backing the JS storeGet/storeSet bridge -------------------------
@@ -221,8 +277,31 @@ class ModuleManager @Inject constructor(
         return try {
             ZipFile(lwp).use { zip ->
                 val entry = zip.getEntry(name) ?: return false
+                if (entry.isDirectory || entry.size > 64 * 1024 + 64) return false
                 val bytes = zip.getInputStream(entry).use { it.readBytes() }
-                crypto.decrypt(bytes, key).isNotEmpty()
+                crypto.decryptEntry(bytes, key, name).isNotEmpty()
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** JSON-only gate: config.json must LWP2-decrypt to JSON with baseUrl. */
+    private fun canDecryptConfig(lwp: File, key: ByteArray): Boolean {
+        return try {
+            ZipFile(lwp).use { zip ->
+                val entry = zip.getEntry("config.json") ?: return false
+                if (entry.isDirectory || entry.size > 64 * 1024 + 64) return false
+                val bytes = zip.getInputStream(entry).use { it.readBytes() }
+                val pt = crypto.decryptEntry(bytes, key, "config.json")
+                if (pt.isEmpty() || pt.size > 64 * 1024) return false
+                val text = pt.toString(Charsets.UTF_8).trim()
+                if (!text.startsWith("{")) return false
+                val o = org.json.JSONObject(text)
+                val url = o.optString("baseUrl").ifBlank {
+                    o.optJSONObject("tidal")?.optString("baseUrl").orEmpty()
+                }
+                url.isNotBlank()
             }
         } catch (_: Exception) {
             false

@@ -73,7 +73,9 @@ class ModuleDrmFactory @Inject constructor(
             val url = request.licenseServerUrl?.takeIf { it.isNotBlank() } ?: drm.licenseUrl
             require(url.isNotBlank()) { "DRM licenseUrl missing" }
             val h = handle
-            return if (h != null && drm.envelope == "module") {
+            // JSON-only addons have no JS license ops; raw POST only.
+            val jsonOnly = h?.manifest?.entryPoint == "config.json"
+            return if (h != null && !jsonOnly && drm.envelope == "module") {
                 // Module authority: build envelope -> POST -> parse (blocking
                 // CDM thread; engine lock lives on IO threads, no deadlock).
                 val challengeB64 = Base64.encodeToString(request.data, Base64.NO_WRAP)

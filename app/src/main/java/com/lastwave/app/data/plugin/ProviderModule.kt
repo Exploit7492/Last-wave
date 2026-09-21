@@ -3,9 +3,9 @@ package com.lastwave.app.data.plugin
 import kotlinx.serialization.Serializable
 
 /**
- * Manifest of an installed provider module (.lwp package).
- * Field names mirror the module-spec schema.json; providers stay anonymous
- * to the host — only id/name/version/capabilities are surfaced in UI.
+ * Manifest of an installed provider module (.lwp package) — JSON-only.
+ * Addon holds ONLY encrypted config (url+secret); all logic lives in app.
+ * No JS, no QuickJS eval. entryPoint must be "config.json" (LWP2).
  */
 @Serializable
 data class ProviderManifest(
@@ -16,8 +16,8 @@ data class ProviderManifest(
     val description: String = "",
     val author: String = "",
     val icon: String = "",
-    val entryPoint: String = "provider.js",
-    /** JS global the host calls (e.g. "LastWaveProvider"); never provider-named. */
+    val entryPoint: String = "config.json",
+    /** Legacy JS global, ignored for JSON-only modules. */
     val global: String = "LastWaveProvider",
     val targetApi: Int = 1,
     val capabilities: List<String> = emptyList(),
@@ -72,5 +72,6 @@ data class OfflineSidecar(
 )
 
 fun ProviderManifest.isPlaybackEligible(): Boolean =
-    id.isNotBlank() && entryPoint.isNotBlank() &&
-        capabilities.contains("playback")
+    id.isNotBlank() && entryPoint.isNotBlank() && encrypted &&
+        (capabilities.contains("playback") || capabilities.contains("config") ||
+            capabilities.contains("lossless") || capabilities.contains("hires"))

@@ -206,15 +206,20 @@ class ModuleRunner @Inject constructor(
         pooled.lock.withLock {
             try {
                 if (!pooled.loaded) {
-                    val key = crypto.appKey() ?: error("Module key not provisioned")
                     val expected = handle.manifest.enc?.keyId
-                    require(!expected.isNullOrBlank() && expected == crypto.appKeyId()) {
-                        "Module key mismatch"
+                    require(!expected.isNullOrBlank()) { "Module key mismatch" }
+                    val key = crypto.loadKey(expected) ?: error("Module key not provisioned")
+                    val source: String
+                    try {
+                        val entryName = handle.manifest.entryPoint
+                        require(!entryName.contains("..") && !entryName.startsWith("/")) { "Bad entry" }
+                        val raw = manager.readEntryBytes(handle, entryName)
+                        val pt = crypto.decryptEntry(raw, key, entryName)
+                        source = String(pt, Charsets.UTF_8)
+                        java.util.Arrays.fill(pt, 0)
+                    } finally {
+                        key.fill(0)
                     }
-                    val source = String(
-                        crypto.decrypt(manager.readEntryBytes(handle, handle.manifest.entryPoint), key),
-                        Charsets.UTF_8,
-                    )
                     bindBridge(pooled.js, handle)
                     pooled.js.evaluate<String>(namespaceScript(), "bridge.js")
                     pooled.js.evaluate<String>("$source\n\"__module_loaded__\";", "module.js")
