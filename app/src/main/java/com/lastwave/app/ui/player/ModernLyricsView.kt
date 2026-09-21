@@ -387,25 +387,18 @@ private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine 
 }
 
 private fun List<LyricLine>.toSyncedLyrics(title: String, artist: String, isOverallRtl: Boolean = false): SyncedLyrics {
-    val rawLines = map { it.toISyncedLine(isOverallRtl) }
-    // Backfill end times: for line-sync lines without explicit duration,
-    // set end to the next line's start (eliminates gaps/overlaps).
-    val lines = rawLines.mapIndexed { i, line ->
-        if (line is SyncedLine && i < rawLines.lastIndex) {
-            val nextStart = rawLines[i + 1].start
-            if (nextStart > line.start && line.end >= line.start + 3900) {
-                // End was the 4000ms fallback; replace with next line's start
-                SyncedLine(
-                    start = line.start,
-                    end = nextStart,
-                    content = line.content,
-                    translation = line.translation,
-                )
+    // Backfill end times: for lines without explicit duration and no syllables,
+    // set duration to reach the next line's start (eliminates gaps/overlaps).
+    val backfilled = mapIndexed { i, line ->
+        if (line.durationMs <= 0 && line.syllables.isEmpty() && i < lastIndex) {
+            val nextStart = this[i + 1].timeMs
+            if (nextStart > line.timeMs) {
+                line.copy(durationMs = nextStart - line.timeMs)
             } else line
         } else line
     }
     return SyncedLyrics(
-        lines = lines,
+        lines = backfilled.map { it.toISyncedLine(isOverallRtl) },
         title = title,
         artists = listOf(Artist(type = "artist", name = artist)),
     )

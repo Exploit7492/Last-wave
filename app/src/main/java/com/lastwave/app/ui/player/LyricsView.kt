@@ -279,11 +279,15 @@ private fun SyncedLyricsList(
         androidx.compose.runtime.derivedStateOf {
             val pos = currentPositionMs
             // Prefer exact range match (line whose [start, end) contains pos)
-            val rangeMatch = lines.indexOfLast { line ->
-                val idx = lines.indexOf(line)
+            var rangeMatch = -1
+            for (idx in lines.indices.reversed()) {
+                val line = lines[idx]
                 val end = if (line.durationMs > 0) line.timeMs + line.durationMs
                           else lines.getOrNull(idx + 1)?.timeMs ?: (line.timeMs + 5000)
-                pos >= line.timeMs && pos < end
+                if (pos >= line.timeMs && pos < end) {
+                    rangeMatch = idx
+                    break
+                }
             }
             if (rangeMatch >= 0) rangeMatch
             else lines.indexOfLast { it.timeMs <= pos }
