@@ -115,9 +115,14 @@ fun ModernLyricsPanel(
     var lastSyncTime by remember(track) { mutableLongStateOf(SystemClock.elapsedRealtime()) }
 
     LaunchedEffect(progress.positionMs, state.isPlaying) {
-        basePositionMs = progress.positionMs
-        lastSyncTime = SystemClock.elapsedRealtime()
-        smoothedPositionMs = progress.positionMs
+        val drift = kotlin.math.abs(smoothedPositionMs - progress.positionMs)
+        // Only re-anchor on seek (>500ms drift) or play-state change;
+        // normal playback lets the monotonic clock run undisturbed.
+        if (drift > 500 || !state.isPlaying) {
+            basePositionMs = progress.positionMs
+            lastSyncTime = SystemClock.elapsedRealtime()
+            smoothedPositionMs = progress.positionMs
+        }
     }
 
     LaunchedEffect(state.isPlaying) {
@@ -315,7 +320,7 @@ private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine 
     val lineStart = timeMs.toInt()
     val lineEnd = if (durationMs > 0) (timeMs + durationMs).toInt()
     else if (syllables.isNotEmpty()) (syllables.last().timeMs + syllables.last().durationMs).toInt()
-    else lineStart + 1500
+    else lineStart + 4000  // reasonable fallback; backfilled by toSyncedLyrics
 
     val isLineRtl = isRtl || (isOverallRtl && (text.isBlank() || text == "♪"))
 
@@ -382,8 +387,25 @@ private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine 
 }
 
 private fun List<LyricLine>.toSyncedLyrics(title: String, artist: String, isOverallRtl: Boolean = false): SyncedLyrics {
+    val rawLines = map { it.toISyncedLine(isOverallRtl) }
+    // Backfill end times: for line-sync lines without explicit duration,
+    // set end to the next line's start (eliminates gaps/overlaps).
+    val lines = rawLines.mapIndexed { i, line ->
+        if (line is SyncedLine && i < rawLines.lastIndex) {
+            val nextStart = rawLines[i + 1].start
+            if (nextStart > line.start && line.end >= line.start + 3900) {
+                // End was the 4000ms fallback; replace with next line's start
+                SyncedLine(
+                    start = line.start,
+                    end = nextStart,
+                    content = line.content,
+                    translation = line.translation,
+                )
+            } else line
+        } else line
+    }
     return SyncedLyrics(
-        lines = map { it.toISyncedLine(isOverallRtl) },
+        lines = lines,
         title = title,
         artists = listOf(Artist(type = "artist", name = artist)),
     )

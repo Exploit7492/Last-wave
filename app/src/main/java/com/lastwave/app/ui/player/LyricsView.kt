@@ -134,9 +134,14 @@ fun LyricsPanel(
     var lastSyncTime by remember(track.videoId) { mutableLongStateOf(SystemClock.elapsedRealtime()) }
 
     LaunchedEffect(progress.positionMs, state.isPlaying) {
-        basePositionMs = progress.positionMs
-        lastSyncTime = SystemClock.elapsedRealtime()
-        smoothedPositionMs = progress.positionMs
+        val drift = kotlin.math.abs(smoothedPositionMs - progress.positionMs)
+        // Only re-anchor on seek (>500ms drift) or play-state change;
+        // normal playback lets the monotonic clock run undisturbed.
+        if (drift > 500 || !state.isPlaying) {
+            basePositionMs = progress.positionMs
+            lastSyncTime = SystemClock.elapsedRealtime()
+            smoothedPositionMs = progress.positionMs
+        }
     }
 
     LaunchedEffect(state.isPlaying) {
@@ -269,10 +274,19 @@ private fun SyncedLyricsList(
         else meaningfulLines.count { it.isRtl } > meaningfulLines.size / 2
     }
 
-    // Active line detection: Exact millisecond vocal onset matching
+    // Active line detection: range-aware matching
     val activeIndex by remember(lines, currentPositionMs) {
         androidx.compose.runtime.derivedStateOf {
-            lines.indexOfLast { it.timeMs <= currentPositionMs }
+            val pos = currentPositionMs
+            // Prefer exact range match (line whose [start, end) contains pos)
+            val rangeMatch = lines.indexOfLast { line ->
+                val idx = lines.indexOf(line)
+                val end = if (line.durationMs > 0) line.timeMs + line.durationMs
+                          else lines.getOrNull(idx + 1)?.timeMs ?: (line.timeMs + 5000)
+                pos >= line.timeMs && pos < end
+            }
+            if (rangeMatch >= 0) rangeMatch
+            else lines.indexOfLast { it.timeMs <= pos }
         }
     }
 
@@ -283,11 +297,9 @@ private fun SyncedLyricsList(
     LaunchedEffect(activeIndex, isPlaying) {
         val timeSinceUserScroll = System.currentTimeMillis() - userScrolledTime
         if (timeSinceUserScroll > 2200L && activeIndex in lines.indices) {
-            val scrollOffset = when (animationStyle) {
-                LyricsAnimation.APPLE_ZOOM -> -210
-                LyricsAnimation.CINEMATIC_BLUR -> -190
-                else -> -180
-            }
+            // Dynamic 25%-from-top anchor adapts to viewport and line height
+            val viewportHeight = listState.layoutInfo.viewportSize.height
+            val scrollOffset = -(viewportHeight / 4).coerceAtLeast(120)
             listState.animateScrollToItem(
                 index = activeIndex,
                 scrollOffset = scrollOffset,
@@ -638,6 +650,10 @@ private fun WordByWordLyricLine(
                     val sylEnd = syllable.timeMs + syllable.durationMs
                     val isSyllableActive = currentPositionMs in sylStart until sylEnd
                     val isSyllablePast = currentPositionMs >= sylEnd
+                    // Smooth progress within syllable for fill animation (0..1)
+                    val syllableProgress = if (isSyllableActive && sylEnd > sylStart) {
+                        ((currentPositionMs - sylStart).toFloat() / (sylEnd - sylStart).toFloat()).coerceIn(0f, 1f)
+                    } else if (isSyllablePast) 1f else 0f
                     val nextSyllable = line.syllables.getOrNull(sIndex + 1)
                     val separator = if (needsSpacing &&
                         sIndex < line.syllables.lastIndex &&
@@ -693,7 +709,7 @@ private fun WordByWordLyricLine(
                     )
 
                     val sylAlphaTarget = when {
-                        isSyllableActive -> 1f
+                        isSyllableActive -> 0.60f + 0.40f * syllableProgress  // smooth fill
                         isSyllablePast -> 0.96f
                         else -> when (animationStyle) {
                             LyricsAnimation.CINEMATIC_BLUR -> 0.28f
@@ -704,7 +720,7 @@ private fun WordByWordLyricLine(
                     }
                     val sylAlpha by animateFloatAsState(
                         targetValue = sylAlphaTarget,
-                        animationSpec = tween(60),
+                        animationSpec = tween(40),
                         label = "sylAlpha_${sIndex}",
                     )
 
