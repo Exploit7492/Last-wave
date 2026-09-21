@@ -26,8 +26,9 @@
 #include "SecretsBridge_generated.h"
 #else
 constexpr char EXPECTED_CERT_PREFIX[] = "PLACEHOLDER_REPLACE_WITH_YOUR_CERT_SHA256";
-static const char BASE_URL[] = "";
 struct Fragment { const uint8_t* data; uint8_t len; uint8_t mask; };
+static const Fragment URL_FRAGMENTS[] = {};
+static constexpr int URL_FRAGMENT_COUNT = 0;
 static const Fragment FRAGMENTS[] = {};
 static constexpr int FRAGMENT_COUNT = 0;
 static const Fragment MODULE_FRAGMENTS[] = {};
@@ -56,6 +57,10 @@ static std::string reconstructFrom(const Fragment* frags, int count) {
     }
     g_sink ^= (uint8_t)result.size();
     return result;
+}
+
+static std::string reconstructBaseUrl() {
+    return reconstructFrom(URL_FRAGMENTS, URL_FRAGMENT_COUNT);
 }
 
 static std::string reconstructKey() {
@@ -104,12 +109,7 @@ static bool isDebuggable(JNIEnv* env, jobject context) {
  * - Official CI header: require cert prefix match, any build type.
  */
 static bool verifyCallerSignature(JNIEnv* env, jobject context) {
-    bool isPlaceholder = (strncmp(EXPECTED_CERT_PREFIX, "PLACEHOLDER", 11) == 0);
-    if (isPlaceholder) {
-        // Public source: never release secrets (there are none).
-        // Debuggable local runs may proceed; release returns empty.
-        return isDebuggable(env, context);
-    }
+    if (!context) return false;
 
     jclass contextClass = env->GetObjectClass(context);
     if (!contextClass) return false;
@@ -119,11 +119,16 @@ static bool verifyCallerSignature(JNIEnv* env, jobject context) {
     auto packageName = (jstring)env->CallObjectMethod(context, getPackageName);
     if (!packageName) return false;
 
-    // Optional package allowlist: only com.lastwave.app may call.
+    // Package allowlist: only com.lastwave.app may call.
     const char* pkgChars = env->GetStringUTFChars(packageName, nullptr);
     bool pkgOk = pkgChars && strcmp(pkgChars, "com.lastwave.app") == 0;
     if (pkgChars) env->ReleaseStringUTFChars(packageName, pkgChars);
     if (!pkgOk) return false;
+
+    bool isPlaceholder = (strncmp(EXPECTED_CERT_PREFIX, "PLACEHOLDER", 11) == 0);
+    if (isPlaceholder) {
+        return true;
+    }
 
     jmethodID getPackageManager = env->GetMethodID(contextClass, "getPackageManager", "()Landroid/content/pm/PackageManager;");
     if (!getPackageManager) return false;
@@ -216,7 +221,10 @@ Java_com_lastwave_app_data_lossless_NativeSecrets_nativeBaseUrl(
     if (!verifyCallerSignature(env, context)) {
         return env->NewStringUTF("");
     }
-    return env->NewStringUTF(BASE_URL);
+    std::string url = reconstructBaseUrl();
+    jstring result = env->NewStringUTF(url.c_str());
+    if (!url.empty()) std::memset(&url[0], 0, url.size());
+    return result;
 }
 
 extern "C" JNIEXPORT jstring JNICALL

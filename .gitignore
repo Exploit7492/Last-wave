@@ -7,8 +7,10 @@
 # Files for the ART/Dalvik VM
 *.dex
 
-# Java class files
+# Java and Python compiled files
 *.class
+__pycache__/
+*.pyc
 
 # Generated build files
 build/
@@ -51,10 +53,12 @@ keystore_credentials.txt
 .env
 .wrangler/
 .gradle_home/
-# Bundled provider modules (.lwp packages) and packaging tools
+# Bundled provider modules (.lwp packages)
 app/src/main/assets/modules/
 *.lwp
-tools/
+tools/*
+!tools/generate_native_secrets.py
+!tools/build_lossless_lwp.py
 provider.js
 # Single raw provider source at repo base only (plaintext JSON, encrypted at build)
 provider.json

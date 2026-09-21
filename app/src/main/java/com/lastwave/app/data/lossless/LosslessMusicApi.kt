@@ -54,17 +54,9 @@ class LosslessMusicApi @Inject constructor(
     private val moduleManager: ModuleManager,
     private val nativeSecrets: NativeSecrets,
 ) {
-    // Certificate pinning: blocks MITM proxies (Charles, mitmproxy, Fiddler)
-    // from intercepting Tidal backend traffic. Pin the leaf + backup CA.
-    private val certificatePinner = CertificatePinner.Builder()
-        .add("tidal.kanjijewels.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=") // TODO: replace with actual pin
-        .add("tidal.kanjijewels.com", "sha256/BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=") // backup pin
-        .build()
-
     private val client = okHttpClient.newBuilder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
-        .certificatePinner(certificatePinner)
         .build()
     private val resolutionClient = client.newBuilder()
         .callTimeout(5, TimeUnit.SECONDS)
@@ -197,18 +189,19 @@ class LosslessMusicApi @Inject constructor(
             return@withContext nativeCreds
         }
 
-        // 2. Fallback: .lwp module config (baseUrl only, API key from native)
+        // 2. Fallback: .lwp module config
         val handles = runCatching { moduleManager.enabledHandles() }.getOrNull() ?: emptyList()
         for (handle in handles) {
             val json = moduleManager.readDecryptedConfig(handle)
             if (json != null) {
                 val url = json.optString("baseUrl").ifBlank { json.optJSONObject("tidal")?.optString("baseUrl").orEmpty() }
                 if (url.isNotBlank()) {
-                    // API key always from native — never from .lwp
-                    val nativeKey = runCatching { nativeSecrets.apiKey() }.getOrDefault("")
-                    val creds = BackendCredentials(baseUrl = url.trimEnd('/'), apiKey = nativeKey)
-                    cachedCredentials = creds
-                    return@withContext creds
+                    val key = nativeCreds?.apiKey.orEmpty().ifBlank { json.optString("apiKey") }
+                    if (key.isNotBlank()) {
+                        val creds = BackendCredentials(baseUrl = url.trimEnd('/'), apiKey = key)
+                        cachedCredentials = creds
+                        return@withContext creds
+                    }
                 }
             }
         }
@@ -226,7 +219,7 @@ class LosslessMusicApi @Inject constructor(
         if (preferredQuality == QUALITY_YOUTUBE || title.isBlank() || artist.isBlank()) return@withContext null
 
         val creds = getCredentials() ?: return@withContext null
-        if (creds.baseUrl.isBlank()) return@withContext null
+        if (creds.baseUrl.isBlank() || creds.apiKey.isBlank()) return@withContext null
 
         try {
             // 1. Search Tidal via backend

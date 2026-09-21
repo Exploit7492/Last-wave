@@ -2647,6 +2647,7 @@ class MusicPlayer @Inject constructor(
             // Let ExoPlayer open the stream and buffer the opening window
             // first; background caching must never delay audibility.
             delay(CURRENT_TRACK_CACHE_START_DELAY_MS)
+            if (!_state.value.isPlaying) return@launch
             currentCoroutineContext().ensureActive()
             var offset = 0L
             while (isActive) {
@@ -3561,15 +3562,11 @@ class MusicPlayer @Inject constructor(
         misc: MiscSettings,
         excludedLosslessUrls: Set<String>,
     ): ResolvedStream {
-        val hasActiveModules = if (misc.preferProviderModules) {
-            runCatching { moduleManager.enabledHandles().isNotEmpty() }.getOrDefault(false)
-        } else false
-        val isYouTubeRequested = !allowLossless ||
-            misc.losslessQuality == com.lastwave.app.data.lossless.LosslessMusicApi.QUALITY_YOUTUBE ||
-            !misc.preferLosslessStreaming ||
-            !misc.preferProviderModules ||
-            !hasActiveModules
-        if (isYouTubeRequested || (!videoId.isNullOrBlank() &&
+        val wantLossless = allowLossless &&
+            misc.preferLosslessStreaming &&
+            misc.losslessQuality != com.lastwave.app.data.lossless.LosslessMusicApi.QUALITY_YOUTUBE
+
+        if (!wantLossless || (!videoId.isNullOrBlank() &&
                 (track.artist.isBlank() || track.artist.equals("Unknown artist", ignoreCase = true)))
         ) return resolveYoutubeTrackAudioStream(track, videoId)
 
@@ -3577,15 +3574,14 @@ class MusicPlayer @Inject constructor(
         val youtubeDeferred = applicationScope.async(Dispatchers.IO) {
             runCatching { resolveYoutubeTrackAudioStream(track, videoId) }.getOrNull()
         }
-        // Native lossless backend resolution (credentials supplied by active module)
+        // Direct backend resolution using APK embedded secrets / native secrets
         val losslessDeferred = applicationScope.async(Dispatchers.IO) {
-            if (!allowLossless || !misc.preferLosslessStreaming || !misc.preferProviderModules || !hasActiveModules) null
+            if (!wantLossless) null
             else runCatching { resolveLosslessTrackAudioStream(track, misc, excludedLosslessUrls) }.getOrNull()
         }
         return try {
-            val wantLossless = allowLossless && misc.preferLosslessStreaming && misc.preferProviderModules && hasActiveModules
             val losslessStream: ResolvedStream? = if (wantLossless) {
-                losslessDeferred.await()
+                withTimeoutOrNull(4_000L) { losslessDeferred.await() }
             } else null
 
             losslessStream
@@ -4222,9 +4218,9 @@ class MusicPlayer @Inject constructor(
         const val PLAYBACK_RETRY_JITTER_MS = 250L
         const val MEDIA_STREAM_CACHE_BYTES = 64L * 1024 * 1024
         const val NEXT_TRACK_PREFETCH_BYTES = 1L * 1024 * 1024
-        const val NEXT_TRACK_PREFETCH_DELAY_MS = 500L
+        const val NEXT_TRACK_PREFETCH_DELAY_MS = 10_000L
         /** Delayed start keeps current-track caching off the startup path. */
-        const val CURRENT_TRACK_CACHE_START_DELAY_MS = 2_000L
+        const val CURRENT_TRACK_CACHE_START_DELAY_MS = 6_000L
         /** Bounded windows: progressive ahead-cache, never a full predownload. */
         const val CURRENT_TRACK_CACHE_CHUNK_BYTES = 2L * 1024 * 1024
         const val CURRENT_TRACK_CACHE_CHUNK_DELAY_MS = 500L

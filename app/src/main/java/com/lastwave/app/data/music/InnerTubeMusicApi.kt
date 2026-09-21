@@ -1919,7 +1919,7 @@ class InnerTubeMusicApi @Inject constructor(
             try {
                 val config = configDeferred.await()
                 val signatureTimestamp = signatureTimestampDeferred.await()
-                val poTokenResult = poTokenDeferred.await()
+                val poTokenResult = kotlinx.coroutines.withTimeoutOrNull(1_500L) { poTokenDeferred.await() }
                 val poToken = poTokenResult?.playerToken
                 val gvsPoToken = poTokenResult?.sessionToken?.takeIf { config.visitorData != null }
                 val availableClients = playerClients(config).filter { candidate ->

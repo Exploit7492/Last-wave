@@ -40,6 +40,18 @@ android {
             if (!fromGradle.isNullOrBlank()) return fromGradle.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
             val fromLocal = localProps.getProperty(key)
             if (!fromLocal.isNullOrBlank()) return fromLocal.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
+            val dotEnv = rootProject.file(".env")
+            if (dotEnv.isFile) {
+                dotEnv.useLines { lines ->
+                    for (line in lines) {
+                        val trimmed = line.trim()
+                        if (trimmed.startsWith("$key=")) {
+                            val v = trimmed.substringAfter("=").trim().replace("\"", "").replace("\\", "")
+                            if (v.isNotBlank()) return v
+                        }
+                    }
+                }
+            }
         }
         return ""
     }
@@ -51,19 +63,9 @@ android {
         versionCode = 18
         versionName = "4.1.1"
 
-        // Module key is NO LONGER in DEX. It lives only in native .so via
-        // SecretsBridge_generated.h (CI: tools/generate_native_secrets.py from
-        // PROVIDER_MODULE_KEY). DEX fields kept empty for compat; ModuleCrypto
-        // reads NativeModuleKey only. Static XOR was trivially reversible.
-        buildConfigField("byte[]", "PROVIDER_MODULE_KEY_BYTES", "new byte[] {}")
-        val secretMask = listOf(0x5A, 0x3F, 0x7E, 0x1B, 0x92, 0x4C, 0xA1, 0x6D)
-        val maskLiteral = "new byte[] { " + secretMask.joinToString(", ") { "(byte) $it" } + " }"
-
-        // No shared Last.fm key: bring-your-own-key model. Everyone creates
-        // their own key at last.fm/api/account/create and pastes it in
-        // Settings → Integrations / Scrobbling. Nothing Last.fm-related is
-        // baked into the build.
-        buildConfigField("byte[]", "SECRET_MASK_BYTES", maskLiteral)
+        // All backend secrets (URL, API key, module key) live strictly in native .so via
+        // SecretsBridge_generated.h (tools/generate_native_secrets.py).
+        // No secret fields are exposed in DEX / BuildConfig.
 
         externalNativeBuild {
             cmake {
@@ -314,7 +316,7 @@ tasks.withType<Test> {
 }
 
 // Generate native secrets header before CMake configures.
-// CI provides PROVIDER_MODULE_KEY / TIDAL_API_KEY / TIDAL_BASE_URL /
+// CI provides PROVIDER_MODULE_KEY / URL_SECRET / BASE_URL /
 // RELEASE_CERT_SHA256 via env/secrets. Public forks get empty header ->
 // native returns empty -> YouTube fallback, no leak.
 val generateNativeSecrets by tasks.registering(Exec::class) {
