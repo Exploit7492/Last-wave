@@ -176,7 +176,11 @@ fun liquidGlassContainerColor(
     enabled: Boolean = LocalLiquidGlass.current,
     backdrop: TrueGlassBackdropState? = LocalLiquidGlassBackdrop.current,
 ): Color = if (enabled) {
-    val cap = if (LocalIsDarkTheme.current) 0.50f else 0.56f
+    // Optical substrate, not a frosted card: deliberately thin so the
+    // refracted backdrop stays visible (artwork preserved). Legibility comes
+    // from the AGSL lens — theme-driven highlight compression + adaptive
+    // gain + bevel lighting — not from stacking opaque white here.
+    val cap = if (LocalIsDarkTheme.current) 0.18f else 0.22f
     color.copy(alpha = minOf(color.alpha, cap))
 } else color
 
@@ -191,19 +195,19 @@ fun isLiquidGlassEnabled(): Boolean = LocalLiquidGlass.current
  */
 private fun glassConfigForPreset(preset: LiquidGlassPreset): GlassConfig = when (preset) {
     LiquidGlassPreset.BottomNavigation -> GlassConfig.Flat.copy(
-        cornerRadius = 28.dp, blur = 10.dp,
+        cornerRadius = 28.dp, blur = 6.dp,
     )
     LiquidGlassPreset.MiniPlayer -> GlassConfig.Flat.copy(
-        cornerRadius = 24.dp, blur = 9.dp,
+        cornerRadius = 24.dp, blur = 5.dp,
     )
     LiquidGlassPreset.ModalSheet -> GlassConfig.Card.copy(
-        cornerRadius = 28.dp, blur = 14.dp, thickness = 14.dp,
+        cornerRadius = 28.dp, blur = 8.dp, thickness = 14.dp,
     )
     LiquidGlassPreset.ContextMenu -> GlassConfig.Card.copy(
-        cornerRadius = 20.dp, blur = 13.dp, thickness = 12.dp,
+        cornerRadius = 20.dp, blur = 7.dp, thickness = 12.dp,
     )
     LiquidGlassPreset.Overlay -> GlassConfig.Flat.copy(
-        cornerRadius = 20.dp, blur = 11.dp,
+        cornerRadius = 20.dp, blur = 6.dp,
     )
     LiquidGlassPreset.PlayerControls,
     LiquidGlassPreset.FloatingControls -> GlassConfig.Control
@@ -211,9 +215,14 @@ private fun glassConfigForPreset(preset: LiquidGlassPreset): GlassConfig = when 
 }
 
 /**
- * True liquid glass via TrueGlass engine: recorded backdrop + AGSL SDF lens
- * (flat-center zero bend, Snell refraction, bevel-only dispersion, Schlick
- * Fresnel rim, single specular glint) + system blur chain in RenderThread.
+ * True liquid glass via TrueGlass engine: sibling-recorded backdrop drawn
+ * through a background-only chain (blur UNDER bevel-localized AGSL lens with
+ * flat-center zero bend, bevel-only dispersion, adaptive luminance,
+ * light-dependent rim + single glint) in RenderThread; foreground content
+ * stays sharp on top.
+ *
+ * No white border / glow / gloss is ever painted here: edge definition comes
+ * from refraction contrast + bevel lighting + soft elevation shadow.
  *
  * Crash-proofing: disabled → untouched; null backdrop → canvas fallback;
  * incapable device → canvas fallback; any driver rejection inside the engine
@@ -225,10 +234,15 @@ fun Modifier.liquidGlassChrome(
     enabled: Boolean,
     preset: LiquidGlassPreset = LiquidGlassPreset.Card,
     backdrop: TrueGlassBackdropState? = LocalLiquidGlassBackdrop.current,
+    interactionSource: MutableInteractionSource? = null,
 ): Modifier {
     if (!enabled) return this
-    if (backdrop == null) return this.then(staticTrueGlass(shape, LocalIsDarkTheme.current))
-    if (!isDeviceGlassCapable()) return this.then(staticTrueGlass(shape, LocalIsDarkTheme.current))
+    if (backdrop == null) {
+        return this.then(staticTrueGlass(shape, LocalIsDarkTheme.current, interactionSource)).clip(shape)
+    }
+    if (!isDeviceGlassCapable()) {
+        return this.then(staticTrueGlass(shape, LocalIsDarkTheme.current, interactionSource)).clip(shape)
+    }
     val config = remember(preset) { glassConfigForPreset(preset) }
     return this.trueGlassChrome(
         shape = shape,
@@ -236,6 +250,7 @@ fun Modifier.liquidGlassChrome(
         backdrop = backdrop,
         enabled = true,
         isDark = LocalIsDarkTheme.current,
+        interactionSource = interactionSource,
     )
 }
 
@@ -277,7 +292,11 @@ fun LiquidGlassActionPill(
     )
 }
 
-/** Circular liquid glass button. Soft press illumination, no translate/stretch. */
+/**
+ * Circular liquid glass button. Press drives the material itself (soft press
+ * illumination + depth via shared interactionSource), never an opacity flash,
+ * translate, or stretch. Interruptible spring, smoothly reversible.
+ */
 @Composable
 fun LiquidGlassIconButton(
     backdrop: TrueGlassBackdropState?,
@@ -288,19 +307,20 @@ fun LiquidGlassIconButton(
     tint: Color = MaterialTheme.colorScheme.onSurface,
     contentDescription: String? = null,
 ) {
+    val interaction = remember { MutableInteractionSource() }
     val capable = isDeviceGlassCapable()
     val config = remember { glassConfigForPreset(LiquidGlassPreset.FloatingControls) }
     val gelModifier = if (backdrop != null && capable) {
-        Modifier.trueGlassChrome(shape, config, backdrop, true, LocalIsDarkTheme.current)
+        Modifier.trueGlassChrome(shape, config, backdrop, true, LocalIsDarkTheme.current, interaction)
     } else {
-        Modifier.staticTrueGlass(shape, LocalIsDarkTheme.current)
+        Modifier.staticTrueGlass(shape, LocalIsDarkTheme.current, interaction)
     }
     Box(
         modifier = modifier
             .then(gelModifier)
             .clip(shape)
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interaction,
                 indication = null,
                 onClick = onClick,
             ),
