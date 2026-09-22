@@ -621,7 +621,7 @@ fun PlaylistDetailScreen(
                     items = displayTracks,
                     key = { index, _ ->
                         if (reorderEnabled) trackKeys.getOrNull(index) ?: "track_$index"
-                        else "track_${displayTracks.getOrNull(index)?.key ?: index}",
+                        else "track_${displayTracks.getOrNull(index)?.key ?: index}"
                     },
                     contentType = { _, _ -> "playlist_track" },
                 ) { index, track ->

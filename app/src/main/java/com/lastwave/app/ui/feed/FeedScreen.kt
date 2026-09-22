@@ -1653,7 +1653,6 @@ private fun RecentTrackCard(
 }
 
 @OptIn(ExperimentalFoundationApi::class)
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChartTrackCard(
     rank: Int,

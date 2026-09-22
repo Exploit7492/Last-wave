@@ -1965,7 +1965,7 @@ class InnerTubeMusicApi @Inject constructor(
         }
         if (innerTubeXCandidate != null) {
             val compatible = innerTubeXCandidate.isAdaptive || isCompatibleAudioCandidate(innerTubeXCandidate)
-            // Return URL immediately; player open is the real validation (SimpMusic/LiMusic).
+            // Return URL immediately; player open is the real validation.
             if (compatible) {
                 cacheResolvedStream(innerTubeXCandidate, now)
                 lastResolvedStreams[resolutionKey(videoId, authScope)] = innerTubeXCandidate

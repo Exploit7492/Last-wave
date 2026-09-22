@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BubbleChart
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -1265,7 +1266,7 @@ fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel(stringResource(R.string.settings_section_about))
-                    SettingsGroup(rowCount = 3) { index, position ->
+                    SettingsGroup(rowCount = 4) { index, position ->
                         when (index) {
                             0 -> SettingsActionCard(
                                 icon = Icons.AutoMirrored.Filled.Send,
@@ -1281,9 +1282,23 @@ fun SettingsScreen(
                                 position = position,
                             )
                             1 -> SettingsActionCard(
-                                icon = Icons.Filled.AutoAwesome,
+                                icon = Icons.Filled.Group,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = "Discord Support",
+                                subtitle = "Join our Discord community",
+                                onClick = {
+                                    val discordIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://discord.gg/TMCEPSUNk2"))
+                                    if (!startActivitySafely(context, discordIntent)) {
+                                        viewModel.showToast("No compatible browser is available")
+                                    }
+                                },
+                                position = position,
+                            )
+                            2 -> SettingsActionCard(
+                                icon = Icons.Filled.AutoAwesome,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 title = stringResource(R.string.settings_more_from_us),
                                 subtitle = "Join @MaterialYouApp on Telegram",
                                 onClick = {
@@ -1293,7 +1308,7 @@ fun SettingsScreen(
                                 },
                                 position = position,
                             )
-                            2 -> SettingsActionCard(
+                            3 -> SettingsActionCard(
                                 icon = Icons.Filled.Code,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,

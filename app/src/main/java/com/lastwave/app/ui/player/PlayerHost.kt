@@ -581,7 +581,7 @@ fun PlayerHost(
     }
     val miniPlayerVisible = state.current != null && !expanded
 
-    // SimpMusic sibling pattern: ONE backdrop capturing feed content,
+    // Sibling pattern: ONE backdrop capturing feed content,
     // consumed by the sibling MiniPlayer. Unconditional remember keeps composition stable.
     val miniBackdropColor = MaterialTheme.colorScheme.background
     val miniBackdrop = rememberLayerBackdrop {
@@ -769,8 +769,8 @@ private fun MiniPlayer(
 ) {
     val context = LocalContext.current
     val track = state.current ?: return
-    // SimpMusic MiniPlayer: single glass card sampling sibling feed content.
-    // Luminance loop verbatim SimpMusic (5x5 avg, 0.3..0.8, tween 500, 1s).
+    // MiniPlayer: single glass card sampling sibling feed content.
+    // Luminance loop (5x5 avg, 0.3..0.8, tween 500, 1s).
     val liquidGlass = LocalLiquidGlass.current
     val isGlass = liquidGlass && isLiquidGlassBackdropSupported() && backdrop != null
     val layer = rememberGraphicsLayer()
@@ -859,7 +859,7 @@ private fun MiniPlayer(
     ) {
         Surface(
             shape = shape,
-            // SimpMusic: Transparent card when glass (glass draws scrim), 85% surface otherwise.
+            // Transparent card when glass (glass draws scrim), 85% surface otherwise.
             color = if (isGlass) Color.Transparent else MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.85f),
             tonalElevation = if (edgeToEdge || isGlass) 0.dp else 6.dp,
             shadowElevation = if (edgeToEdge || isGlass) 0.dp else 12.dp,
@@ -892,7 +892,7 @@ private fun MiniPlayer(
                             PlayerArtwork(track, Modifier.fillMaxSize(), 18.dp)
                         }
                     }
-                    // SimpMusic: glass surface follows the theme (frosted white → black text
+                    // Glass surface follows the theme (frosted white → black text
                     // in light, white text in dark); opaque card keeps theme tokens.
                     val miniTitleColor = if (isGlass) {
                         if (LocalIsDarkTheme.current) Color.White else Color.Black
@@ -918,7 +918,7 @@ private fun MiniPlayer(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    // SimpMusic: inner controls sit plain on the glass card (no nested glass).
+                    // Inner controls sit plain on the glass card (no nested glass).
                     Surface(
                         onClick = onToggle,
                         shape = CircleShape,

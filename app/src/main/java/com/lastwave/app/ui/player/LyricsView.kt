@@ -941,7 +941,8 @@ private fun LyricsPlaybackControls(
                     targetValue = if (isPlayerPressed) 0.82f else 1.0f,
                     animationSpec = ExpressiveMotion.spatialSpring(),
                     label = "playerTabScale",
-                         IconButton(
+                )
+                IconButton(
                     onClick = onToggleFullscreen,
                     interactionSource = playerInteraction,
                     modifier = Modifier

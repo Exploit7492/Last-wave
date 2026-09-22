@@ -12,6 +12,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.size
@@ -88,10 +89,10 @@ val LocalLiquidGlassBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 /** Separate source for overlays; kept for call-site compat, same type as backdrop. */
 val LocalLiquidGlassOverlayBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
 
-/** Content-brightness hint, kept for compat (SimpMusic recipe does not need it). */
+/** Content-brightness hint, kept for compat (native recipe does not need it). */
 val LocalLiquidGlassContentBrightness = compositionLocalOf { 0f }
 
-/** Typealiases for clean, unified Backdrop types (mirrors SimpMusic PlatformBackdrop). */
+/** Typealiases for clean, unified Backdrop types (mirrors PlatformBackdrop). */
 typealias LayerBackdrop = LayerBackdrop
 typealias Backdrop = Backdrop
 
@@ -104,7 +105,7 @@ fun rememberLayerBackdrop(
 /** Marks a composable as the source layer that sibling glass surfaces refract. */
 fun Modifier.layerBackdropCompat(backdrop: LayerBackdrop): Modifier = this.nativeBackdrop(backdrop)
 
-/** SimpMusic-faithful: remember a backdrop that draws a flat color + content. */
+/** Remember a backdrop that draws a flat color + content. */
 @Composable
 fun rememberBackdrop(color: Color): LayerBackdrop =
     rememberLayerBackdrop {
@@ -347,10 +348,10 @@ fun LiquidGlassSurface(
     }
 }
 
-// ── SimpMusic-faithful core ──────────────────────────────────────────────
+// ── Interactive liquid glass core ──────────────────────────────────────────────
 // No custom RuntimeShader, no ambient infiniteTransition, no haptics,
 // no progressive blur, no always-on chromatic aberration.
-// Effect stack is exactly SimpMusic's drawInteractiveGlass.
+// Effect stack is drawInteractiveGlass.
 
 @Composable
 fun isDeviceGlassCapable(): Boolean {
@@ -393,7 +394,7 @@ fun isLiquidGlassEnabled(): Boolean = LocalLiquidGlass.current
 
 /**
  * Press/hold state holder for a single liquid-glass surface.
- * Verbatim port of SimpMusic GlassInteraction: spring press 0→1,
+ * Responsive GlassInteraction: spring press 0→1,
  * observe-only drag so wrapped clicks keep working.
  */
 class GlassInteraction(
@@ -431,7 +432,7 @@ fun rememberGlassInteraction(): GlassInteraction {
 }
 
 /**
- * SimpMusic drawInteractiveGlass verbatim (package-renamed).
+ * Interactive liquid glass drawing modifier.
  * Element MUST be a sibling of the backdrop source, never inside it.
  */
 fun Modifier.drawInteractiveGlass(
@@ -512,7 +513,7 @@ fun Modifier.drawInteractiveGlass(
             },
         )
 
-/** SimpMusic liquidGlass: static surfaces use fixed mid-luminance. */
+/** Interactive liquidGlass: static surfaces use fixed mid-luminance. */
 @Composable
 fun Modifier.liquidGlass(
     backdrop: Backdrop,
@@ -544,7 +545,7 @@ fun Modifier.liquidGlass(
     )
 }
 
-/** SimpMusic liquidGlass overload for luminance-sampling surfaces (MiniPlayer, nav capsule). */
+/** Interactive liquidGlass overload for luminance-sampling surfaces (MiniPlayer, nav capsule). */
 @Composable
 fun Modifier.liquidGlass(
     backdrop: Backdrop,
@@ -629,7 +630,7 @@ fun LiquidGlassActionPill(
     )
 }
 
-/** SimpMusic LiquidGlassIconButton: ImageVector version, small circles use narrow highlight. */
+/** LiquidGlassIconButton: ImageVector version, small circles use narrow highlight. */
 @Composable
 fun LiquidGlassIconButton(
     backdrop: Backdrop?,
@@ -684,9 +685,9 @@ fun LiquidGlassIconButton(
     }
 }
 
-// ── Compat shims: keep old symbols compiling, route to SimpMusic recipe ──
+// ── Compat shims: keep old symbols compiling, route to interactive liquid glass ──
 
-/** Kept for call-site compat; values are ignored — SimpMusic recipe is fixed. */
+/** Kept for call-site compat; values are ignored — recipe is fixed. */
 enum class LiquidGlassPreset {
     BottomNavigation,
     MiniPlayer,
@@ -710,7 +711,7 @@ private fun LiquidGlassPreset.isGlassTarget(): Boolean = when (this) {
 }
 
 /**
- * Compat shim: old liquidGlassChrome now delegates to SimpMusic drawInteractiveGlass
+ * Compat shim: old liquidGlassChrome now delegates to drawInteractiveGlass
  * for allowed targets only; all other presets return unmodified (opaque fallback).
  */
 @Composable
@@ -729,7 +730,7 @@ fun Modifier.liquidGlassChrome(
         return this
     }
     // interactionSource/ambient/contentBrightness deliberately ignored:
-    // SimpMusic uses its own observe-only GlassInteraction, no haptics, no ambient drift.
+    // Uses observe-only GlassInteraction, no haptics, no ambient drift.
     return this.liquidGlass(
         backdrop = backdrop,
         shape = shape,
@@ -758,7 +759,7 @@ fun BackdropBlur(
 }
 
 /**
- * Observe-only drag/press recogniser ported from SimpMusic (Kyant catalog DragGestureInspector).
+ * Observe-only drag/press recogniser (Kyant catalog DragGestureInspector).
  * Never consumes events, so glass reacts while wrapped buttons keep their taps.
  */
 internal suspend fun PointerInputScope.inspectDragGestures(

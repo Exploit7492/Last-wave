@@ -204,10 +204,31 @@ class ThemeRepository @Inject constructor(
                 dark to light
             }
             prefs.accentMode == AccentMode.DYNAMIC -> {
-                val seed = dynamic ?: getSystemWallpaperColorHex() ?: prefs.accentColor
-                val dark = Md3SchemeBuilder.buildDarkScheme(seed, isAmoled, isGlass)
-                val light = Md3SchemeBuilder.buildLightScheme(seed, isGlass)
-                dark to light
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val sysDark = runCatching { androidx.compose.material3.dynamicDarkColorScheme(context) }.getOrNull()
+                    val sysLight = runCatching { androidx.compose.material3.dynamicLightColorScheme(context) }.getOrNull()
+                    if (sysDark != null && sysLight != null) {
+                        val adaptedDark = if (isAmoled) {
+                            sysDark.copy(
+                                background = Color.Black,
+                                surface = Color.Black,
+                                surfaceContainerLow = Color.Black,
+                                surfaceContainerLowest = Color.Black,
+                            )
+                        } else sysDark
+                        adaptedDark to sysLight
+                    } else {
+                        val seed = dynamic ?: getSystemWallpaperColorHex() ?: prefs.accentColor
+                        val dark = Md3SchemeBuilder.buildDarkScheme(seed, isAmoled, isGlass)
+                        val light = Md3SchemeBuilder.buildLightScheme(seed, isGlass)
+                        dark to light
+                    }
+                } else {
+                    val seed = dynamic ?: getSystemWallpaperColorHex() ?: prefs.accentColor
+                    val dark = Md3SchemeBuilder.buildDarkScheme(seed, isAmoled, isGlass)
+                    val light = Md3SchemeBuilder.buildLightScheme(seed, isGlass)
+                    dark to light
+                }
             }
             else -> {
                 val dark = Md3SchemeBuilder.buildDarkScheme(prefs.accentColor, isAmoled, isGlass)
