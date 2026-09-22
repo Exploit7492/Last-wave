@@ -67,6 +67,8 @@ import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
+import com.lastwave.app.ui.common.TrackMiniTrayData
+import com.lastwave.app.ui.common.TrackMiniTraySheet
 import com.lastwave.app.ui.theme.ArtworkShape
 import com.lastwave.app.ui.theme.BadgePillShape
 import com.lastwave.app.ui.theme.ExpressiveHeroShape
@@ -281,7 +283,9 @@ fun HomeScreen(
                     }
                 }
                 val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
-                val addToPlaylist = com.lastwave.app.ui.player.LocalAddToPlaylist.current
+                // Long-press (deep press) on a track row opens the mini tray;
+                // the 3-dot button keeps opening the full menu sheet.
+                var miniTrayRowIndex by remember { mutableStateOf<Int?>(null) }
 
                 Column(
                     Modifier
@@ -340,15 +344,7 @@ fun HomeScreen(
                                                 sourceLabel = "Home",
                                             )
                                         },
-                                        onLongClick = {
-                                            addToPlaylist(
-                                                com.lastwave.app.playback.PlayableTrack(
-                                                    title = row.track.name,
-                                                    artist = row.track.artist,
-                                                    artworkUrl = row.track.artworkUrl,
-                                                ),
-                                            )
-                                        },
+                                        onLongClick = { miniTrayRowIndex = rowIndex },
                                         onMenuClick = { menuTrack = row.track },
                                     )
                                     is HomeRow.Album -> AlbumRow(
@@ -385,6 +381,27 @@ fun HomeScreen(
                                     Text("No tracks yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
+                        }
+                    }
+
+                    miniTrayRowIndex?.let { trayIndex ->
+                        (rows.getOrNull(trayIndex) as? HomeRow.Track)?.let { trayRow ->
+                            TrackMiniTraySheet(
+                                data = TrackMiniTrayData(
+                                    title = trayRow.track.name,
+                                    artist = trayRow.track.artist,
+                                    artworkUrl = trayRow.track.artworkUrl,
+                                    sourceLabel = "Home",
+                                    onPlay = {
+                                        musicPlayer.playQueue(
+                                            tracks = playbackQueue,
+                                            startIndex = playbackIndexByRow[trayIndex],
+                                            sourceLabel = "Home",
+                                        )
+                                    },
+                                ),
+                                onDismiss = { miniTrayRowIndex = null },
+                            )
                         }
                     }
                 }

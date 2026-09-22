@@ -338,7 +338,10 @@ fun LiquidGlassSurface(
         interactionSource = interactionSource,
         enabled = enabled,
     ) {
-        Box(modifier = glassModifier) {
+        Box(
+            modifier = Modifier.fillMaxSize().then(glassModifier),
+            contentAlignment = Alignment.Center,
+        ) {
             content()
         }
     }

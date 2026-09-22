@@ -108,6 +108,7 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.SurroundSound
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.AlertDialog
@@ -207,8 +208,8 @@ import com.lastwave.app.data.local.LyricsUiVersion
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.MusicPlayerState
 import com.lastwave.app.playback.PlaybackChromeState
+import com.lastwave.app.playback.isSpatialAudioCodec
 import com.lastwave.app.playback.qualityBadgeLabel
-import com.lastwave.app.playback.spatialIndicatorLabel
 import com.lastwave.app.playback.PlaybackProgressState
 import com.lastwave.app.playback.PlayableTrack
 import com.lastwave.app.ui.common.ArtworkImage
@@ -1276,17 +1277,22 @@ private fun AddToPlaylistDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        modifier = Modifier.liquidGlassChrome(
-            androidx.compose.material3.BottomSheetDefaults.ExpandedShape,
-            LocalLiquidGlass.current,
-            LiquidGlassPreset.ModalSheet,
-            LocalLiquidGlassOverlayBackdrop.current,
-        ),
-        containerColor = liquidGlassContainerColor(
-            MaterialTheme.colorScheme.surfaceContainer,
-            backdrop = LocalLiquidGlassOverlayBackdrop.current,
-        ),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        // Opaque sheet: player controls / quality pill behind must not bleed through.
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        scrimColor = Color.Black.copy(alpha = 0.55f),
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+        dragHandle = {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 8.dp)
+                    .size(width = 36.dp, height = 4.dp),
+            ) {}
+        },
     ) {
+        com.lastwave.app.ui.common.EdgeToEdgeDialogWindow()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1920,7 +1926,7 @@ private fun FullPlayer(
                                     Modifier
                                         .fillMaxSize()
                                         .adaptiveContentWidth(maxWidth = 720.dp)
-                                        .padding(horizontal = 20.dp),
+                                        .padding(horizontal = 12.dp),
                                 )
                             }
                         }
@@ -2189,24 +2195,19 @@ private fun FullPlayer(
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Column(Modifier.weight(1f)) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            ) {
-                                                Text(
-                                                    track.title,
-                                                    style = MaterialTheme.typography.headlineSmall.copy(
-                                                        letterSpacing = (-0.35).sp,
-                                                        fontWeight = FontWeight.ExtraBold,
-                                                    ),
-                                                    color = Color.White,
-                                                    maxLines = 1,
-                                                    modifier = Modifier
-                                                        .weight(1f, fill = false)
-                                                        .basicMarquee(iterations = Int.MAX_VALUE),
-                                                )
-                                                spatialIndicatorLabel(state.audioCodec)?.let { SpatialAudioChip(it) }
-                                            }
+                                            Text(
+                                                track.title,
+                                                style = MaterialTheme.typography.headlineSmall.copy(
+                                                    letterSpacing = (-0.35).sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                ),
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .basicMarquee(iterations = Int.MAX_VALUE),
+                                            )
                                             Spacer(Modifier.height(4.dp))
                                             val splitArtists = remember(track.artist) {
                                                 com.lastwave.app.util.ArtistHelper.splitArtists(track.artist)
@@ -2245,7 +2246,10 @@ private fun FullPlayer(
 
                                         Spacer(Modifier.width(12.dp))
 
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
                                             val likeInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
                                             val isLikePressed by likeInteraction.collectIsPressedAsState()
                                             val likeScale by animateFloatAsState(
@@ -2280,7 +2284,7 @@ private fun FullPlayer(
                                                         scaleY = likeScale
                                                     },
                                             ) {
-                                                Box(contentAlignment = Alignment.Center) {
+                                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                                     Icon(
                                                         if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
                                                         contentDescription = if (isLiked) "Unlike song" else "Like song",
@@ -2311,7 +2315,7 @@ private fun FullPlayer(
                                                         scaleY = lyricsScale
                                                     },
                                             ) {
-                                                Box(contentAlignment = Alignment.Center) {
+                                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                                     Icon(
                                                         Icons.Filled.FormatQuote,
                                                         contentDescription = "Show lyrics",
@@ -2691,7 +2695,7 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
                     scaleY = prevScale
                 },
         ) {
-            Box(contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
             }
         }
@@ -2713,7 +2717,7 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
                     scaleY = playScale
                 },
         ) {
-            Box(contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 if (state.isBuffering) {
                     ExpressiveInlineLoadingIndicator(
                         size = if (isTranslucent) 28.dp else 30.dp,
@@ -2741,7 +2745,7 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
                     scaleY = nextScale
                 },
         ) {
-            Box(contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.SkipNext, "Next", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
             }
         }
@@ -2842,6 +2846,21 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             iconSize = if (isTranslucent) 19.dp else 20.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
         )
+        val pillLabel = remember(state.audioCodec, state.bitrateKbps, state.samplingRateKHz, state.bitDepth, state.isLossless) {
+            qualityBadgeLabel(state)
+        }
+        val isSpatialPill = remember(state.audioCodec) { isSpatialAudioCodec(state.audioCodec) }
+        // Atmos gets its own spatial logo — HQ badge is only for lossless, never for spatial.
+        val pillIcon = when {
+            isSpatialPill -> Icons.Filled.SurroundSound
+            state.isLossless -> Icons.Filled.HighQuality
+            else -> Icons.Filled.MusicNote
+        }
+        val pillIconDesc = when {
+            isSpatialPill -> "Dolby Atmos"
+            state.isLossless -> "Lossless quality"
+            else -> "Audio quality"
+        }
         Surface(
             shape = RoundedCornerShape(24.dp),
             color = liquidGlassContainerColor(qualityButtonBackground),
@@ -2853,27 +2872,53 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
                 .liquidGlassChrome(RoundedCornerShape(24.dp), LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
         ) {
             Row(
-                Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                Modifier.fillMaxSize().padding(horizontal = 10.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    Icons.Filled.HighQuality,
-                    null,
-                    tint = if (isTranslucent) Color.White.copy(alpha = 0.92f) else MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(17.dp),
+                    pillIcon,
+                    pillIconDesc,
+                    tint = if (isSpatialPill) {
+                        if (isTranslucent) Color.White.copy(alpha = 0.95f) else MaterialTheme.colorScheme.onPrimaryContainer
+                    } else if (isTranslucent) {
+                        Color.White.copy(alpha = 0.92f)
+                    } else {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    },
+                    modifier = Modifier.size(if (isSpatialPill) 19.dp else 17.dp),
                 )
+                // Auto-shrink (never ellipsis "..."): shrink font until the whole label fits.
+                val baseFontSize = if (isTranslucent) 11.sp else 13.sp
+                var pillFontSize by remember(pillLabel, isTranslucent) { mutableStateOf(baseFontSize) }
                 Text(
-                    qualityBadgeLabel(state),
-                    style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.3.sp) else MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    pillLabel,
+                    style = if (isTranslucent) {
+                        MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 0.4.sp,
+                        )
+                    } else {
+                        MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                    },
+                    fontSize = pillFontSize,
+                    textAlign = TextAlign.Center,
                     color = when {
                         signalPath.bitPerfect -> Color(0xFFE6C15A)
-                        isTranslucent -> Color.White.copy(alpha = 0.90f)
+                        isTranslucent -> Color.White.copy(alpha = 0.95f)
                         else -> Color.Unspecified
                     },
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(start = 5.dp),
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                    onTextLayout = { layout ->
+                        if (layout.didOverflowWidth && pillFontSize > 8.sp) {
+                            pillFontSize *= 0.92f
+                        }
+                    },
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .padding(start = 6.dp),
                 )
             }
         }
@@ -3084,12 +3129,20 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                     state = dismissState,
                     modifier = Modifier.animateItem(),
                     backgroundContent = {
-                        val alignment = if (dismissState.dismissDirection == androidx.compose.material3.SwipeToDismissBoxValue.StartToEnd) Alignment.CenterStart else Alignment.CenterEnd
-                        Box(
-                            Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 24.dp),
-                            contentAlignment = alignment
-                        ) {
-                            Icon(Icons.Filled.DeleteOutline, contentDescription = "Delete", tint = MaterialTheme.colorScheme.onErrorContainer)
+                        // The delete background must only exist while a swipe
+                        // is actually in progress: the queue card is
+                        // translucent (liquid glass), so a permanently
+                        // composed trash icon ghosts through the card and
+                        // visually merges with the drag handle at the same
+                        // CenterEnd spot.
+                        if (dismissState.dismissDirection != androidx.compose.material3.SwipeToDismissBoxValue.Settled) {
+                            val alignment = if (dismissState.dismissDirection == androidx.compose.material3.SwipeToDismissBoxValue.StartToEnd) Alignment.CenterStart else Alignment.CenterEnd
+                            Box(
+                                Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 24.dp),
+                                contentAlignment = alignment
+                            ) {
+                                Icon(Icons.Filled.DeleteOutline, contentDescription = "Delete", tint = MaterialTheme.colorScheme.onErrorContainer)
+                            }
                         }
                     },
                     content = {
@@ -3158,7 +3211,7 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                             stringResource(com.lastwave.app.R.string.queue_drag_hint),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isDragging) 1f else 0.6f),
                             modifier = Modifier
-                                .padding(start = 4.dp)
+                                .padding(start = 8.dp)
                                 .size(40.dp)
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(
@@ -3254,27 +3307,6 @@ private fun PlayerArtwork(
 internal fun formatTime(ms: Long): String {
     val total = (ms.coerceAtLeast(0) / 1000)
     return "%d:%02d".format(total / 60, total % 60)
-}
-
-@Composable
-private fun SpatialAudioChip(label: String) {
-    Surface(
-        shape = RoundedCornerShape(6.dp),
-        color = Color(0xFF00A3E0),
-        contentColor = Color.White,
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 0.6.sp,
-            ),
-            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-            maxLines = 1,
-        )
-    }
 }
 
 private fun PlayableTrack.toGeneratedTrack() = com.lastwave.app.data.generate.GeneratedTrack(

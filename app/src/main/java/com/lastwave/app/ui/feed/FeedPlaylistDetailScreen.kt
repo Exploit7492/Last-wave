@@ -57,6 +57,8 @@ import com.lastwave.app.playback.PlayableTrack
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
+import com.lastwave.app.ui.common.TrackMiniTrayData
+import com.lastwave.app.ui.common.TrackMiniTraySheet
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 
 @Composable
@@ -159,6 +161,8 @@ private fun PlaylistContent(
     saveError: String?,
 ) {
     var menuTrack by remember { mutableStateOf<YouTubeMusicTrack?>(null) }
+    // Long-press (deep press) opens the mini tray; 3-dot keeps the full sheet.
+    var miniTrayIndex by remember { mutableStateOf<Int?>(null) }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
@@ -259,7 +263,7 @@ private fun PlaylistContent(
                 subtitle = track.artistAndAlbum(),
                 position = groupPositionFor(index, playlist.tracks.size),
                 onClick = { onPlay(index) },
-                onLongClick = { menuTrack = track },
+                onLongClick = { miniTrayIndex = index },
                 modifier = Modifier.padding(horizontal = 16.dp),
                 leading = {
                     ArtworkImage(
@@ -315,6 +319,23 @@ private fun PlaylistContent(
             playbackSourceLabel = playlist.title.ifBlank { "Mix" },
             onDismiss = { menuTrack = null },
         )
+    }
+
+    miniTrayIndex?.let { trayIndex ->
+        playlist.tracks.getOrNull(trayIndex)?.let { track ->
+            TrackMiniTraySheet(
+                data = TrackMiniTrayData(
+                    title = track.title,
+                    artist = track.artist,
+                    album = track.album,
+                    artworkUrl = track.artworkUrl,
+                    videoId = track.videoId.takeIf(String::isNotBlank),
+                    sourceLabel = playlist.title.ifBlank { "Mix" },
+                    onPlay = { onPlay(trayIndex) },
+                ),
+                onDismiss = { miniTrayIndex = null },
+            )
+        }
     }
 }
 

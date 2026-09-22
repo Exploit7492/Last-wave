@@ -66,6 +66,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import com.lastwave.app.ui.theme.LiquidGlassPreset
 import com.lastwave.app.ui.theme.LiquidGlassSurface
 import com.lastwave.app.ui.theme.liquidGlassChrome
 import com.lastwave.app.ui.theme.liquidGlassContainerColor
@@ -940,30 +941,27 @@ private fun LyricsPlaybackControls(
                     targetValue = if (isPlayerPressed) 0.82f else 1.0f,
                     animationSpec = ExpressiveMotion.spatialSpring(),
                     label = "playerTabScale",
-                )
-                LiquidGlassSurface(
-                    glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, interactionSource = playerInteraction),
+                         IconButton(
                     onClick = onToggleFullscreen,
                     interactionSource = playerInteraction,
-                    shape = CircleShape,
-                    color = liquidGlassContainerColor(Color.White.copy(alpha = 0.14f)),
-                    contentColor = Color.White.copy(alpha = 0.90f),
-                    tonalElevation = 0.dp,
-                    shadowElevation = 0.dp,
                     modifier = Modifier
-                        .size(46.dp)
+                        .size(44.dp)
                         .graphicsLayer {
                             scaleX = playerScale
                             scaleY = playerScale
-                        },
+                        }
+                        .clip(CircleShape)
+                        .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls, interactionSource = playerInteraction)
+                        .background(
+                            liquidGlassContainerColor(Color.White.copy(alpha = 0.14f)),
+                        ),
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
-                            contentDescription = if (isFullscreen) "Exit fullscreen lyrics" else "Fullscreen lyrics",
-                            modifier = Modifier.size(24.dp),
-                        )
-                    }
+                    Icon(
+                        if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                        contentDescription = if (isFullscreen) "Exit fullscreen lyrics" else "Fullscreen lyrics",
+                        modifier = Modifier.size(24.dp),
+                        tint = Color.White.copy(alpha = 0.90f),
+                    )
                 }
             }
         }
@@ -1030,12 +1028,14 @@ private fun LyricsPlaybackControls(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                val prevInteraction = remember { MutableInteractionSource() }
                 IconButton(
                     onClick = player::previous,
+                    interactionSource = prevInteraction,
                     modifier = Modifier
-                        .size(42.dp)
-                        .liquidGlassChrome(CircleShape, LocalLiquidGlass.current)
+                        .size(46.dp)
                         .clip(CircleShape)
+                        .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls, interactionSource = prevInteraction)
                         .background(liquidGlassContainerColor(Color.White.copy(alpha = 0.14f))),
                 ) {
                     Icon(
@@ -1046,35 +1046,35 @@ private fun LyricsPlaybackControls(
                     )
                 }
 
-                LiquidGlassSurface(
-                    glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current),
+                val playInteraction = remember { MutableInteractionSource() }
+                IconButton(
                     onClick = player::togglePlayPause,
-                    shape = CircleShape,
-                    color = liquidGlassContainerColor(Color.White),
-                    contentColor = Color.Black,
-                    tonalElevation = 0.dp,
-                    shadowElevation = 0.dp,
-                    modifier = Modifier.size(52.dp),
+                    interactionSource = playInteraction,
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls, interactionSource = playInteraction)
+                        .background(liquidGlassContainerColor(Color.White.copy(alpha = 0.18f))),
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        if (state.isBuffering) {
-                            ExpressiveInlineLoadingIndicator(
-                                size = 22.dp,
-                                color = Color.Black,
-                                strokeWidth = 2.5.dp,
-                            )
-                        } else {
-                            AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(28.dp))
-                        }
+                    if (state.isBuffering) {
+                        ExpressiveInlineLoadingIndicator(
+                            size = 24.dp,
+                            color = Color.White,
+                            strokeWidth = 2.5.dp,
+                        )
+                    } else {
+                        AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(28.dp))
                     }
                 }
 
+                val nextInteraction = remember { MutableInteractionSource() }
                 IconButton(
                     onClick = player::next,
+                    interactionSource = nextInteraction,
                     modifier = Modifier
-                        .size(42.dp)
-                        .liquidGlassChrome(CircleShape, LocalLiquidGlass.current)
+                        .size(46.dp)
                         .clip(CircleShape)
+                        .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls, interactionSource = nextInteraction)
                         .background(liquidGlassContainerColor(Color.White.copy(alpha = 0.14f))),
                 ) {
                     Icon(

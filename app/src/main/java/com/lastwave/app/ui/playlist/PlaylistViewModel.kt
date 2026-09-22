@@ -398,6 +398,52 @@ class PlaylistViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Permanent drag-reorder for local playlists. Updates the open detail
+     * immediately (so the row stays under the finger) then persists the new
+     * order to Room. YouTube-only playlists have no remote move API, so they
+     * stay locked.
+     */
+    fun moveTrack(playlistId: Long, fromIndex: Int, toIndex: Int) {
+        if (fromIndex == toIndex) return
+        if (playlistId < 0L) {
+            _uiState.update { it.copy(toastMessage = "Reorder works for local playlists") }
+            return
+        }
+        val current = _uiState.value.detailPlaylist?.takeIf { it.id == playlistId } ?: return
+        if (fromIndex !in current.tracks.indices || toIndex !in current.tracks.indices) return
+        val reordered = current.tracks.toMutableList().apply {
+            add(toIndex, removeAt(fromIndex))
+        }
+        _uiState.update { state ->
+            state.copy(
+                detailPlaylist = current.copy(tracks = reordered),
+                playlists = state.playlists.map { playlist ->
+                    if (playlist.id == playlistId) playlist.copy(tracks = reordered) else playlist
+                },
+            )
+        }
+        viewModelScope.launch {
+            runCatching { playlistRepository.moveTrack(playlistId, fromIndex, toIndex) }
+                .onSuccess { persisted ->
+                    if (persisted != null) {
+                        _uiState.update { state ->
+                            state.copy(
+                                detailPlaylist = if (state.detailPlaylist?.id == playlistId) persisted else state.detailPlaylist,
+                                playlists = state.playlists.map { playlist ->
+                                    if (playlist.id == playlistId) persisted else playlist
+                                },
+                            )
+                        }
+                    }
+                }
+                .onFailure {
+                    _uiState.update { it.copy(toastMessage = "Couldn't save new order") }
+                    loadDetail(playlistId)
+                }
+        }
+    }
+
     fun requestDelete(id: Long) = _uiState.update { it.copy(deleteConfirmForPlaylistId = id) }
     fun dismissDeleteConfirm() = _uiState.update { it.copy(deleteConfirmForPlaylistId = null) }
 

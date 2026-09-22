@@ -294,6 +294,26 @@ class PlaylistRepository @Inject constructor(
         return updated.toDomain()
     }
 
+    /**
+     * Permanently moves a track within a local playlist and persists the new
+     * order to Room (source of truth). No-op for out-of-range indices.
+     */
+    suspend fun moveTrack(id: Long, fromIndex: Int, toIndex: Int): SavedPlaylist? {
+        if (fromIndex == toIndex) return getById(id)
+        awaitStartupSync()
+        val entity = dao.getById(id) ?: return null
+        val playlist = entity.toDomain()
+        if (fromIndex !in playlist.tracks.indices || toIndex !in playlist.tracks.indices) return playlist
+        val updatedTracks = playlist.tracks.toMutableList().apply {
+            add(toIndex, removeAt(fromIndex))
+        }
+        val updated = entity.copy(tracksJson = json.encodeToString(updatedTracks.map { it.toStored() }))
+        dao.upsert(updated)
+        syncPublicMirror()
+        _changes.tryEmit(Unit)
+        return updated.toDomain()
+    }
+
     suspend fun getLikedSongs(): SavedPlaylist? =
         getAll().firstOrNull { it.mode == LIKED_SONGS_MODE }
 

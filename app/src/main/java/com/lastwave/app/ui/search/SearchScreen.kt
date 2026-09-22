@@ -89,6 +89,8 @@ import com.lastwave.app.ui.common.HeaderActionIcon
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
+import com.lastwave.app.ui.common.TrackMiniTrayData
+import com.lastwave.app.ui.common.TrackMiniTraySheet
 import com.lastwave.app.ui.common.safeDrawingBottomPadding
 import com.lastwave.app.ui.common.safeHorizontalContentPadding
 import com.lastwave.app.ui.common.adaptiveContentWidth
@@ -130,7 +132,9 @@ fun SearchScreen(
     val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
     val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     var menuTarget by remember { mutableStateOf<TrackMenuTarget?>(null) }
-    val addToPlaylist = com.lastwave.app.ui.player.LocalAddToPlaylist.current
+    // Long-press (deep press) on a TRACKS row opens the mini tray;
+    // the overflow button keeps the full sheet.
+    var miniTrayItem by remember { mutableStateOf<SearchResultItem?>(null) }
     val focusManager = LocalFocusManager.current
 
     Box(
@@ -442,6 +446,9 @@ fun SearchScreen(
                                                         else -> viewModel.playResult(topResult)
                                                     }
                                                 },
+                                                onLongClick = {
+                                                    if (state.tab == SearchTab.TRACKS) miniTrayItem = topResult
+                                                },
                                                 onMenu = {
                                                     menuTarget = when (state.tab) {
                                                         SearchTab.TRACKS -> TrackMenuTarget.Track(topResult.name, topResult.artist.orEmpty(), topResult.url)
@@ -478,15 +485,7 @@ fun SearchScreen(
                                             },
                                             onLongClick = {
                                                 if (state.tab == SearchTab.TRACKS) {
-                                                    addToPlaylist(
-                                                        com.lastwave.app.playback.PlayableTrack(
-                                                            title = item.name,
-                                                            artist = item.artist.orEmpty(),
-                                                            album = item.subtitle,
-                                                            artworkUrl = item.artworkUrl,
-                                                            videoId = item.videoId,
-                                                        ),
-                                                    )
+                                                    miniTrayItem = item
                                                 }
                                             },
                                             onMenu = {
@@ -517,9 +516,25 @@ fun SearchScreen(
             onDismiss = { menuTarget = null },
         )
     }
+
+    miniTrayItem?.let { item ->
+        TrackMiniTraySheet(
+            data = TrackMiniTrayData(
+                title = item.name,
+                artist = item.artist.orEmpty(),
+                album = item.subtitle,
+                artworkUrl = item.artworkUrl,
+                videoId = item.videoId,
+                sourceLabel = "Search",
+                onPlay = { viewModel.playResult(item) },
+            ),
+            onDismiss = { miniTrayItem = null },
+        )
+    }
 }
 
 /** Featured Top Result Card styled after YouTube Music hero cards. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun TopResultCard(
     item: SearchResultItem,
@@ -527,6 +542,7 @@ private fun TopResultCard(
     isPlaying: Boolean = false,
     onPlay: () -> Unit,
     onMenu: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val shape = RoundedCornerShape(20.dp)
     val containerColor = if (isPlaying) {
@@ -535,6 +551,7 @@ private fun TopResultCard(
         MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.65f)
     }
     val cardContentColor = MaterialTheme.colorScheme.onSurface
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     Card(
         shape = shape,
         colors = CardDefaults.cardColors(
@@ -544,7 +561,17 @@ private fun TopResultCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp)
-            .clickable(onClick = onPlay),
+            .combinedClickable(
+                onClick = onPlay,
+                onLongClick = onLongClick?.let { action ->
+                    {
+                        haptics.performHapticFeedback(
+                            androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress,
+                        )
+                        action()
+                    }
+                },
+            ),
     ) {
         Row(
             modifier = Modifier

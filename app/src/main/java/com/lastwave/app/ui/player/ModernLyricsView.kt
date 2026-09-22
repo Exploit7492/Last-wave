@@ -14,6 +14,7 @@ import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -56,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import com.lastwave.app.ui.theme.LocalLiquidGlass
+import com.lastwave.app.ui.theme.LiquidGlassPreset
 import com.lastwave.app.ui.theme.LiquidGlassSurface
 import com.lastwave.app.ui.theme.liquidGlassChrome
 import com.lastwave.app.ui.theme.liquidGlassContainerColor
@@ -64,7 +66,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextMotion
 import androidx.compose.ui.unit.LayoutDirection
@@ -207,22 +212,19 @@ fun ModernLyricsPanel(
                             if (meaningful.isEmpty()) false
                             else meaningful.count { it.isRtl } > meaningful.size / 2
                         }
-                        val syncedLyrics = remember(targetState.lines, track.title, track.artist, isOverallRtl) {
-                            targetState.lines.toSyncedLyrics(track.title, track.artist, isOverallRtl)
-                        }
-
-                        val initialLineIndex = remember(syncedLyrics) {
-                            val time = smoothedPositionMs.toInt()
-                            val idx = syncedLyrics.lines.indexOfFirst { time in it.start..it.end }
-                            if (idx != -1) idx else syncedLyrics.lines.indexOfFirst { it.start > time }.takeIf { it != -1 } ?: 0
-                        }
-                        // Reset scroll state whenever the lyrics themselves
-                        // change (new track or provider upgrade); otherwise
-                        // the previous song's scroll offset leaks into this
-                        // one until auto-scroll corrects it.
-                        val listState = key(syncedLyrics) {
-                            rememberLazyListState(initialFirstVisibleItemIndex = initialLineIndex)
-                        }
+                        // Shared style instances: the splitter below measures
+                        // with exactly this style, so its fit verdict matches
+                        // what the canvas will draw.
+                        val karaokeNormalStyle = LocalTextStyle.current.copy(
+                            fontSize = if (isWordSynced) 28.sp else 24.sp,
+                            fontWeight = FontWeight.Bold,
+                            textMotion = TextMotion.Animated,
+                        )
+                        val karaokeAccompanimentStyle = LocalTextStyle.current.copy(
+                            fontSize = if (isWordSynced) 20.sp else 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            textMotion = TextMotion.Animated,
+                        )
 
                         val layoutDirection = if (isOverallRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
                         // Short provider badge: makes it visible why words
@@ -260,32 +262,19 @@ fun ModernLyricsPanel(
                                         )
                                     }
                                 }
-                                KaraokeLyricsView(
-                                    listState = listState,
-                                    lyrics = syncedLyrics,
-                                    showTranslation = true,
-                                    showPhonetic = true,
-                                    currentPosition = { smoothedPositionMs.toInt() },
-                                    onLineClicked = { line ->
-                                        player.seekTo(line.start.toLong())
-                                    },
-                                    onLinePressed = {},
+                                KaraokeLineWrapScope(
+                                    lines = targetState.lines,
+                                    isWordSynced = isWordSynced,
+                                    isOverallRtl = isOverallRtl,
+                                    trackTitle = track.title,
+                                    trackArtist = track.artist,
+                                    normalStyle = karaokeNormalStyle,
+                                    accompanimentStyle = karaokeAccompanimentStyle,
+                                    smoothedPositionMs = smoothedPositionMs,
+                                    player = player,
                                     modifier = Modifier
                                         .weight(1f)
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 24.dp),
-                                    offset = 84.dp,
-                                    normalLineTextStyle = LocalTextStyle.current.copy(
-                                        fontSize = if (isWordSynced) 28.sp else 24.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        textMotion = TextMotion.Animated,
-                                    ),
-                                    accompanimentLineTextStyle = LocalTextStyle.current.copy(
-                                        fontSize = if (isWordSynced) 20.sp else 18.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        textMotion = TextMotion.Animated,
-                                    ),
-                                    textColor = Color.White,
+                                        .fillMaxWidth(),
                                 )
                             }
                         }
@@ -324,6 +313,85 @@ fun ModernLyricsPanel(
     }
 }
 
+/**
+ * Horizontal chrome around karaoke glyphs, both sides combined: 24dp view
+ * padding (applied twice upstream — the library puts the same padded
+ * modifier on both its outer scrim Box and its inner list) + 16dp line
+ * padding inside each karaoke row. Kept conservative on purpose: if the
+ * upstream double-padding is ever fixed, lines simply split just as early.
+ */
+private val KaraokeHorizontalChrome = 128.dp
+
+/**
+ * Measures word-sync lines against the settled list width and pre-splits
+ * overlong ones into balanced sub-lines (see [splitKaraokeToFit]) before
+ * the karaoke canvas ever measures them.
+ */
+@Composable
+private fun KaraokeLineWrapScope(
+    lines: List<LyricLine>,
+    isWordSynced: Boolean,
+    isOverallRtl: Boolean,
+    trackTitle: String,
+    trackArtist: String,
+    normalStyle: TextStyle,
+    accompanimentStyle: TextStyle,
+    smoothedPositionMs: Long,
+    player: MusicPlayer,
+    modifier: Modifier = Modifier,
+) {
+    BoxWithConstraints(modifier) {
+        val density = LocalDensity.current
+        val textMeasurer = rememberTextMeasurer()
+        val wrapBudgetPx = remember(maxWidth, density) {
+            // 3% safety: the splitter measures word-by-word while the canvas
+            // draws continuous text, so cross-word kerning can add a pixel
+            // or two beyond the summed word widths.
+            with(density) { (maxWidth - KaraokeHorizontalChrome).toPx().coerceAtLeast(0f) } * 0.97f
+        }
+        val displayLines = remember(lines, wrapBudgetPx, normalStyle) {
+            if (!isWordSynced) lines
+            else lines.flatMap { line ->
+                line.splitKaraokeToFit(wrapBudgetPx) { text ->
+                    textMeasurer.measure(text, normalStyle).size.width.toFloat()
+                }
+            }
+        }
+        val syncedLyrics = remember(displayLines, trackTitle, trackArtist, isOverallRtl) {
+            displayLines.toSyncedLyrics(trackTitle, trackArtist, isOverallRtl)
+        }
+        val initialLineIndex = remember(syncedLyrics) {
+            val time = smoothedPositionMs.toInt()
+            val idx = syncedLyrics.lines.indexOfFirst { time in it.start..it.end }
+            if (idx != -1) idx else syncedLyrics.lines.indexOfFirst { it.start > time }.takeIf { it != -1 } ?: 0
+        }
+        // Reset scroll state whenever the lyrics themselves change (new
+        // track or provider upgrade); otherwise the previous song's scroll
+        // offset leaks into this one until auto-scroll corrects it.
+        val listState = key(syncedLyrics) {
+            rememberLazyListState(initialFirstVisibleItemIndex = initialLineIndex)
+        }
+        KaraokeLyricsView(
+            listState = listState,
+            lyrics = syncedLyrics,
+            showTranslation = true,
+            showPhonetic = true,
+            currentPosition = { smoothedPositionMs.toInt() },
+            onLineClicked = { line ->
+                player.seekTo(line.start.toLong())
+            },
+            onLinePressed = {},
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp),
+            offset = 84.dp,
+            normalLineTextStyle = normalStyle,
+            accompanimentLineTextStyle = accompanimentStyle,
+            textColor = Color.White,
+        )
+    }
+}
+
 private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine {
     val lineStart = timeMs.toInt()
     val lineEnd = if (durationMs > 0) (timeMs + durationMs).toInt()
@@ -338,6 +406,10 @@ private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine 
         val needsSpacing = text.contains(' ') || text.contains('\u00A0')
 
         fun List<LyricSyllable>.toKaraokeSyllables(): List<KaraokeSyllable> {
+            // Separator rule lives in renderedSyllableContents (shared with
+            // KaraokeLineSplitter's word grouping) so the wrap points the
+            // splitter breaks at are exactly the points the canvas can wrap.
+            val contents = renderedSyllableContents(this, needsSpacing)
             return mapIndexed { index, syl ->
                 val sStart = syl.timeMs.toInt()
                 val minDur = if (syl.durationMs > 0) syl.durationMs.toInt() else {
@@ -346,16 +418,8 @@ private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine 
                     else 150
                 }
                 val sEnd = (sStart + minDur).coerceAtLeast(sStart + 50)
-                val next = getOrNull(index + 1)
-                val separator = if (needsSpacing &&
-                    index < lastIndex &&
-                    !syl.text.endsWith(' ') &&
-                    !syl.text.endsWith('\u00A0') &&
-                    next?.appendToPrevious != true &&
-                    (next == null || (!next.text.startsWith(' ') && !next.text.startsWith('\u00A0')))
-                ) " " else ""
                 KaraokeSyllable(
-                    content = syl.text + separator,
+                    content = contents[index],
                     start = sStart,
                     end = sEnd,
                 )
@@ -557,29 +621,27 @@ private fun ModernLyricsControls(
                     animationSpec = ExpressiveMotion.spatialSpring(),
                     label = "playerTabScale",
                 )
-                LiquidGlassSurface(
-                    glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, interactionSource = playerInteraction),
+                IconButton(
                     onClick = onToggleFullscreen,
                     interactionSource = playerInteraction,
-                    shape = CircleShape,
-                    color = liquidGlassContainerColor(Color.White.copy(alpha = 0.14f)),
-                    contentColor = Color.White.copy(alpha = 0.90f),
-                    tonalElevation = 0.dp,
-                    shadowElevation = 0.dp,
                     modifier = Modifier
-                        .size(46.dp)
+                        .size(44.dp)
                         .graphicsLayer {
                             scaleX = playerScale
                             scaleY = playerScale
-                        },
+                        }
+                        .clip(CircleShape)
+                        .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls, interactionSource = playerInteraction)
+                        .background(
+                            liquidGlassContainerColor(Color.White.copy(alpha = 0.14f)),
+                        ),
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
-                            contentDescription = if (isFullscreen) "Exit fullscreen lyrics" else "Fullscreen lyrics",
-                            modifier = Modifier.size(24.dp),
-                        )
-                    }
+                    Icon(
+                        if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                        contentDescription = if (isFullscreen) "Exit fullscreen lyrics" else "Fullscreen lyrics",
+                        modifier = Modifier.size(24.dp),
+                        tint = Color.White.copy(alpha = 0.90f),
+                    )
                 }
             }
         }
@@ -646,12 +708,14 @@ private fun ModernLyricsControls(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                val prevInteraction = remember { MutableInteractionSource() }
                 IconButton(
                     onClick = player::previous,
+                    interactionSource = prevInteraction,
                     modifier = Modifier
-                        .size(42.dp)
-                        .liquidGlassChrome(CircleShape, LocalLiquidGlass.current)
+                        .size(46.dp)
                         .clip(CircleShape)
+                        .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls, interactionSource = prevInteraction)
                         .background(liquidGlassContainerColor(Color.White.copy(alpha = 0.14f))),
                 ) {
                     Icon(
@@ -662,35 +726,35 @@ private fun ModernLyricsControls(
                     )
                 }
 
-                LiquidGlassSurface(
-                    glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current),
+                val playInteraction = remember { MutableInteractionSource() }
+                IconButton(
                     onClick = player::togglePlayPause,
-                    shape = CircleShape,
-                    color = liquidGlassContainerColor(Color.White),
-                    contentColor = Color.Black,
-                    tonalElevation = 0.dp,
-                    shadowElevation = 0.dp,
-                    modifier = Modifier.size(52.dp),
+                    interactionSource = playInteraction,
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls, interactionSource = playInteraction)
+                        .background(liquidGlassContainerColor(Color.White.copy(alpha = 0.18f))),
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        if (state.isBuffering) {
-                            ExpressiveInlineLoadingIndicator(
-                                size = 22.dp,
-                                color = Color.Black,
-                                strokeWidth = 2.5.dp,
-                            )
-                        } else {
-                            AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(28.dp))
-                        }
+                    if (state.isBuffering) {
+                        ExpressiveInlineLoadingIndicator(
+                            size = 24.dp,
+                            color = Color.White,
+                            strokeWidth = 2.5.dp,
+                        )
+                    } else {
+                        AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(28.dp))
                     }
                 }
 
+                val nextInteraction = remember { MutableInteractionSource() }
                 IconButton(
                     onClick = player::next,
+                    interactionSource = nextInteraction,
                     modifier = Modifier
-                        .size(42.dp)
-                        .liquidGlassChrome(CircleShape, LocalLiquidGlass.current)
+                        .size(46.dp)
                         .clip(CircleShape)
+                        .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls, interactionSource = nextInteraction)
                         .background(liquidGlassContainerColor(Color.White.copy(alpha = 0.14f))),
                 ) {
                     Icon(
