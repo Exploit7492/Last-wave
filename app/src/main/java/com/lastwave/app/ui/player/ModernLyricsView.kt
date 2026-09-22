@@ -117,7 +117,7 @@ fun ModernLyricsPanel(
     // and a null key would leak the previous song's smoothing state.
     var smoothedPositionMs by remember(track) { mutableLongStateOf(progress.positionMs) }
 
-    LaunchedEffect(progress.positionMs, state.isPlaying) {
+    LaunchedEffect(progress.positionMs, state.isPlaying, track) {
         val drift = kotlin.math.abs(smoothedPositionMs - progress.positionMs)
         // Hard snap on seek (>250ms drift) or when stopped/paused
         if (drift > 250 || !state.isPlaying) {
@@ -125,7 +125,7 @@ fun ModernLyricsPanel(
         }
     }
 
-    LaunchedEffect(state.isPlaying) {
+    LaunchedEffect(state.isPlaying, track) {
         if (!state.isPlaying) return@LaunchedEffect
         var lastFrameTime = SystemClock.elapsedRealtime()
         while (isActive) {
@@ -270,7 +270,7 @@ fun ModernLyricsPanel(
                                     trackArtist = track.artist,
                                     normalStyle = karaokeNormalStyle,
                                     accompanimentStyle = karaokeAccompanimentStyle,
-                                    smoothedPositionMs = smoothedPositionMs,
+                                    currentPosition = { smoothedPositionMs.toInt() },
                                     player = player,
                                     modifier = Modifier
                                         .weight(1f)
@@ -336,7 +336,7 @@ private fun KaraokeLineWrapScope(
     trackArtist: String,
     normalStyle: TextStyle,
     accompanimentStyle: TextStyle,
-    smoothedPositionMs: Long,
+    currentPosition: () -> Int,
     player: MusicPlayer,
     modifier: Modifier = Modifier,
 ) {
@@ -361,7 +361,7 @@ private fun KaraokeLineWrapScope(
             displayLines.toSyncedLyrics(trackTitle, trackArtist, isOverallRtl)
         }
         val initialLineIndex = remember(syncedLyrics) {
-            val time = smoothedPositionMs.toInt()
+            val time = currentPosition()
             val idx = syncedLyrics.lines.indexOfFirst { time in it.start..it.end }
             if (idx != -1) idx else syncedLyrics.lines.indexOfFirst { it.start > time }.takeIf { it != -1 } ?: 0
         }
@@ -376,7 +376,7 @@ private fun KaraokeLineWrapScope(
             lyrics = syncedLyrics,
             showTranslation = true,
             showPhonetic = true,
-            currentPosition = { smoothedPositionMs.toInt() },
+            currentPosition = currentPosition,
             onLineClicked = { line ->
                 player.seekTo(line.start.toLong())
             },

@@ -70,7 +70,11 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInParent
@@ -160,6 +164,21 @@ object FloatingNavDefaults {
 
 private val DockShape: CornerBasedShape = SquircleShape(percent = 50)
 private val PillShape: CornerBasedShape = SquircleShape(percent = 50)
+
+private fun DrawScope.clipToShape(
+    shape: Shape,
+    block: DrawScope.() -> Unit,
+) {
+    val outline = shape.createOutline(size, layoutDirection, this)
+    val path = when (outline) {
+        is Outline.Generic -> outline.path
+        is Outline.Rounded -> Path().apply { addRoundRect(outline.roundRect) }
+        is Outline.Rectangle -> Path().apply { addRect(outline.rect) }
+    }
+    clipPath(path) {
+        block()
+    }
+}
 
 private fun <T> navSpring() = ExpressiveMotion.spatialSpring<T>()
 
@@ -350,8 +369,7 @@ private fun FloatingNavBar(
             .windowInsetsPadding(
                 WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
             )
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-            .animateContentSize(animationSpec = navSpring()),
+            .padding(horizontal = 8.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         Row(
@@ -359,95 +377,99 @@ private fun FloatingNavBar(
             horizontalArrangement = Arrangement.Center,
         ) {
             val dockModifier = if (isGlass) {
-                Modifier.drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { DockShape },
-                    effects = {
-                        if (!size.isSpecified || !size.width.isFinite() || !size.height.isFinite() ||
-                            size.width <= 0f || size.height <= 0f
-                        ) return@drawBackdrop
+                Modifier
+                    .clip(DockShape)
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { DockShape },
+                        effects = {
+                            if (!size.isSpecified || !size.width.isFinite() || !size.height.isFinite() ||
+                                size.width <= 0f || size.height <= 0f
+                            ) return@drawBackdrop
 
-                        // 1. Color Vibrancy (API 33+) or Saturation boost (API 31+)
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            vibrancy()
-                        } else {
-                            colorControls(saturation = 1.15f)
-                        }
+                            // 1. Color Vibrancy (API 33+) or Saturation boost (API 31+)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                vibrancy()
+                            } else {
+                                colorControls(saturation = 1.15f)
+                            }
 
-                        // 2. Optical Blur (subtle 5dp so underlying content is clearly refracted through lens)
-                        blur(5.dp.toPx())
+                            // 2. Optical Blur (subtle 5dp so underlying content is clearly refracted through lens)
+                            blur(5.dp.toPx())
 
-                        // 3. Continuous-curvature squircle lens (API 33+) - high refraction for intense liquify!
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && DockShape is CornerBasedShape) {
-                            val minCorner = minOf(
-                                DockShape.topStart.toPx(size, density),
-                                DockShape.topEnd.toPx(size, density),
-                                DockShape.bottomStart.toPx(size, density),
-                                DockShape.bottomEnd.toPx(size, density),
-                            ).coerceAtLeast(0f)
-                            val lensH = 20.dp.toPx().coerceIn(0f, if (minCorner > 0f) minCorner else 32.dp.toPx())
-                            val lensA = 40.dp.toPx().coerceIn(0f, size.minDimension)
-                            if (lensH > 0f && lensA > 0f) {
-                                lens(
-                                    refractionHeight = lensH,
-                                    refractionAmount = lensA,
-                                    depthEffect = true,
-                                    chromaticAberration = true,
+                            // 3. Continuous-curvature squircle lens (API 33+) - high refraction for intense liquify!
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && DockShape is CornerBasedShape) {
+                                val minCorner = minOf(
+                                    DockShape.topStart.toPx(size, density),
+                                    DockShape.topEnd.toPx(size, density),
+                                    DockShape.bottomStart.toPx(size, density),
+                                    DockShape.bottomEnd.toPx(size, density),
+                                ).coerceAtLeast(0f)
+                                val lensH = 20.dp.toPx().coerceIn(0f, if (minCorner > 0f) minCorner else 32.dp.toPx())
+                                val lensA = 40.dp.toPx().coerceIn(0f, size.minDimension)
+                                if (lensH > 0f && lensA > 0f) {
+                                    lens(
+                                        refractionHeight = lensH,
+                                        refractionAmount = lensA,
+                                        depthEffect = true,
+                                        chromaticAberration = true,
+                                    )
+                                }
+                            }
+                        },
+                        layerBlock = {
+                            val progress = pressProgress.value
+                            val scale = lerp(1f, 0.96f, progress)
+                            scaleX = scale
+                            scaleY = scale
+                        },
+                        highlight = {
+                            Highlight(
+                                alpha = lerp(if (isDark) 0.45f else 0.32f, 0.72f, pressProgress.value),
+                                style = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) HighlightStyle.Default else HighlightStyle.Plain,
+                            )
+                        },
+                        shadow = {
+                            Shadow(
+                                radius = lerp(14f, 4f, pressProgress.value).dp,
+                                color = Color.Black.copy(alpha = if (isDark) 0.38f else 0.18f),
+                            )
+                        },
+                        onDrawSurface = {
+                            clipToShape(DockShape) {
+                                // Translucent glass substrate
+                                val baseAlpha = if (isDark) 0.18f else 0.40f
+                                drawRect(if (isDark) Color(0xFF0A0A0A).copy(alpha = baseAlpha) else Color.White.copy(alpha = baseAlpha))
+
+                                // Glossy top-to-bottom sheen gradient
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        0f to Color.White.copy(alpha = if (isDark) 0.28f else 0.50f),
+                                        0.28f to Color.White.copy(alpha = if (isDark) 0.08f else 0.18f),
+                                        0.60f to Color.Transparent,
+                                        1f to Color.Black.copy(alpha = if (isDark) 0.12f else 0.04f),
+                                        startY = 0f,
+                                        endY = size.height,
+                                    ),
+                                )
+
+                                // Dynamic directional specular shine following touch motion across the squircle
+                                val highlightCenter = touchPosition.value ?: Offset(size.width * 0.5f, 0f)
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        colors = listOf(
+                                            Color.White.copy(alpha = if (isDark) 0.34f else 0.48f),
+                                            Color.Transparent,
+                                        ),
+                                        center = highlightCenter,
+                                        radius = size.width * 0.55f,
+                                    ),
+                                    radius = size.width * 0.55f,
+                                    center = highlightCenter,
                                 )
                             }
-                        }
-                    },
-                    layerBlock = {
-                        val progress = pressProgress.value
-                        val scale = lerp(1f, 0.96f, progress)
-                        scaleX = scale
-                        scaleY = scale
-                    },
-                    highlight = {
-                        Highlight(
-                            alpha = lerp(if (isDark) 0.45f else 0.32f, 0.72f, pressProgress.value),
-                            style = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) HighlightStyle.Default else HighlightStyle.Plain,
-                        )
-                    },
-                    shadow = {
-                        Shadow(
-                            radius = lerp(14f, 4f, pressProgress.value).dp,
-                            color = Color.Black.copy(alpha = if (isDark) 0.38f else 0.18f),
-                        )
-                    },
-                    onDrawSurface = {
-                        // Translucent glass substrate
-                        val baseAlpha = if (isDark) 0.18f else 0.40f
-                        drawRect(if (isDark) Color(0xFF0A0A0A).copy(alpha = baseAlpha) else Color.White.copy(alpha = baseAlpha))
-
-                        // Glossy top-to-bottom sheen gradient
-                        drawRect(
-                            brush = Brush.verticalGradient(
-                                0f to Color.White.copy(alpha = if (isDark) 0.28f else 0.50f),
-                                0.28f to Color.White.copy(alpha = if (isDark) 0.08f else 0.18f),
-                                0.60f to Color.Transparent,
-                                1f to Color.Black.copy(alpha = if (isDark) 0.12f else 0.04f),
-                                startY = 0f,
-                                endY = size.height,
-                            ),
-                        )
-
-                        // Dynamic directional specular shine following touch motion across the squircle
-                        val highlightCenter = touchPosition.value ?: Offset(size.width * 0.5f, 0f)
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(
-                                    Color.White.copy(alpha = if (isDark) 0.34f else 0.48f),
-                                    Color.Transparent,
-                                ),
-                                center = highlightCenter,
-                                radius = size.width * 0.55f,
-                            ),
-                            radius = size.width * 0.55f,
-                            center = highlightCenter,
-                        )
-                    },
-                )
+                        },
+                    )
             } else {
                 Modifier
                     .background(
@@ -462,7 +484,7 @@ private fun FloatingNavBar(
                 color = Color.Transparent,
                 tonalElevation = 0.dp,
                 shadowElevation = if (isGlass) 0.dp else 12.dp,
-                modifier = dockModifier,
+                modifier = dockModifier.animateContentSize(animationSpec = navSpring()),
             ) {
                 Row(
                     modifier = Modifier
@@ -533,14 +555,15 @@ private fun FloatingNavBar(
                     shrinkHorizontally(animationSpec = navSpring(), shrinkTowards = Alignment.End),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(8.dp))
                     Surface(
                         shape = SquircleShape(percent = 50),
                         color = if (isGlass) Color.Transparent else MaterialTheme.colorScheme.primaryContainer,
                         shadowElevation = if (isGlass) 0.dp else 10.dp,
                         tonalElevation = if (isGlass) 0.dp else 4.dp,
                         modifier = Modifier
-                            .size(56.dp)
+                            .size(48.dp)
+                            .clip(SquircleShape(percent = 50))
                             .then(
                                 if (isGlass) {
                                     Modifier.drawBackdrop(
@@ -572,18 +595,20 @@ private fun FloatingNavBar(
                                             )
                                         },
                                         onDrawSurface = {
-                                            val baseAlpha = if (isDark) 0.18f else 0.40f
-                                            drawRect(if (isDark) Color(0xFF0A0A0A).copy(alpha = baseAlpha) else Color.White.copy(alpha = baseAlpha))
-                                            drawRect(
-                                                brush = Brush.verticalGradient(
-                                                    0f to Color.White.copy(alpha = if (isDark) 0.28f else 0.50f),
-                                                    0.25f to Color.White.copy(alpha = if (isDark) 0.08f else 0.18f),
-                                                    0.60f to Color.Transparent,
-                                                    1f to Color.Black.copy(alpha = if (isDark) 0.12f else 0.04f),
-                                                    startY = 0f,
-                                                    endY = size.height,
-                                                ),
-                                            )
+                                            clipToShape(SquircleShape(percent = 50)) {
+                                                val baseAlpha = if (isDark) 0.18f else 0.40f
+                                                drawRect(if (isDark) Color(0xFF0A0A0A).copy(alpha = baseAlpha) else Color.White.copy(alpha = baseAlpha))
+                                                drawRect(
+                                                    brush = Brush.verticalGradient(
+                                                        0f to Color.White.copy(alpha = if (isDark) 0.28f else 0.50f),
+                                                        0.25f to Color.White.copy(alpha = if (isDark) 0.08f else 0.18f),
+                                                        0.60f to Color.Transparent,
+                                                        1f to Color.Black.copy(alpha = if (isDark) 0.12f else 0.04f),
+                                                        startY = 0f,
+                                                        endY = size.height,
+                                                    ),
+                                                )
+                                            }
                                         },
                                     )
                                 } else Modifier
@@ -656,7 +681,7 @@ private fun FloatingNavItem(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
             modifier = Modifier
-                .padding(horizontal = if (selected) 18.dp else 12.dp)
+                .padding(horizontal = if (selected) 14.dp else 10.dp)
                 .height(48.dp),
         ) {
             Icon(

@@ -1,15 +1,21 @@
 package com.lastwave.app.ui.theme
 
 import android.app.Activity
+import android.os.Build
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+import com.lastwave.app.data.local.AccentMode
 import com.lastwave.app.data.repository.ThemeUiState
 
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -36,7 +42,32 @@ fun LastWaveTheme(
         ThemeMode.DARK -> true
         ThemeMode.LIGHT -> false
     }
-    val activeColorScheme = if (isDark) themeState.darkColorScheme else themeState.lightColorScheme
+    // Dynamic Color ON (S+): use the live wallpaper Monet scheme instead of the
+    // default manual accent or monochrome. System dynamic auto-tracks wallpaper
+    // changes, so no manual refresh is needed. Now-playing artwork wins when it
+    // is active; pre-S falls back to the repository's wallpaper-seeded scheme.
+    val context = LocalContext.current
+    val useSystemDynamic = themeState.mode == AccentMode.DYNAMIC &&
+        !themeState.isNowPlayingThemed &&
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val systemDark = if (useSystemDynamic) {
+        val base = dynamicDarkColorScheme(context)
+        if (themeState.amoled) {
+            base.copy(
+                background = Color.Black,
+                surface = Color.Black,
+                surfaceContainerLow = Color.Black,
+                surfaceContainerLowest = Color.Black,
+            )
+        } else base
+    } else null
+    val systemLight = if (useSystemDynamic) dynamicLightColorScheme(context) else null
+    val activeColorScheme = when {
+        systemDark != null && isDark -> systemDark
+        systemLight != null && !isDark -> systemLight
+        isDark -> themeState.darkColorScheme
+        else -> themeState.lightColorScheme
+    }
 
     val view = LocalView.current
     if (!view.isInEditMode) {

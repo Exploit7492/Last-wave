@@ -49,6 +49,11 @@ data class ThemeUiState(
      *  true, container roles in [colorScheme] are semi-translucent and the
      *  chrome surfaces get specular glass dressing. */
     val liquidGlass: Boolean = false,
+    /** True when the "Dynamic Now Playing" artwork override is currently
+     *  driving the schemes. LastWaveTheme uses this so S+ system dynamic
+     *  (wallpaper) only takes over when no now-playing color is active:
+     *  now-playing wins, wallpaper-dynamic is next, manual/mono last. */
+    val isNowPlayingThemed: Boolean = false,
 )
 
 @Singleton
@@ -157,16 +162,12 @@ class ThemeRepository @Inject constructor(
         }
     }
 
+    /** Wallpaper seed for DYNAMIC mode on pre-S devices (and as the data-layer
+     *  fallback on S+ — the real S+ wallpaper Monet scheme is applied in
+     *  LastWaveTheme via dynamicDark/LightColorScheme, which are @Composable
+     *  and can never be called from here). Reads only
+     *  WallpaperManager.getWallpaperColors(), safe on any thread. */
     private fun getSystemWallpaperColorHex(): String? {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            return try {
-                androidx.compose.material3.dynamicDarkColorScheme(context).primary.toHex()
-            } catch (e: Exception) {
-                null
-            } catch (error: LinkageError) {
-                null
-            }
-        }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return null
         return try {
             val colors = WallpaperManager.getInstance(context).getWallpaperColors(WallpaperManager.FLAG_SYSTEM)
@@ -192,9 +193,10 @@ class ThemeRepository @Inject constructor(
     ) { prefs: ThemePrefs, dynamic: String?, nowPlaying: String?, misc: MiscSettings ->
         val isAmoled = prefs.amoled
         val isGlass = prefs.liquidGlass
+        val nowPlayingActive = misc.dynamicNowPlayingEnabled && nowPlaying != null
         val (darkScheme, lightScheme) = when {
-            misc.dynamicNowPlayingEnabled && nowPlaying != null -> {
-                val dark = Md3SchemeBuilder.buildDarkScheme(nowPlaying, isAmoled, isGlass)
+            nowPlayingActive -> {
+                val dark = Md3SchemeBuilder.buildDarkScheme(nowPlaying!!, isAmoled, isGlass)
                 val light = Md3SchemeBuilder.buildLightScheme(nowPlaying, isGlass)
                 dark to light
             }
@@ -204,31 +206,15 @@ class ThemeRepository @Inject constructor(
                 dark to light
             }
             prefs.accentMode == AccentMode.DYNAMIC -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    val sysDark = runCatching { androidx.compose.material3.dynamicDarkColorScheme(context) }.getOrNull()
-                    val sysLight = runCatching { androidx.compose.material3.dynamicLightColorScheme(context) }.getOrNull()
-                    if (sysDark != null && sysLight != null) {
-                        val adaptedDark = if (isAmoled) {
-                            sysDark.copy(
-                                background = Color.Black,
-                                surface = Color.Black,
-                                surfaceContainerLow = Color.Black,
-                                surfaceContainerLowest = Color.Black,
-                            )
-                        } else sysDark
-                        adaptedDark to sysLight
-                    } else {
-                        val seed = dynamic ?: getSystemWallpaperColorHex() ?: prefs.accentColor
-                        val dark = Md3SchemeBuilder.buildDarkScheme(seed, isAmoled, isGlass)
-                        val light = Md3SchemeBuilder.buildLightScheme(seed, isGlass)
-                        dark to light
-                    }
-                } else {
-                    val seed = dynamic ?: getSystemWallpaperColorHex() ?: prefs.accentColor
-                    val dark = Md3SchemeBuilder.buildDarkScheme(seed, isAmoled, isGlass)
-                    val light = Md3SchemeBuilder.buildLightScheme(seed, isGlass)
-                    dark to light
-                }
+                // Wallpaper seed for the data layer. On S+ the real Monet
+                // dynamic scheme is applied in LastWaveTheme (composable);
+                // here we only need a wallpaper-derived fallback so pre-S
+                // and cold-start frames already show the wallpaper accent
+                // instead of the default red or monochrome.
+                val seed = dynamic ?: getSystemWallpaperColorHex() ?: prefs.accentColor
+                val dark = Md3SchemeBuilder.buildDarkScheme(seed, isAmoled, isGlass)
+                val light = Md3SchemeBuilder.buildLightScheme(seed, isGlass)
+                dark to light
             }
             else -> {
                 val dark = Md3SchemeBuilder.buildDarkScheme(prefs.accentColor, isAmoled, isGlass)
@@ -246,6 +232,7 @@ class ThemeRepository @Inject constructor(
             accentColorHex = prefs.accentColor,
             useCustomFont = misc.useCustomFont,
             liquidGlass = isGlass,
+            isNowPlayingThemed = nowPlayingActive,
         )
     }.stateIn(
         applicationScope,
@@ -267,6 +254,8 @@ class ThemeRepository @Inject constructor(
         themePreferences.setThemeMode(mode)
     }
 
+    /** Manual pick always leaves DYNAMIC/MONOCHROME: choosing your own accent
+     *  turns Dynamic Color off itself (ThemePreferences persists MANUAL). */
     suspend fun setManualAccent(color: Color) {
         val hex = color.toHex()
         themePreferences.setManualAccent(hex, hex)
