@@ -2168,10 +2168,16 @@ class MusicPlayer @Inject constructor(
         if (player.currentPosition > 5_000) {
             player.seekTo(0)
         } else {
-            // Under shuffle, ExoPlayer's permutation previous is almost never
-            // the song just heard (rebuilt on toggle/handoff/edits) — walk
-            // the explicit listening history first.
+            // Under shuffle, walk the explicit listening history first:
+            // the engine permutation is rebuilt on toggle/handoff/edits, so
+            // its "previous" is often a song never heard in this session.
+            // With exhausted history there is no heard song to return to —
+            // restart instead of jumping to a random unheard track.
             val historyIndex = if (pendingState.shuffleEnabled) popHistoryIndex(pendingState) else null
+            if (historyIndex == null && pendingState.shuffleEnabled) {
+                player.seekTo(0)
+                return@onMain
+            }
             val index = historyIndex
                 ?: player.previousMediaItemIndex.takeIf { it != C.INDEX_UNSET }
                 ?: previousQueueIndex(pendingState)
@@ -2281,7 +2287,13 @@ class MusicPlayer @Inject constructor(
         val queue = state.queue
         if (queue.isEmpty()) return C.INDEX_UNSET
         val start = (state.currentIndex + 1).coerceAtLeast(0)
-        val ordered = if (state.shuffleEnabled) queue.indices.shuffled() else {
+        // Shuffle fallback (engine has no next, e.g. repeat-off at the true
+        // permutation end): with repeat-all keep going on a random track,
+        // otherwise stop — an unconditional random jump here made shuffle
+        // play forever and made manual-next at the end jump unpredictably.
+        val ordered = if (state.shuffleEnabled) {
+            if (state.repeatMode == Player.REPEAT_MODE_ALL) queue.indices.shuffled() else emptyList()
+        } else {
             (start until queue.size) + if (state.repeatMode == Player.REPEAT_MODE_ALL) (0 until start) else emptyList()
         }
         return ordered.firstOrNull { it != state.currentIndex && queue[it].mediaIdKey() !in unavailableMediaIds }
@@ -2314,6 +2326,25 @@ class MusicPlayer @Inject constructor(
         }
     }
 
+    /**
+     * Takes over playback of [index] after (re)installing its media source.
+     * The loader thread may have already opened its own resolve of this
+     * placeholder and started audible playback while the app-level resolve
+     * was still in flight: rewinding to zero then replays the intro seconds
+     * ("plays a moment then jumps"). Only seek when still at the very start.
+     */
+    @MainThread
+    private fun takeOverPlayback(index: Int, expectedMediaId: String) {
+        val alreadyAudible = player.currentMediaItemIndex == index &&
+            player.currentMediaItem?.mediaId == expectedMediaId &&
+            (player.isPlaying || player.currentPosition > 1_500L)
+        if (!alreadyAudible) {
+            player.seekToDefaultPosition(index)
+        }
+        if (player.playbackState == Player.STATE_IDLE) player.prepare()
+        player.play()
+    }
+
     @MainThread
     private fun resolveAndPlayQueueItem(index: Int) {
         if (index !in 0 until player.mediaItemCount) {
@@ -2336,9 +2367,7 @@ class MusicPlayer @Inject constructor(
             mediaItem.localConfiguration?.customCacheKey
                 ?.let(preparedStreams::get)
                 ?.let(::publishResolvedQuality)
-            player.seekToDefaultPosition(index)
-            if (player.playbackState == Player.STATE_IDLE) player.prepare()
-            player.play()
+            takeOverPlayback(index, mediaItem.mediaId)
             preloadNextQueueItem(index)
             return
         }
@@ -2396,9 +2425,7 @@ class MusicPlayer @Inject constructor(
                     logStreamEvent("queue-prepare", resolved, retry = 0)
                     cacheCurrentTrackStream(resolved)
                     player.replaceMediaItem(index, track.toMediaItem(resolved))
-                    player.seekToDefaultPosition(index)
-                    player.prepare()
-                    player.play()
+                    takeOverPlayback(index, expectedMediaId)
                     enrichUpcomingQueue(index)
                     extendDiscoverQueueIfNeeded(index)
                     preloadNextQueueItem(index)
@@ -2430,9 +2457,7 @@ class MusicPlayer @Inject constructor(
                             logStreamEvent("queue-prepare-yt-fallback", ytFallback, retry = 0)
                             cacheCurrentTrackStream(ytFallback)
                             player.replaceMediaItem(index, track.toMediaItem(ytFallback))
-                            player.seekToDefaultPosition(index)
-                            player.prepare()
-                            player.play()
+                            takeOverPlayback(index, expectedMediaId)
                             enrichUpcomingQueue(index)
                             extendDiscoverQueueIfNeeded(index)
                             preloadNextQueueItem(index)
@@ -2478,7 +2503,11 @@ class MusicPlayer @Inject constructor(
             persistPlaybackSession()
             return@onMain
         }
-        if (player.shuffleModeEnabled == enabled) return@onMain
+        // Converge BOTH flags: refresh() mirrors the engine flag into state
+        // on every player event, so returning early on engine-only equality
+        // leaves a stale state flag behind — the toggle then visibly flips
+        // back ("unsuffles itself") on the next event.
+        if (player.shuffleModeEnabled == enabled && _state.value.shuffleEnabled == enabled) return@onMain
         cancelCrossfade()
         player.shuffleModeEnabled = enabled
         preloadNextQueueItem(player.currentMediaItemIndex)
@@ -2583,6 +2612,10 @@ class MusicPlayer @Inject constructor(
         sleepTimerStep = 0
         player.stop()
         player.clearMediaItems()
+        // Shuffle is engine state that survives stop()/clearMediaItems(): without
+        // this reset the next fresh queue silently inherits shuffle while the
+        // fresh state says off — until the first refresh() flips it back on.
+        player.shuffleModeEnabled = false
         preparedStreams.clear()
         _state.value = MusicPlayerState()
         if (clearSession) clearPersistedPlaybackSession()
@@ -3838,7 +3871,12 @@ class MusicPlayer @Inject constructor(
                 android.util.Log.i("MusicPlayer", "[PLAYBACK] local-download hit for '${track.title}' key=${localStream.cacheKey}")
                 localStream
             } else {
-                val losslessTimeoutMs = if (!videoId.isNullOrBlank()) 3_500L else 4_500L
+                val isDolbyPreferred = misc.dolbyAtmosEnabled || misc.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS
+                val losslessTimeoutMs = if (isDolbyPreferred) {
+                    if (!videoId.isNullOrBlank()) 6_500L else 7_500L
+                } else {
+                    if (!videoId.isNullOrBlank()) 3_500L else 4_500L
+                }
                 val losslessBudgetMs = losslessTimeoutMs - (SystemClock.elapsedRealtime() - forkStart)
                 val losslessStream: ResolvedStream? = if (!losslessAttempt) {
                     null

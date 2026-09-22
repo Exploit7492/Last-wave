@@ -552,7 +552,12 @@ class TrackDownloadManager @Inject constructor(
                 if (!isYouTubeRequested) {
                     try {
                         val losslessStream = runCatching {
-                            losslessMusicApi.resolveStream(title, artist, preferredQuality = downloadQuality)
+                            losslessMusicApi.resolveStream(
+                                title = title,
+                                artist = artist,
+                                expectedAlbum = resolvedAlbum,
+                                preferredQuality = downloadQuality,
+                            )
                         }.getOrNull()
 
                         if (losslessStream != null && losslessStream.url.isNotBlank()) {
@@ -678,9 +683,10 @@ class TrackDownloadManager @Inject constructor(
                                     runCatching { offlineLicense.acquire(desc) }.getOrNull()
                                 }
                             }
+                        }
 
-                            if (resolvedUrl != null) {
-                                val rawFile = File.createTempFile("dl_raw_", ".$extension", context.cacheDir)
+                        if (resolvedUrl != null) {
+                            val rawFile = File.createTempFile("dl_raw_", ".$extension", context.cacheDir)
                                 tempDownloadFile = rawFile
 
                                 if (isDashModuleDownload && dashInitUrl != null && dashMediaTemplate != null && dashSegmentCount > 0) {
@@ -798,7 +804,6 @@ class TrackDownloadManager @Inject constructor(
                                 }
                                 downloadSucceeded = true
                             }
-                        }
                     } catch (cancellation: CancellationException) {
                         throw cancellation
                     } catch (moduleError: Throwable) {

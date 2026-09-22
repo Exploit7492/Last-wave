@@ -115,6 +115,15 @@ class LosslessMusicApi @Inject constructor(
 
         fun getQualityAttemptOrder(preferred: Int): List<Int> {
             if (preferred == QUALITY_YOUTUBE) return emptyList()
+            if (preferred == QUALITY_DOLBY_ATMOS) {
+                return listOf(
+                    QUALITY_DOLBY_ATMOS,
+                    QUALITY_MAX_HI_RES,
+                    QUALITY_CD_LOSSLESS,
+                    QUALITY_MP3_320,
+                    QUALITY_DATA_SAVER,
+                )
+            }
             val tiersAscending = listOf(
                 QUALITY_DATA_SAVER,
                 QUALITY_MP3_320,
@@ -123,7 +132,7 @@ class LosslessMusicApi @Inject constructor(
                 QUALITY_MAX_HI_RES,
             )
             val index = tiersAscending.indexOf(preferred)
-            if (index == -1) return listOf(QUALITY_MAX_HI_RES, QUALITY_HI_RES_96, QUALITY_CD_LOSSLESS, QUALITY_MP3_320, QUALITY_DATA_SAVER)
+            if (index == -1) return listOf(QUALITY_MAX_HI_RES, QUALITY_CD_LOSSLESS, QUALITY_MP3_320, QUALITY_DATA_SAVER)
 
             val preferredQuality = tiersAscending[index]
             val above = tiersAscending.subList(index + 1, tiersAscending.size)
@@ -335,7 +344,7 @@ class LosslessMusicApi @Inject constructor(
 
         try {
             // 1. Search Tidal via backend
-            val candidate = findBestVerifiedMatch(
+            val candidates = findVerifiedCandidates(
                 title = title,
                 artist = artist,
                 expectedDurationSeconds = expectedDurationSeconds,
@@ -343,34 +352,36 @@ class LosslessMusicApi @Inject constructor(
                 creds = creds,
                 preferredQuality = preferredQuality,
             )
-            if (candidate == null) {
+            if (candidates.isEmpty()) {
                 Log.w(TAG, "resolveStream: No matching Tidal candidate found for '$title' by '$artist'")
                 return@withContext null
             }
-            Log.i(TAG, "resolveStream: Matched Tidal track id=${candidate.id}, title='${candidate.title}', performer='${candidate.performerName}', atmos=${candidate.isAtmos}")
+            Log.i(TAG, "resolveStream: Matched ${candidates.size} Tidal candidate(s) for '$title'. Top candidate id=${candidates.first().id}, atmos=${candidates.first().isAtmos}")
 
-            // 2. Fetch Tidal direct streaming manifest
-            val directStream = fetchTrackStreamUrl(candidate, preferredQuality, creds = creds)
-            if (directStream != null && directStream.url !in excludedUrls &&
-                (preferredQuality == QUALITY_DOLBY_ATMOS || !isAtmosStreamUrl(directStream.url))
-            ) {
-                Log.i(TAG, "resolveStream: Acquired stream for track ${candidate.id}: formatId=${directStream.formatId}, bitDepth=${directStream.bitDepth}, sampleRate=${directStream.samplingRate}kHz, bitrate=${directStream.bitrateKbps}kbps")
-                consecutiveFailures = 0
-                failureCooldownUntilMs = 0L
-                return@withContext directStream
-            }
-
-            val qualitiesToTry = getQualityAttemptOrder(preferredQuality).filter { it != preferredQuality }
+            // 2. Fetch Tidal streaming manifest in tier attempt order (e.g. Atmos -> Hi-Res -> Lossless -> 320k)
+            val qualitiesToTry = getQualityAttemptOrder(preferredQuality)
             for (quality in qualitiesToTry) {
                 currentCoroutineContext().ensureActive()
-                val stream = fetchTrackStreamUrl(candidate, quality, creds = creds)
-                if (stream == null || stream.url in excludedUrls) continue
-                // Never leak an Atmos (E-AC-3) mix into a stereo request:
-                // devices without an EC-3 decoder fail on it outright.
-                if (preferredQuality != QUALITY_DOLBY_ATMOS && isAtmosStreamUrl(stream.url)) continue
-                consecutiveFailures = 0
-                failureCooldownUntilMs = 0L
-                return@withContext stream
+                val targetCandidates = if (quality == QUALITY_DOLBY_ATMOS) {
+                    val atmosMatches = candidates.filter { it.isAtmos || it.isSpatial }
+                    if (atmosMatches.isNotEmpty()) atmosMatches else listOf(candidates.first())
+                } else {
+                    val stereoMatches = candidates.filter { !it.isAtmos && !it.isSpatial }
+                    if (stereoMatches.isNotEmpty()) stereoMatches else candidates
+                }
+
+                for (candidate in targetCandidates.take(2)) {
+                    currentCoroutineContext().ensureActive()
+                    val stream = fetchTrackStreamUrl(candidate, quality, creds = creds)
+                    if (stream == null || stream.url in excludedUrls) continue
+                    // Never leak an Atmos (E-AC-3) mix into a stereo request:
+                    // devices without an EC-3 decoder fail on it outright.
+                    if (preferredQuality != QUALITY_DOLBY_ATMOS && isAtmosStreamUrl(stream.url)) continue
+                    Log.i(TAG, "resolveStream: Acquired stream for track ${candidate.id}: formatId=${stream.formatId}, bitDepth=${stream.bitDepth}, sampleRate=${stream.samplingRate}kHz, bitrate=${stream.bitrateKbps}kbps, codec=${stream.audioCodecOverride ?: "PCM"}")
+                    consecutiveFailures = 0
+                    failureCooldownUntilMs = 0L
+                    return@withContext stream
+                }
             }
             null
         } catch (e: CancellationException) {
@@ -405,14 +416,14 @@ class LosslessMusicApi @Inject constructor(
         return false
     }
 
-    private suspend fun findBestVerifiedMatch(
+    private suspend fun findVerifiedCandidates(
         title: String,
         artist: String,
         expectedDurationSeconds: Int?,
         expectedAlbum: String?,
         creds: BackendCredentials,
         preferredQuality: Int,
-    ): TidalCandidateItem? {
+    ): List<TidalCandidateItem> {
         val cleanArtist = cleanForSearch(artist).ifBlank { artist }
         val cleanTitle = cleanForSearch(title).ifBlank { title }
         val queries = listOf(
@@ -432,7 +443,7 @@ class LosslessMusicApi @Inject constructor(
             val items = parseTidalSearchItems(body)
             if (items.isEmpty()) continue
 
-            items.asSequence()
+            val verified = items.asSequence()
                 .mapNotNull { item ->
                     verifiedMatchScore(
                         item = item,
@@ -449,16 +460,20 @@ class LosslessMusicApi @Inject constructor(
                 .sortedWith(
                     compareByDescending<Pair<TidalCandidateItem, Int>> { it.second },
                 )
-                .firstOrNull()
-                ?.first
-                ?.let { return it }
+                .map { it.first }
+                .distinctBy { it.id }
+                .toList()
+
+            if (verified.isNotEmpty()) {
+                return verified
+            }
             // Backend answered but scoring vetoed every candidate — log it:
             // silent misses here are the #1 reason lossless degrades to
             // YouTube with a generic badge.
             Log.d(TAG, "no verified match for '$title' / '$artist' among ${items.size} backend candidates")
         }
 
-        return null
+        return emptyList()
     }
 
     private fun parseTidalSearchItems(body: String): List<TidalCandidateItem> {
@@ -510,10 +525,6 @@ class LosslessMusicApi @Inject constructor(
         if (quality == QUALITY_DOLBY_ATMOS) {
             fetchTidalAtmosStream(candidate, creds)?.let { return it }
             fetchTidalSpatialStream(candidate, creds)?.let { return it }
-            for (param in listOf("DOLBY_ATMOS", "ATMOS", "DOLBY")) {
-                val spatial = fetchTrackQualityParam(candidate, param, creds) ?: continue
-                if (spatial.audioCodecOverride != null) return spatial
-            }
             return null
         }
 
@@ -526,13 +537,6 @@ class LosslessMusicApi @Inject constructor(
         }
         return loadTrackManifest(candidate, qualityParam, quality, creds)
     }
-
-    private suspend fun fetchTrackQualityParam(
-        candidate: TidalCandidateItem,
-        qualityParam: String,
-        creds: BackendCredentials,
-    ): LosslessAudioStream? =
-        loadTrackManifest(candidate, qualityParam, QUALITY_DOLBY_ATMOS, creds)
 
     private suspend fun loadTrackManifest(
         candidate: TidalCandidateItem,
