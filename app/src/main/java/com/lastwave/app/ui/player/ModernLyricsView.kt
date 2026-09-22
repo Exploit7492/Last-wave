@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -212,16 +211,23 @@ fun ModernLyricsPanel(
                             if (meaningful.isEmpty()) false
                             else meaningful.count { it.isRtl } > meaningful.size / 2
                         }
+                        // Apple Music word-sync rows run full-sentence wide, so at
+                        // the default 28sp they sit on the screen edge even at
+                        // rest. They get a compact type size; other providers
+                        // keep their existing sizes.
+                        val isAppleMusic = remember(targetState.source) {
+                            targetState.source?.contains("Apple Music", ignoreCase = true) == true
+                        }
                         // Shared style instances: the splitter below measures
                         // with exactly this style, so its fit verdict matches
                         // what the canvas will draw.
                         val karaokeNormalStyle = LocalTextStyle.current.copy(
-                            fontSize = if (isWordSynced) 28.sp else 24.sp,
+                            fontSize = if (isAppleMusic) 22.sp else if (isWordSynced) 28.sp else 24.sp,
                             fontWeight = FontWeight.Bold,
                             textMotion = TextMotion.Animated,
                         )
                         val karaokeAccompanimentStyle = LocalTextStyle.current.copy(
-                            fontSize = if (isWordSynced) 20.sp else 18.sp,
+                            fontSize = if (isAppleMusic) 17.sp else if (isWordSynced) 20.sp else 18.sp,
                             fontWeight = FontWeight.Bold,
                             textMotion = TextMotion.Animated,
                         )
@@ -325,7 +331,11 @@ private val KaraokeHorizontalChrome = 128.dp
 /**
  * Measures word-sync lines against the settled list width and pre-splits
  * overlong ones into balanced sub-lines (see [splitKaraokeToFit]) before
- * the karaoke canvas ever measures them.
+ * the karaoke canvas ever measures them. The budget reserves headroom for
+ * the canvas's focused-line emphasis (~1.1x zoom on the active row): without
+ * it a line that exactly fits while idle overflows past the screen edge the
+ * moment it becomes active — Apple Music word-sync lines are the usual
+ * victims since they routinely span the full width.
  */
 @Composable
 private fun KaraokeLineWrapScope(
@@ -344,10 +354,15 @@ private fun KaraokeLineWrapScope(
         val density = LocalDensity.current
         val textMeasurer = rememberTextMeasurer()
         val wrapBudgetPx = remember(maxWidth, density) {
-            // 3% safety: the splitter measures word-by-word while the canvas
-            // draws continuous text, so cross-word kerning can add a pixel
-            // or two beyond the summed word widths.
-            with(density) { (maxWidth - KaraokeHorizontalChrome).toPx().coerceAtLeast(0f) } * 0.97f
+            // Conservative on purpose, two compounding reasons:
+            // 1. The splitter measures word-by-word while the canvas draws
+            //    continuous text, so cross-word kerning can add a pixel or
+            //    two beyond the summed word widths.
+            // 2. The canvas enlarges the focused line (~1.1x). A row that
+            //    exactly fits while idle would spill past the screen edge
+            //    once active — 0.88 reserves that zoom room so wrapped rows
+            //    stay clear of the edge in every focus state.
+            with(density) { (maxWidth - KaraokeHorizontalChrome).toPx().coerceAtLeast(0f) } * 0.88f
         }
         val displayLines = remember(lines, wrapBudgetPx, normalStyle) {
             if (!isWordSynced) lines

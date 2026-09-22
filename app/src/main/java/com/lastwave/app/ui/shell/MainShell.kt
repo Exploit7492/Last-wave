@@ -488,7 +488,6 @@ private fun FloatingNavItem(
         color = Color.Transparent,
         modifier = Modifier
             .height(48.dp)
-            .width(84.dp)
             .animateContentSize(animationSpec = navSpring()),
     ) {
         Row(
