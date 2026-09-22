@@ -3873,7 +3873,7 @@ class MusicPlayer @Inject constructor(
         track: PlayableTrack,
         forkStart: Long,
     ): ResolvedStream {
-        val budgetMs = InnerTubeMusicApi.YOUTUBE_PROMOTE_BUDGET_MS - (SystemClock.elapsedRealtime() - forkStart)
+        val budgetMs = YOUTUBE_PROMOTE_BUDGET_MS - (SystemClock.elapsedRealtime() - forkStart)
         val promoted = if (budgetMs <= 0L) {
             if (youtubeDeferred.isCompleted) youtubeDeferred.await() else null
         } else {
@@ -3881,7 +3881,7 @@ class MusicPlayer @Inject constructor(
         }
         if (promoted == null) {
             val error = java.util.concurrent.TimeoutException(
-                "YouTube promote budget expired after ${InnerTubeMusicApi.YOUTUBE_PROMOTE_BUDGET_MS}ms for '${track.title}'",
+                "YouTube promote budget expired after ${YOUTUBE_PROMOTE_BUDGET_MS}ms for '${track.title}'",
             )
             logResolutionFailure(track, "youtube-promote-budget", 0, error)
             throw error
@@ -4568,6 +4568,7 @@ class MusicPlayer @Inject constructor(
     }
 
     private companion object {
+        const val YOUTUBE_PROMOTE_BUDGET_MS = 12_000L
         const val DISCOVER_QUEUE_BATCH_SIZE = 16
         const val DISCOVER_QUEUE_REFILL_THRESHOLD = 8
         const val RADIO_QUEUE_BATCH_SIZE = 25
