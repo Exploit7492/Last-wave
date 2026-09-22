@@ -130,10 +130,21 @@ class ExclusiveUsbOutput @Inject constructor(
         stream?.setPaused(value)
     }
 
+    /** True while the isochronous stream is still accepting PCM. */
+    fun isStreamAlive(): Boolean = active && stream?.isAlive == true
+
     /** Re-anchor the Media3 clock after an explicit seek. */
     fun noteSeek(positionUs: Long) {
+        val timeUs = positionUs.coerceAtLeast(0L)
+        val rate = configuredRateHz.coerceAtLeast(1)
+        val targetFrames = timeUs * rate / C.MICROS_PER_SECOND
+        Log.i(
+            TAG,
+            "seek timeUs=$timeUs targetFrames=$targetFrames rate=$rate " +
+                "clock=${stream?.framesClock} alive=${stream?.isAlive}",
+        )
         mediaTimeBaseFrames = stream?.framesClock ?: 0L
-        startMediaTimeUs = positionUs.coerceAtLeast(0L)
+        startMediaTimeUs = timeUs
         startMediaTimeNeedsInit = false
     }
 
@@ -187,12 +198,10 @@ class ExclusiveUsbOutput @Inject constructor(
             }
             val clock = running.framesClock
             if (startMediaTimeNeedsInit) {
-                // Decoder timestamps are not the playhead. A DASH buffer can
-                // report a presentation time at the end of the window, which
-                // pinned the bit-perfect bar there. Count frames from this
-                // write, starting at 0 unless noteSeek() just placed us.
+                // Anchor once, to the first buffer. Later DASH chunks must
+                // not rebase this or ExoPlayer waits after the first segment.
                 mediaTimeBaseFrames = clock
-                startMediaTimeUs = 0L
+                startMediaTimeUs = presentationTimeUs.coerceAtLeast(0L)
                 startMediaTimeNeedsInit = false
             }
             recheckClockLocked()
@@ -231,23 +240,46 @@ class ExclusiveUsbOutput @Inject constructor(
      * while the ISO stream is merely alive makes ExoPlayer wait to drain an
      * AudioTrack that does not exist — next-track / seek stalls for seconds.
      */
-    fun hasPendingData(): Boolean = false
+    /**
+     * ExoPlayer treats "no pending data" as "the sink is idle" and drops to
+     * BUFFERING between DASH chunks. While exclusive USB is playing, the
+     * isochronous pipeline is that pending audio.
+     */
+    fun hasPendingData(): Boolean = active && !paused && stream?.isAlive == true
 
     fun flush() {
         synchronized(lock) {
-            // Residual only. Re-anchoring here froze the slider: DASH/FLAC
-            // flushes mid-track, framesWritten went to 0, and ExoPlayer kept
-            // the last position (often 0:01) until the next write.
             stream?.flush()
+            // Seek only flushes the sink. ExoPlayer does not call play()
+            // again, so a pause flag left set here means every later buffer
+            // is refused and the DAC stays silent while the bar moves on.
+            paused = false
+            stream?.setPaused(false)
         }
     }
 
-    fun handleDiscontinuity() {
+    /**
+     * The stream stopped without the device being closed. [flush] discards
+     * leftover URBs and marks it running again. [start] would zero the DAC
+     * clock and make the sink position jump back to the beginning.
+     */
+    fun restartIfStopped(): Boolean {
+        val running = stream ?: return false
+        if (running.isAlive) return false
+        running.flush()
+        if (!running.isAlive) return false
         synchronized(lock) {
-            stream?.flush()
-            startMediaTimeNeedsInit = true
-            mediaTimeBaseFrames = stream?.framesClock ?: 0L
+            paused = false
+            mediaTimeBaseFrames = running.framesClock
         }
+        Log.i(TAG, "seek rearmed clock=${running.framesClock} startUs=$startMediaTimeUs")
+        return true
+    }
+
+    fun handleDiscontinuity() {
+        // A DASH segment boundary is not a seek. Resetting the sink clock
+        // here made ExoPlayer wait forever after the first ~5s chunk
+        // ("keeps loading") while the DAC had already stopped.
     }
 
     /**
@@ -338,10 +370,11 @@ class ExclusiveUsbOutput @Inject constructor(
         val epOut = endpoints?.first ?: info.endpointOutAddress
         val epFb = (endpoints?.second ?: info.endpointFeedbackAddress).let { if (it < 0) 0 else it }
         val packet = endpoints?.third ?: info.maxPacketSize
-        // Packet timing is one microframe. The descriptor bInterval is not
-        // the usbdevfs schedule; using it made packets ~8× too long and the
-        // song ended after a few seconds.
-        val interval = 1
+        // Kernel usbdevfs schedules ISO packets from the endpoint bInterval
+        // (2^(bInterval-1) microframes). 44.1/48/96/192 alts are interval 1.
+        // 88.2/176.4/352.8 alts are interval 4, so each packet must carry a
+        // full millisecond of audio or the DAC buzzes once per millisecond.
+        val interval = device.isoIntervalForAlt(alt).coerceIn(1, 16)
         val needed = minIsoPacketBytes(sampleRate, channelCount, bits, interval)
         if (epOut < 0 || packet <= 0) return failLocked("no ISO OUT endpoint for alt $alt")
         if (needed > packet) {
@@ -385,7 +418,10 @@ class ExclusiveUsbOutput @Inject constructor(
         Log.i(
             TAG,
             "exclusive USB started ${info.deviceName} ${sampleRate}Hz ${channelCount}ch " +
-                "srcBits=$sourceBits dacBits=$bits alt=$alt GET_CUR=$reported clockMatched=$clockMatched",
+                "srcBits=$sourceBits dacBits=$bits bpf=${((bits + 7) / 8) * channelCount} " +
+                "alt=$alt ep=0x${epOut.toString(16)} bInterval=$interval " +
+                "isoMicroframes=${1 shl (interval - 1)} maxPacket=$packet needed=$needed " +
+                "GET_CUR=$reported clockMatched=$clockMatched",
         )
 
         ensureVolumeObserverLocked()

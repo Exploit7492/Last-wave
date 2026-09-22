@@ -287,18 +287,37 @@ static int reapOldestUrb(UsbAudioContext *ctx, int timeoutMs) {
                 c = nullptr;  // retry — we need an audio URB
                 continue;
             }
-            // Audio URB reaped successfully
+            // A completion with nothing queued is a late event from a seek
+            // discard. Counting it would desync the ring and stop audio.
+            if (ctx->urbsInFlight <= 0) {
+                LOGW("reapOldestUrb: stale completion, inflight=0");
+                c = nullptr;
+                continue;
+            }
+            // Audio URB reaped successfully. ISO_ASAP completions are FIFO,
+            // so this is the URB at reapIdx.
             ctx->reapIdx = (ctx->reapIdx + 1) % USB_AUDIO_NUM_URBS;
             ctx->urbsInFlight--;
             return 0;
         }
+        if (ret < 0 && errno == EINTR) {
+            continue;
+        }
         if (ret < 0 && errno != EAGAIN) {
-            LOGE("reapOldestUrb: error errno=%d (%s)", errno, strerror(errno));
-            return -1;
+            // ENODEV / EPIPE / EIO mean the device or endpoint is gone.
+            // Anything else is a transient reap condition.
+            int err = errno;
+            if (err == ENODEV || err == EPIPE || err == ESHUTDOWN ||
+                err == ENXIO || err == EIO || err == ECONNRESET) {
+                LOGE("reapOldestUrb: fatal errno=%d (%s)", err, strerror(err));
+                return -1;
+            }
+            LOGW("reapOldestUrb: errno=%d (%s), retry", err, strerror(err));
+            continue;
         }
         usleep(125);  // 125µs = 1 USB microframe
     }
-    return -2;  // timeout
+    return -2;  // timeout: no completion yet, not a device failure
 }
 
 /**
@@ -413,6 +432,7 @@ Java_com_decent_usbaudio_UsbAudioStream_nativeUsbAudioCreate(
     ctx->bytesPerSample = bits / 8;
     ctx->bytesPerFrame = (bits / 8) * ch;
     ctx->maxPacketSize = maxPkt;
+    ctx->bInterval = interval < 1 ? 1 : (interval > 16 ? 16 : interval);
     ctx->running.store(false);
     ctx->paused.store(false);
     ctx->transferBuffer = nullptr;
@@ -475,12 +495,52 @@ Java_com_decent_usbaudio_UsbAudioStream_nativeUsbAudioSetSampleRate(
     return JNI_TRUE;
 }
 
+/**
+ * Frames per USB service opportunity.
+ *
+ * usbdevfs sets URB interval to 2^(bInterval-1) high-speed microframes.
+ * That is the gap between iso_frame_desc entries, not a hint to ignore.
+ * bInterval 1 → every 125 µs. bInterval 4 → every 1 ms (8 microframes).
+ * Packet size is the audio that belongs in one of those gaps:
+ *   phase += sampleRate * microframes
+ *   frames = phase / 8000
+ *   phase %= 8000
+ * 88.2 kHz at bInterval 4 is 88 frames, then 89 every 5th packet.
+ * 88.2 kHz at bInterval 1 is 11 frames, then 12. The descriptor decides.
+ */
+static void configurePacketizer(UsbAudioContext *ctx) {
+    int interval = ctx->bInterval;
+    if (interval < 1) interval = 1;
+    if (interval > 16) interval = 16;
+    int dataInterval = interval - 1;
+    int microframes = 1 << dataInterval;
+    int rate = ctx->sampleRate > 0 ? ctx->sampleRate : 48000;
+    ctx->isoMicroframes = microframes;
+    ctx->serviceNumerator = (int64_t)rate * (int64_t)microframes;
+    ctx->phase = 0;
+    ctx->sampleAccum = 0;
+    ctx->sampleRem = 0;
+    ctx->packetsSubmitted = 0;
+    ctx->reapStalls = 0;
+    int pps = 8000 >> dataInterval;
+    if (pps < 1) pps = 1;
+    ctx->packetsPerSecond = pps;
+    ctx->packSmall = rate / pps;
+    if (ctx->packSmall < 1) ctx->packSmall = 1;
+    ctx->packLarge = (rate + pps - 1) / pps;
+    if (ctx->packLarge < ctx->packSmall) ctx->packLarge = ctx->packSmall;
+    int packs = USB_AUDIO_PACKETS_PER_URB >> dataInterval;
+    if (packs < 1) packs = 1;
+    if (packs > USB_AUDIO_PACKETS_PER_URB) packs = USB_AUDIO_PACKETS_PER_URB;
+    ctx->packetsPerUrb = packs;
+    ctx->calibratedFpmf = (double)ctx->serviceNumerator / 8000.0;
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_decent_usbaudio_UsbAudioStream_nativeUsbAudioStart(
         JNIEnv *, jobject, jlong h) {
     auto *ctx = reinterpret_cast<UsbAudioContext *>(h);
     if (!ctx) return JNI_FALSE;
-    ctx->running.store(true);
     ctx->paused.store(false);
     ctx->framesWritten = 0;
     ctx->framesClock.store(0);
@@ -490,24 +550,17 @@ Java_com_decent_usbaudio_UsbAudioStream_nativeUsbAudioStart(
     ctx->frameAccumulator = 0.0;
     ctx->microframeIndex = 0;
     ctx->residualBytes = 0;
-
-    double nominalFpmf = ctx->sampleRate / 8000.0;
-    ctx->calibratedFpmf = nominalFpmf;
-    // One microframe per ISO packet, same as decent-player. Do not scale by
-    // bInterval: usbdevfs ISO_ASAP schedules every 125 µs. Treating bInterval
-    // 4 as "8× larger packets" stuffed a full millisecond into one microframe
-    // on the 88.2/176.4/352.8 alts and the DAC played it as a 1 ms buzz.
-    // 44.1/48/96/192 alts are bInterval 1, so they were already the right size.
+    configurePacketizer(ctx);
+    ctx->running.store(true);
+    double fb = 0;
     if (ctx->endpointFeedback > 0) {
-        double fb = readFeedback(ctx->fd, ctx->endpointFeedback);
-        if (fb > nominalFpmf * 0.97 && fb < nominalFpmf * 1.03) {
-            ctx->calibratedFpmf = fb;
-        }
+        fb = readFeedback(ctx->fd, ctx->endpointFeedback);
     }
-    LOGI("Start: rate=%d ch=%d bits=%d ring=%d slots×%dpkt fpmf=%.4f (nominal microframe, no live feedback)",
-         ctx->sampleRate, ctx->channelCount, ctx->bitDepth,
-         USB_AUDIO_NUM_URBS, USB_AUDIO_PACKETS_PER_URB,
-         ctx->calibratedFpmf);
+    LOGI("Start: rate=%d ch=%d bits=%d bpf=%d ep=0x%02x bInterval=%d isoMicroframes=%d "
+         "maxPacket=%d frames/pkt=%d/%d urbs=%d×%d fb=%.4f",
+         ctx->sampleRate, ctx->channelCount, ctx->bitDepth, ctx->bytesPerFrame,
+         ctx->endpointOut, ctx->bInterval, ctx->isoMicroframes, ctx->maxPacketSize,
+         ctx->packSmall, ctx->packLarge, USB_AUDIO_NUM_URBS, ctx->packetsPerUrb, fb);
     return JNI_TRUE;
 }
 
@@ -593,11 +646,46 @@ Java_com_decent_usbaudio_UsbAudioStream_nativeFlush(
         JNIEnv *, jobject, jlong h) {
     auto *ctx = reinterpret_cast<UsbAudioContext *>(h);
     if (!ctx) return;
+    // Seek: drop audio already queued for the old position. Waiting for those
+    // URBs to finish is the "audio continues, then dies" symptom. framesClock
+    // stays so the sink position remains anchored at the seek target.
+    ctx->paused.store(true);
+    int before = ctx->urbsInFlight;
+    for (int i = 0; i < before; i++) {
+        int slot = (ctx->reapIdx + i) % USB_AUDIO_NUM_URBS;
+        ioctl(ctx->fd, USBDEVFS_DISCARDURB, ctx->ring[slot].urb);
+    }
+    int reaped = 0;
+    int quietMs = 0;
+    while (quietMs < 8 && reaped < before + 64) {
+        struct usbdevfs_urb *c = nullptr;
+        int ret = ioctl(ctx->fd, USBDEVFS_REAPURBNDELAY, &c);
+        if (ret == 0 && c != nullptr) {
+            reaped++;
+            quietMs = 0;
+            continue;
+        }
+        if (ret < 0 && errno != EAGAIN && errno != EINTR) {
+            LOGW("Flush reap errno=%d (%s)", errno, strerror(errno));
+            break;
+        }
+        usleep(1000);
+        quietMs++;
+    }
+    ctx->urbsInFlight = 0;
+    ctx->submitIdx = 0;
+    ctx->reapIdx = 0;
+    ctx->phase = 0;
+    ctx->reapStalls = 0;
+    ctx->sampleAccum = 0;
     ctx->frameAccumulator = 0.0;
     ctx->microframeIndex = 0;
     ctx->residualBytes = 0;
     ctx->framesWritten = 0;
-    LOGI("Flush: frameAccumulator, residual, and framesWritten reset");
+    ctx->running.store(true);
+    ctx->paused.store(false);
+    LOGI("Flush: URBs before=%d reaped=%d after=%d clock=%lld phase=0",
+         before, reaped, ctx->urbsInFlight, (long long)ctx->framesClock.load());
 }
 
 JNIEXPORT jint JNICALL
@@ -732,49 +820,55 @@ void submitPcmToUrbs(UsbAudioContext *ctx, const uint8_t *pcmData, int totalByte
     }
 
     int offset = 0;
-    // usbdevfs ISO_ASAP schedules one packet per 125 µs microframe.
-    // Scaling by bInterval made every packet ~8× too long: playback ran fast
-    // and the track ended after a few seconds. 44.1 is 5/6 frames, 48 kHz
-    // family is exact. 24-bit stereo is 6 bytes/frame, so an 11-frame packet
-    // is 66 bytes (not 4-byte aligned) and the DAC turns that into jitter.
-    // Keep the average rate, but only emit packets whose length is aligned.
-    const double fpmf = ctx->sampleRate / 8000.0;
     const int bpf = ctx->bytesPerFrame > 0 ? ctx->bytesPerFrame : 1;
+    const int packetsPerUrb = ctx->packetsPerUrb > 0 ? ctx->packetsPerUrb
+                                                     : USB_AUDIO_PACKETS_PER_URB;
 
     while (offset < dataLen && ctx->running.load() && !ctx->paused.load()) {
         int pktSizes[USB_AUDIO_PACKETS_PER_URB];
         int numPackets = 0;
         int urbBytes = 0;
-        double acc = ctx->frameAccumulator;
+        int64_t phase = ctx->phase;
+        const int64_t step = ctx->serviceNumerator > 0
+                ? ctx->serviceNumerator
+                : (int64_t)ctx->sampleRate;
 
-        for (int p = 0; p < USB_AUDIO_PACKETS_PER_URB; p++) {
+        for (int p = 0; p < packetsPerUrb; p++) {
             int remaining = dataLen - offset - urbBytes;
             if (remaining <= 0) break;
 
-            double sum = acc + fpmf;
-            int ideal = (int)sum;
-            if (ideal < 1) ideal = 1;
-            double carry = sum - (double)ideal;
-            int frames = ideal;
-            if ((bpf % 4) != 0) {
-                int down = ideal - 1;
-                if (down >= 1 && ((down * bpf) % 4) == 0) {
-                    frames = down;
-                    carry += (double)(ideal - down);
-                } else if ((((ideal + 1) * bpf) % 4) == 0) {
-                    frames = ideal + 1;
-                    carry -= 1.0;
-                }
+            // One service opportunity. Do not round the frame count to a
+            // 4-byte boundary: 24-bit stereo is 6 bytes/frame, so 11 frames
+            // is 66 bytes and that is a legal PCM payload.
+            int64_t sum = phase + step;
+            int frames = (int)(sum / 8000);
+            int64_t nextPhase = sum - (int64_t)frames * 8000;
+            if (frames < 1) {
+                phase = nextPhase;
+                continue;
             }
             int b = frames * bpf;
+            if (ctx->maxPacketSize > 0 && b > ctx->maxPacketSize) {
+                LOGE("packet %d bytes > max %d (rate=%d bInterval=%d microframes=%d)",
+                     b, ctx->maxPacketSize, ctx->sampleRate, ctx->bInterval,
+                     ctx->isoMicroframes);
+                ctx->running.store(false);
+                free(mergedBuf);
+                return;
+            }
             if (urbBytes + b > USB_AUDIO_URB_BUFFER_SIZE || b > remaining) break;
 
             pktSizes[p] = b;
             urbBytes += b;
             numPackets++;
-            acc = carry;
+            phase = nextPhase;
+            if ((ctx->packetsSubmitted++ % 4000) == 0) {
+                LOGI("pkt#%lld frames=%d bytes=%d phase=%lld submittedFrames=%lld",
+                     (long long)ctx->packetsSubmitted, frames, b,
+                     (long long)phase, (long long)ctx->framesClock.load());
+            }
         }
-        if (numPackets < USB_AUDIO_PACKETS_PER_URB || urbBytes <= 0) {
+        if (numPackets < packetsPerUrb || urbBytes <= 0) {
             int leftover = dataLen - offset;
             if (leftover > 0 && leftover < (int)sizeof(ctx->residualBuffer)) {
                 memcpy(ctx->residualBuffer, data + offset, leftover);
@@ -785,30 +879,57 @@ void submitPcmToUrbs(UsbAudioContext *ctx, const uint8_t *pcmData, int totalByte
 
         if (ctx->urbsInFlight >= USB_AUDIO_NUM_URBS) {
             if (ctx->paused.load()) break;
-            int result = reapOldestUrb(ctx, 200);
+            int result = reapOldestUrb(ctx, 250);
             if (result == -2) {
-                LOGE("submitPcmToUrbs: reap timeout, inflight=%d", ctx->urbsInFlight);
-                drainAllUrbs(ctx);
-                ctx->running.store(false);
-                free(mergedBuf);
-                return;
+                // No completion yet. One timeout is the host between frames,
+                // especially right after a seek. Killing the stream on that
+                // timeout is what left the DAC silent while the seek bar
+                // kept moving.
+                ctx->reapStalls++;
+                LOGW("submitPcmToUrbs: reap timeout, inflight=%d stalls=%d",
+                     ctx->urbsInFlight, ctx->reapStalls);
+                if (ctx->reapStalls >= 12) {
+                    LOGE("USB produced no completion for ~3s, stopping stream");
+                    ctx->running.store(false);
+                    free(mergedBuf);
+                    return;
+                }
+                break;
             } else if (result < 0) {
                 ctx->running.store(false);
                 free(mergedBuf);
                 return;
             }
+            ctx->reapStalls = 0;
         }
 
         UrbSlot *slot = &ctx->ring[ctx->submitIdx];
         memcpy(slot->buffer, data + offset, urbBytes);
 
-        ctx->frameAccumulator = acc;
         if (submitRingUrb(ctx, pktSizes, numPackets, urbBytes) < 0) {
-            LOGE("submitPcmToUrbs: submit failed, stopping stream");
-            ctx->running.store(false);
-            free(mergedBuf);
-            return;
+            int err = errno;
+            bool sent = false;
+            if (err == EBUSY || err == EAGAIN || err == EINTR) {
+                LOGW("SUBMITURB errno=%d (%s), retry", err, strerror(err));
+                reapOldestUrb(ctx, 20);
+                sent = submitRingUrb(ctx, pktSizes, numPackets, urbBytes) == 0;
+                if (!sent) err = errno;
+            }
+            if (!sent) {
+                if (err == ENODEV || err == EPIPE || err == ESHUTDOWN ||
+                    err == ENXIO || err == EIO || err == ECONNRESET) {
+                    LOGE("SUBMITURB fatal errno=%d (%s)", err, strerror(err));
+                    ctx->running.store(false);
+                    free(mergedBuf);
+                    return;
+                }
+                LOGW("SUBMITURB errno=%d (%s), stream kept", err, strerror(err));
+                break;
+            }
         }
+        ctx->phase = phase;
+        ctx->sampleAccum = (int32_t)phase;
+        ctx->frameAccumulator = 0.0;
         if (ctx->bytesPerFrame > 0) {
             ctx->framesClock.fetch_add(urbBytes / ctx->bytesPerFrame, std::memory_order_relaxed);
         }
