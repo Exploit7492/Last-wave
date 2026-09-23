@@ -4049,11 +4049,28 @@ class MusicPlayer @Inject constructor(
                     }
                 }
 
-                losslessStream
-                    ?: runCatching { awaitYoutubeWithinBudget(youtubeDeferred, track, forkStart) }.getOrNull()
-                    ?: runCatching { youtubeDeferred.await() }.getOrNull()
-                    ?: runCatching { resolveYoutubeTrackAudioStream(track, videoId) }.getOrNull()
-                    ?: resolveYoutubeTrackAudioStream(track, null)
+                // Hard total cap for the YouTube fallback chain: the stages
+                // each carry their own budgets, but stacked end to end
+                // (promote budget + unbounded await + two fresh resolves,
+                // times the outer retry) they exceed a minute of spinner on
+                // a slow network. Past the cap, fail fast so the track
+                // errors and auto-skips instead of loading forever.
+                losslessStream ?: run {
+                    val remainingMs = YT_RESOLVE_TOTAL_TIMEOUT_MS - (SystemClock.elapsedRealtime() - forkStart)
+                    if (remainingMs <= 0L && !youtubeDeferred.isCompleted) {
+                        throw java.util.concurrent.TimeoutException(
+                            "YouTube resolve budget exhausted (${YT_RESOLVE_TOTAL_TIMEOUT_MS}ms) for '${track.title}'",
+                        )
+                    }
+                    withTimeoutOrNull(remainingMs.coerceAtLeast(0L)) {
+                        runCatching { awaitYoutubeWithinBudget(youtubeDeferred, track, forkStart) }.getOrNull()
+                            ?: runCatching { youtubeDeferred.await() }.getOrNull()
+                            ?: runCatching { resolveYoutubeTrackAudioStream(track, videoId) }.getOrNull()
+                            ?: resolveYoutubeTrackAudioStream(track, null)
+                    } ?: throw java.util.concurrent.TimeoutException(
+                        "YouTube resolve exceeded ${YT_RESOLVE_TOTAL_TIMEOUT_MS}ms total for '${track.title}'",
+                    )
+                }
             }
         } finally {
             youtubeDeferred.cancel()
@@ -4767,6 +4784,10 @@ class MusicPlayer @Inject constructor(
 
     private companion object {
         const val YOUTUBE_PROMOTE_BUDGET_MS = 12_000L
+        /** Total cap for one YouTube fallback chain from fork, covering the
+         *  promote wait plus every stacked re-resolve. Normal resolves take
+         *  seconds; past this the track fails fast instead of spinning. */
+        const val YT_RESOLVE_TOTAL_TIMEOUT_MS = 30_000L
         const val DISCOVER_QUEUE_BATCH_SIZE = 16
         const val DISCOVER_QUEUE_REFILL_THRESHOLD = 8
         const val RADIO_QUEUE_BATCH_SIZE = 25

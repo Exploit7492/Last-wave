@@ -1386,6 +1386,7 @@ class InnerTubeMusicApi @Inject constructor(
                 clientName = "WEB_REMIX",
                 clientVersion = config.clientVersion,
                 userAgent = WEB_USER_AGENT,
+                callTimeoutMs = SEARCH_REQUEST_TIMEOUT_MS,
             )
             return parseSongRenderers(root)
         }
@@ -3481,6 +3482,10 @@ class InnerTubeMusicApi @Inject constructor(
         const val MAX_PLAYER_REQUEST_ATTEMPTS = 2
         const val CONFIG_REQUEST_TIMEOUT_MS = 4_000L
         const val RELATED_REQUEST_TIMEOUT_MS = 8_000L
+        /** Per-call cap for interactive search POSTs: without it a hanging
+         *  search burns both socket timeouts per attempt and stalls playback
+         *  resolution with no error. Normal searches answer in ~1s. */
+        const val SEARCH_REQUEST_TIMEOUT_MS = 10_000L
         const val ACCOUNT_SWITCHER_TIMEOUT_MS = 15_000L
         /** Per-probe socket timeout for the 0-1 byte stream validity check. */
         const val STREAM_PROBE_TIMEOUT_MS = 4_000L
