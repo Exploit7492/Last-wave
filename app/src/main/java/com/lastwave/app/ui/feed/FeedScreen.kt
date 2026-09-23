@@ -1461,15 +1461,14 @@ private fun FeedMediaCard(
             ),
     ) {
         Box(modifier = Modifier.size(cardWidth)) {
+            // No onClick here on purpose: the outer Column's combinedClickable
+            // owns tap + long-press for the whole card. An inner clickable
+            // Surface would swallow the press and starve the long-press tray.
             Surface(
                 shape = RoundedCornerShape(18.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 tonalElevation = 1.dp,
                 modifier = Modifier.fillMaxSize(),
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onClick()
-                },
             ) {
                 Box(Modifier.fillMaxSize()) {
                     ArtworkImage(
@@ -1500,17 +1499,25 @@ private fun FeedMediaCard(
             }
             if (onPlayClick != null) {
                 Surface(
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onPlayClick()
-                    },
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.primaryContainer,
                     shadowElevation = 6.dp,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(end = 8.dp, bottom = 8.dp)
-                        .size(38.dp),
+                        .size(38.dp)
+                        .combinedClickable(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onPlayClick()
+                            },
+                            onLongClick = onLongClick?.let { tray ->
+                                {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    tray()
+                                }
+                            },
+                        ),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Icon(
@@ -1601,7 +1608,6 @@ private fun RecentTrackCard(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 1.dp,
             modifier = Modifier.size(148.dp),
-            onClick = onClick,
         ) {
             Box(Modifier.fillMaxSize()) {
                 ArtworkImage(
@@ -1705,10 +1711,6 @@ private fun ChartTrackCard(
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
                 modifier = Modifier.size(56.dp),
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onClick()
-                },
             ) {
                 Box(Modifier.fillMaxSize()) {
                     ArtworkImage(

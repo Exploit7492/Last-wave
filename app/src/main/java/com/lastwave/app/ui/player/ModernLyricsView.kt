@@ -320,13 +320,15 @@ fun ModernLyricsPanel(
 }
 
 /**
- * Horizontal chrome around karaoke glyphs, both sides combined: 24dp view
- * padding (applied twice upstream — the library puts the same padded
- * modifier on both its outer scrim Box and its inner list) + 16dp line
- * padding inside each karaoke row. Kept conservative on purpose: if the
- * upstream double-padding is ever fixed, lines simply split just as early.
+ * Horizontal chrome around karaoke glyphs, both sides combined: 12dp view
+ * padding (Modifier.padding on the list below) + the library's own padding
+ * on both its outer scrim Box and its inner list (assumed 24dp each, kept
+ * from the original conservative estimate) + 16dp line padding inside each
+ * karaoke row, plus a small safety margin. The 0.88 zoom headroom in the
+ * budget below sits on top of this, so wrapped rows stay clear of the edge
+ * in every focus state — including long Apple Music word-sync rows.
  */
-private val KaraokeHorizontalChrome = 128.dp
+private val KaraokeHorizontalChrome = 112.dp
 
 /**
  * Measures word-sync lines against the settled list width and pre-splits
@@ -398,7 +400,7 @@ private fun KaraokeLineWrapScope(
             onLinePressed = {},
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp),
+                .padding(horizontal = 12.dp),
             offset = 84.dp,
             normalLineTextStyle = normalStyle,
             accompanimentLineTextStyle = accompanimentStyle,
