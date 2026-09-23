@@ -82,9 +82,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -105,9 +103,6 @@ import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
 import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.shell.FloatingNavDefaults
-import com.lastwave.app.ui.theme.isLiquidGlassBackdropSupported
-import com.lastwave.app.ui.theme.liquidGlassSource
-import com.lastwave.app.ui.theme.rememberLayerBackdrop
 import com.lastwave.app.ui.theme.ExpressivePillShape
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -155,29 +150,71 @@ fun PlaylistScreen(
     var menuTarget by remember { mutableStateOf<Pair<Long, GeneratedTrack>?>(null) }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Floating glass header (same technique as Home + nav dock): the
-        // header refracts the list scrolling beneath it on its own capture.
-        // Unconditional remember keeps composition stable; usage is gated
-        // on glass support below.
-        val backgroundColor = MaterialTheme.colorScheme.background
-        val headerBackdrop = rememberLayerBackdrop {
-            drawRect(backgroundColor)
-            drawContent()
-        }
-        val headerGlass = isLiquidGlassBackdropSupported()
-        var headerHeight by remember { mutableStateOf(0.dp) }
-        val density = LocalDensity.current
-        var sortMenuExpanded by remember { mutableStateOf(false) }
         Column(
             Modifier
                 .fillMaxSize()
                 .adaptiveContentWidth(maxWidth = 860.dp)
-                .align(Alignment.TopCenter)
-                .liquidGlassSource(if (headerGlass) headerBackdrop else null),
+                .align(Alignment.TopCenter),
         ) {
-            // Reserves the overlay header's measured height so loading,
-            // empty and list states all start below it.
-            Spacer(Modifier.height(headerHeight))
+            var sortMenuExpanded by remember { mutableStateOf(false) }
+            ExpressiveHeader(
+                title = "Playlist",
+                subtitle = if (state.playlists.any { it.isYouTubeOnly && it.remoteTrackCount == null }) {
+                    "${state.playlists.size} Playlists"
+                } else {
+                    "${state.playlists.size} Playlists \u00b7 ${state.playlists.sumOf { it.remoteTrackCount ?: it.tracks.size }} Tracks"
+                },
+                actions = {
+                    IconButton(
+                        onClick = viewModel::openCreateDialog,
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = "Create custom playlist")
+                    }
+                    Box {
+                        Surface(
+                            onClick = { sortMenuExpanded = true },
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            tonalElevation = 1.dp,
+                            modifier = Modifier.heightIn(min = 34.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Sort,
+                                    contentDescription = "Sort playlists",
+                                    modifier = Modifier.size(15.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    "Sort",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = sortMenuExpanded,
+                            onDismissRequest = { sortMenuExpanded = false },
+                            shape = RoundedCornerShape(22.dp),
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            tonalElevation = 4.dp,
+                            shadowElevation = 10.dp,
+                            modifier = Modifier.padding(vertical = 4.dp),
+                        ) {
+                            DropdownMenuItem(text = { Text("Newest first") }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_DESC); sortMenuExpanded = false })
+                            DropdownMenuItem(text = { Text("Oldest first") }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_ASC); sortMenuExpanded = false })
+                            DropdownMenuItem(text = { Text("Name") }, onClick = { viewModel.setSortMode(PlaylistSortMode.NAME); sortMenuExpanded = false })
+                            DropdownMenuItem(text = { Text("Track count") }, onClick = { viewModel.setSortMode(PlaylistSortMode.TRACK_COUNT); sortMenuExpanded = false })
+                        }
+                    }
+                },
+            )
 
             Box(
                 modifier = Modifier
@@ -257,72 +294,6 @@ fun PlaylistScreen(
                 }
             }
         }
-
-        ExpressiveHeader(
-            title = "Playlist",
-            subtitle = if (state.playlists.any { it.isYouTubeOnly && it.remoteTrackCount == null }) {
-                "${state.playlists.size} Playlists"
-            } else {
-                "${state.playlists.size} Playlists \u00b7 ${state.playlists.sumOf { it.remoteTrackCount ?: it.tracks.size }} Tracks"
-            },
-            backdrop = if (headerGlass) headerBackdrop else null,
-            modifier = Modifier
-                .adaptiveContentWidth(maxWidth = 860.dp)
-                .align(Alignment.TopCenter)
-                .onGloballyPositioned { coordinates ->
-                    headerHeight = with(density) { coordinates.size.height.toDp() }
-                },
-            actions = {
-                IconButton(
-                    onClick = viewModel::openCreateDialog,
-                    modifier = Modifier.size(40.dp),
-                ) {
-                    Icon(Icons.Filled.Add, contentDescription = "Create custom playlist")
-                }
-                Box {
-                    Surface(
-                        onClick = { sortMenuExpanded = true },
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        tonalElevation = 1.dp,
-                        modifier = Modifier.heightIn(min = 34.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 13.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.Sort,
-                                contentDescription = "Sort playlists",
-                                modifier = Modifier.size(15.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                "Sort",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                    }
-                    DropdownMenu(
-                        expanded = sortMenuExpanded,
-                        onDismissRequest = { sortMenuExpanded = false },
-                        shape = RoundedCornerShape(22.dp),
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        tonalElevation = 4.dp,
-                        shadowElevation = 10.dp,
-                        modifier = Modifier.padding(vertical = 4.dp),
-                    ) {
-                        DropdownMenuItem(text = { Text("Newest first") }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_DESC); sortMenuExpanded = false })
-                        DropdownMenuItem(text = { Text("Oldest first") }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_ASC); sortMenuExpanded = false })
-                        DropdownMenuItem(text = { Text("Name") }, onClick = { viewModel.setSortMode(PlaylistSortMode.NAME); sortMenuExpanded = false })
-                        DropdownMenuItem(text = { Text("Track count") }, onClick = { viewModel.setSortMode(PlaylistSortMode.TRACK_COUNT); sortMenuExpanded = false })
-                    }
-                }
-            },
-        )
 
         state.toastMessage?.let { msg ->
             LaunchedEffect(msg) {

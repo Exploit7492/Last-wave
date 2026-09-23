@@ -310,6 +310,21 @@ class MusicPlayer @Inject constructor(
      */
     private var lastAutoAdvanceKey: String? = null
     private var lastAutoAdvanceAtMs = 0L
+    /**
+     * Rendering watchdog (silent-advance safety net): ExoPlayer position at
+     * the last ticker sample, buffer at the last sample, and when the
+     * current stall began (0 = rendering or not monitored). See the ticker
+     * check below for the full contract.
+     */
+    private var lastRenderPositionMs = -1L
+    private var lastRenderBufferedMs = -1L
+    private var renderStallSinceMs = 0L
+    /** Same, for the inaudible-but-rendering branch + its position cursor. */
+    private var inaudibleSinceMs = 0L
+    private var lastAdvancingPositionMs = -1L
+    /** Recovery attempts per mediaId, so a hopeless window stops at 2 and
+     *  the existing error/unavailable machinery owns it from there. */
+    private val silentRecoveries = mutableMapOf<String, Int>()
     private var sleepTimerDeadlineMs: Long? = null
     private var sleepTimerStep = 0
     @Volatile
@@ -1130,6 +1145,7 @@ class MusicPlayer @Inject constructor(
                     // Stream-health sampling: effective clock drift + glitch
                     // watch, 1 Hz while playing. Feeds the signal-path popup.
                     val tickerNow = SystemClock.elapsedRealtime()
+                    updateRenderStallWatchdog(tickerNow)
                     val healthPlaying = player.isPlaying || _state.value.isPlaying
                     if (healthPlaying && tickerNow - lastSignalPathMs >= SIGNAL_PATH_TICK_MS) {
                         lastSignalPathMs = tickerNow
@@ -3351,6 +3367,136 @@ class MusicPlayer @Inject constructor(
         resolveAndPlayQueueItem(nextIndex)
     }
 
+    /**
+     * Rendering watchdog: the progress bar is a wall clock and [refresh]
+     * preserves the playing flag while a track resolves, so the UI can show
+     * a normally-moving "playing" track while nothing audible comes out.
+     * Two shapes, both fixed by the same recovery a manual seek performs
+     * (renderer reset + fresh source):
+     *
+     * 1. Parked: ExoPlayer is not rendering at all — wedged placeholder
+     *    load, dead-but-not-erroring source after a window swap, or a stuck
+     *    IDLE/READY window, all with playWhenReady=true. Fires after
+     *    [RENDER_STALL_TIMEOUT_MS] with zero movement in position AND
+     *    buffer. A growing buffer means a slow network, which must never
+     *    be interrupted.
+     * 2. Inaudible: ExoPlayer reports rendering with an advancing position
+     *    yet no music stream is active system-wide
+     *    ([AudioManager.isMusicActive]) — output gated downstream of the
+     *    player (stale device route, dead exclusive session, wedged sink).
+     *    Fires after [INAUDIBLE_TIMEOUT_MS] of advancing-but-silent output.
+     *    USB-exclusive playback bypasses AudioTrack by design, so it is
+     *    excluded here (the parked branch still guards it).
+     *
+     * Never fires while a resolve/skip/crossfade owns the transition, on
+     * ENDED (owned by [handleNaturalTrackEnd]), while casting, paused, or
+     * with an error showing — healthy playback is never touched.
+     */
+    @MainThread
+    private fun updateRenderStallWatchdog(nowMs: Long) {
+        val snapshot = _state.value
+        val stalledWindow = player.currentMediaItemIndex
+        val mediaId = player.currentMediaItem?.mediaId
+        val windowOk = !isCasting &&
+            playerDelegate.isInitialized() &&
+            player.mediaItemCount > 0 &&
+            snapshot.isPlaying &&
+            snapshot.error == null &&
+            player.playWhenReady &&
+            playRequest?.isActive != true &&
+            unavailableSkipJob?.isActive != true &&
+            outgoingPlayer == null &&
+            stalledWindow != C.INDEX_UNSET &&
+            stalledWindow in 0 until player.mediaItemCount &&
+            mediaId != null &&
+            mediaId == snapshot.current?.mediaIdKey() &&
+            player.playbackState != Player.STATE_ENDED
+        // Null mediaId can't smart-cast through the flag above; re-check
+        // here so the recovery call below type-checks.
+        if (!windowOk || mediaId == null) {
+            renderStallSinceMs = 0L
+            inaudibleSinceMs = 0L
+            return
+        }
+        val posNow = runCatching { player.currentPosition }.getOrDefault(0L)
+        val bufNow = runCatching { player.bufferedPosition }.getOrDefault(0L)
+        val progressed = posNow != lastRenderPositionMs || bufNow != lastRenderBufferedMs
+        lastRenderPositionMs = posNow
+        lastRenderBufferedMs = bufNow
+        if (!player.isPlaying) {
+            // Parked branch: only a fully frozen loader counts as stalled.
+            inaudibleSinceMs = 0L
+            if (progressed) {
+                renderStallSinceMs = 0L
+                return
+            }
+            if (renderStallSinceMs == 0L) {
+                renderStallSinceMs = nowMs
+                return
+            }
+            if (nowMs - renderStallSinceMs < RENDER_STALL_TIMEOUT_MS) return
+            renderStallSinceMs = 0L
+            recoverSilentAdvance(stalledWindow, mediaId)
+            return
+        }
+        // Rendering branch: position must be advancing (else the parked
+        // branch above owns it) with no active music stream behind it.
+        renderStallSinceMs = 0L
+        val usbBypass = exclusiveUsbOutput.isActive()
+        val musicActive = usbBypass || runCatching { audioManager?.isMusicActive == true }.getOrDefault(true)
+        if (posNow == lastAdvancingPositionMs || musicActive) {
+            lastAdvancingPositionMs = posNow
+            if (musicActive) inaudibleSinceMs = 0L
+            return
+        }
+        lastAdvancingPositionMs = posNow
+        if (inaudibleSinceMs == 0L) {
+            inaudibleSinceMs = nowMs
+            return
+        }
+        if (nowMs - inaudibleSinceMs < INAUDIBLE_TIMEOUT_MS) return
+        inaudibleSinceMs = 0L
+        recoverSilentAdvance(stalledWindow, mediaId)
+    }
+
+    /**
+     * Tiered recovery for a window the watchdog proved silent. Attempt 1 on
+     * an already-resolved window mirrors the proven manual-seek rescue: a
+     * same-position seek resets the stalled renderers and re-opens the
+     * registered source without moving the playhead. Anything else (or a
+     * repeat stall) goes through the full lossless-first
+     * [resolveAndPlayQueueItem], which also covers expired/dead signed URLs
+     * with fresh ones. Capped per track; beyond that the existing
+     * error/unavailable machinery owns the window.
+     */
+    @MainThread
+    private fun recoverSilentAdvance(index: Int, mediaId: String) {
+        if (isCasting) return
+        if (!playerDelegate.isInitialized() || index !in 0 until player.mediaItemCount) return
+        if (_state.value.current?.mediaIdKey() != mediaId || !_state.value.isPlaying || _state.value.error != null) return
+        if (silentRecoveries.size > 64) silentRecoveries.clear()
+        val attempt = (silentRecoveries[mediaId] ?: 0) + 1
+        if (attempt > MAX_SILENT_RECOVERIES) return
+        silentRecoveries[mediaId] = attempt
+        val item = player.getMediaItemAt(index)
+        val prepared = item.localConfiguration?.customCacheKey?.let(preparedStreams::get)
+        val windowResolved = item.localConfiguration?.uri?.scheme != "lastwave" && prepared?.isExpired() != true
+        android.util.Log.w(
+            "MusicPlayer",
+            "Silent window '${_state.value.current?.title}' (attempt $attempt): " +
+                "state=${player.playbackState} playWhenReady=${player.playWhenReady} " +
+                "pos=${player.currentPosition}ms buf=${player.bufferedPosition}ms " +
+                "resolved=$windowResolved -> ${if (windowResolved && attempt == 1) "renderer reset" else "re-resolve"}",
+        )
+        if (windowResolved && attempt == 1) {
+            runCatching { player.seekTo(player.currentPosition.coerceAtLeast(0L)) }
+            if (player.playbackState == Player.STATE_IDLE) runCatching { player.prepare() }
+            runCatching { player.play() }
+            return
+        }
+        resolveAndPlayQueueItem(index)
+    }
+
     @MainThread
     private fun scheduleUnavailableMediaSkip(
         failedIndex: Int,
@@ -4648,6 +4794,19 @@ class MusicPlayer @Inject constructor(
         const val END_OF_TRACK_STALL_THRESHOLD_MS = 750L
         /** Debounce so STATE_ENDED + ticker watchdog can't churn generations. */
         const val AUTO_ADVANCE_DEBOUNCE_MS = 3_000L
+        /** UI-playing but ExoPlayer frozen (pos + buffer) this long means a
+         *  silent window, not slow loading — legit rebuffers advance the
+         *  buffer and reset the clock. Well above normal hitches, far below
+         *  a full silent track. */
+        const val RENDER_STALL_TIMEOUT_MS = 8_000L
+        /** Rendering with an advancing position yet no active music stream
+         *  this long means gated output, not a startup gap (those last a
+         *  second or two). User-muted-to-zero still counts as active, so
+         *  this never fires on a deliberately silent phone. */
+        const val INAUDIBLE_TIMEOUT_MS = 10_000L
+        /** Renderer-reset, then re-resolve. Beyond that the error/unavailable
+         *  machinery owns the window — never loop recovery forever. */
+        const val MAX_SILENT_RECOVERIES = 2
         const val PLAYBACK_RETRY_BASE_DELAY_MS = 350L
         const val PLAYBACK_RETRY_JITTER_MS = 250L
         const val MEDIA_STREAM_CACHE_BYTES = 64L * 1024 * 1024

@@ -73,9 +73,9 @@ fun EdgeToEdgeDialogWindow() {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     w.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
                     val lp = w.attributes
-                    lp.setBlurBehindRadius(60)
+                    lp.setBlurBehindRadius(150)
                     w.attributes = lp
-                    runCatching { w.setBackgroundBlurRadius(60) }
+                    runCatching { w.setBackgroundBlurRadius(150) }
                 }
                 w.setDimAmount(0.18f)
             }

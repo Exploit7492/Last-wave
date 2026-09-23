@@ -64,9 +64,6 @@ import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.HeaderActionIcon
 import com.lastwave.app.ui.common.safeHorizontalContentPadding
 import com.lastwave.app.ui.common.adaptiveContentWidth
-import com.lastwave.app.ui.theme.isLiquidGlassBackdropSupported
-import com.lastwave.app.ui.theme.liquidGlassSource
-import com.lastwave.app.ui.theme.rememberLayerBackdrop
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
@@ -125,8 +122,6 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import com.lastwave.app.ui.shell.FloatingNavDefaults
@@ -183,25 +178,23 @@ fun HomeScreen(
 
     var menuTrack by remember { mutableStateOf<HomeTrack?>(null) }
 
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-    // Floating glass header (same technique as Home + nav dock): the header
-    // refracts the stats scrolling beneath it on its own capture.
-    // Unconditional remember keeps composition stable; usage is gated on
-    // glass support below.
-    val backgroundColor = MaterialTheme.colorScheme.background
-    val headerBackdrop = rememberLayerBackdrop {
-        drawRect(backgroundColor)
-        drawContent()
-    }
-    val headerGlass = isLiquidGlassBackdropSupported()
-    var headerHeight by remember { mutableStateOf(0.dp) }
-    val density = LocalDensity.current
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        modifier = Modifier.fillMaxSize(),
+        topBar = {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                ExpressiveHeader(
+                    title = "Statistics",
+                    modifier = Modifier.adaptiveContentWidth(maxWidth = 860.dp),
+                    actions = {
+                        HeaderActionIcon(Icons.Filled.Explore, "Discover", onOpenDiscover)
+                        HeaderActionIcon(Icons.Filled.Search, "Search", onOpenSearch)
+                        IconButton(onClick = onOpenSettings) {
+                            ProfileAvatar(avatarUrl = uiState.stats?.avatarUrl, modifier = Modifier.size(30.dp))
+                        }
+                    },
+                )
+            }
+        },
     ) { scaffoldPadding ->
         if (uiState.isLoading) {
             Box(
@@ -214,8 +207,7 @@ fun HomeScreen(
         }
 
         Box(
-            modifier = Modifier.fillMaxSize().padding(scaffoldPadding)
-                .liquidGlassSource(if (headerGlass) headerBackdrop else null),
+            modifier = Modifier.fillMaxSize().padding(scaffoldPadding),
             contentAlignment = Alignment.TopCenter,
         ) {
             Column(
@@ -224,9 +216,6 @@ fun HomeScreen(
                     .adaptiveContentWidth(maxWidth = 860.dp)
                     .safeHorizontalContentPadding(),
             ) {
-            // Reserves the overlay header's measured height so stats content
-            // starts below it.
-            Spacer(Modifier.height(headerHeight))
             HeaderRow(
                 displayUsername = when {
                     uiState.isViewingFriend -> uiState.viewingUsername
@@ -419,23 +408,6 @@ fun HomeScreen(
             }
         }
     }
-    }
-    ExpressiveHeader(
-        title = "Statistics",
-        backdrop = if (headerGlass) headerBackdrop else null,
-        modifier = Modifier
-            .adaptiveContentWidth(maxWidth = 860.dp)
-            .onGloballyPositioned { coordinates ->
-                headerHeight = with(density) { coordinates.size.height.toDp() }
-            },
-        actions = {
-            HeaderActionIcon(Icons.Filled.Explore, "Discover", onOpenDiscover, backdrop = if (headerGlass) headerBackdrop else null)
-            HeaderActionIcon(Icons.Filled.Search, "Search", onOpenSearch, backdrop = if (headerGlass) headerBackdrop else null)
-            IconButton(onClick = onOpenSettings) {
-                ProfileAvatar(avatarUrl = uiState.stats?.avatarUrl, modifier = Modifier.size(30.dp))
-            }
-        },
-    )
     }
 
     menuTrack?.let { track ->

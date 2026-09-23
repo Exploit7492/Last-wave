@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
@@ -21,7 +20,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -38,11 +36,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import com.lastwave.app.ui.theme.LayerBackdrop
-import com.lastwave.app.ui.theme.LocalLiquidGlass
-import com.lastwave.app.ui.theme.isLiquidGlassBackdropSupported
-import com.lastwave.app.ui.theme.liquidGlass
-import com.lastwave.app.ui.theme.liquidGlassContainerColor
 
 
 /** Only the bottom corners are rounded, and a modest 24dp at that (not
@@ -80,36 +73,16 @@ fun ExpressiveHeader(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     onBack: (() -> Unit)? = null,
-    /** Live backdrop this header refracts — the nav-dock technique. Null
-     *  keeps the classic opaque header, so every existing caller without a
-     *  backdrop renders pixel-identical to before. */
-    backdrop: LayerBackdrop? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     val glow = MaterialTheme.colorScheme.primary
     val secondaryGlow = MaterialTheme.colorScheme.tertiary
-    // Same gating as the nav dock: real glass only when supported with a
-    // live source; the glass surface must sit outside its source, never
-    // inside it.
-    val glassActive = isLiquidGlassBackdropSupported() && backdrop != null
     Box(modifier.fillMaxWidth().zIndex(1f)) {
         Surface(
             shape = HeaderShape,
-            color = liquidGlassContainerColor(
-                MaterialTheme.colorScheme.surfaceContainer,
-                enabled = LocalLiquidGlass.current,
-                backdrop = backdrop,
-            ),
-            tonalElevation = if (glassActive) 0.dp else 2.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(
-                    if (glassActive && backdrop != null) {
-                        Modifier.liquidGlass(backdrop, HeaderShape, interactive = false)
-                    } else {
-                        Modifier
-                    },
-                ),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            tonalElevation = 2.dp,
+            modifier = Modifier.fillMaxWidth(),
         ) {
             Column(
                 Modifier
@@ -126,12 +99,14 @@ fun ExpressiveHeader(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (onBack != null) {
-                        HeaderActionIcon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            "Back",
-                            onBack,
-                            backdrop = backdrop,
-                        )
+                        FilledTonalIconButton(
+                            onClick = onBack,
+                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            ),
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
                         Spacer(Modifier.width(12.dp))
                     }
 
@@ -201,41 +176,18 @@ private fun Modifier.drawGlowBackground(color: Color, secondaryColor: Color): Mo
 /** A trailing action icon for [ExpressiveHeader] (or any other header-style
  *  surface) — a small filled-tonal circular button matching the leading
  *  back button's tone, so every icon in a header reads as one family
- *  instead of each screen picking its own IconButton style.
- *
- *  With a live [backdrop] (and glass supported) it uses the nav-dock
- *  technique instead: a clear refracting circle. Without one it renders
- *  exactly the classic tonal button. */
+ *  instead of each screen picking its own IconButton style. */
 @Composable
 fun HeaderActionIcon(
     icon: ImageVector,
     contentDescription: String?,
     onClick: () -> Unit,
-    backdrop: LayerBackdrop? = null,
-    modifier: Modifier = Modifier,
 ) {
-    if (isLiquidGlassBackdropSupported() && backdrop != null) {
-        IconButton(
-            onClick = onClick,
-            modifier = modifier
-                .size(40.dp)
-                .liquidGlass(backdrop, CircleShape),
-        ) {
-            Icon(
-                icon,
-                contentDescription = contentDescription,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(24.dp),
-            )
-        }
-        return
-    }
     FilledTonalIconButton(
         onClick = onClick,
         colors = IconButtonDefaults.filledTonalIconButtonColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
         ),
-        modifier = modifier,
     ) {
         Icon(icon, contentDescription = contentDescription)
     }
