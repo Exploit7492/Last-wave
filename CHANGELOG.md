@@ -1,5 +1,24 @@
 # Changelog
 
+## [4.2.0] - 2026-09-23
+
+### Added
+- **Dolby Atmos Playback:** Added Dolby Atmos playback support for compatible devices and audio configurations, providing an enhanced spatial audio experience.
+- **Enhanced Liquid Glass:** Completely reworked the Liquid Glass system. The previous implementation was primarily a translucent blur effect; the new implementation introduces significantly improved depth, translucency, reflections, layering, highlights, and overall visual polish for a more refined glass experience.
+- **Playlist Downloads:** Added support for downloading complete playlists for offline listening, making it easier to manage and save large collections.
+- **True Bit-Perfect Playback:** Improved bit-perfect playback with untouched DAC routing, preserving the audio output path without unnecessary modification or processing.
+- **YouTube Recommendation Algorithm:** The entire recommendation system has been shifted from Last.fm to YouTube, providing a new recommendation backend while making Last.fm completely optional.
+- **Guest Login:** Added Guest Login, allowing users to use LastWave without creating or connecting an account.
+- **Native Spotify & Apple Music Playlist Import:** Added native playlist importing from Spotify and Apple Music, allowing users to bring their existing playlists directly into LastWave.
+
+### Changed & Improved
+- **Playback & Audio Improvements:** Improved playback reliability, audio handling, DAC behavior, and various edge cases across the playback pipeline.
+- **UI & Performance Improvements:** Refined multiple parts of the interface with improved responsiveness, animations, visual consistency, and overall performance.
+- **Under-the-Hood Improvements:** A large number of architectural, performance, reliability, and quality-of-life improvements have been made throughout the app.
+
+### Fixed
+- **Stability & Bug Fixes:** Fixed numerous reported issues across playback, downloads, recommendations, authentication, UI, and background behavior.
+
 ## Unreleased
 
 ### Added
