@@ -485,7 +485,7 @@ private fun FloatingNavItem(
     Surface(
         onClick = onClick,
         shape = PillShape,
-        color = Color.Transparent,
+        color = backgroundColor,
         modifier = Modifier
             .height(48.dp)
             .animateContentSize(animationSpec = navSpring()),
