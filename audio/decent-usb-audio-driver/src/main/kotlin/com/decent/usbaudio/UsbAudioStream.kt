@@ -41,8 +41,7 @@ class UsbAudioStream(
         sampleRate: Int,
         channelCount: Int,
         bitDepth: Int,
-        maxPacketSize: Int,
-        packetInterval: Int = 1,
+        maxPacketSize: Int
 ) {
 
     /** Native UsbAudioContext pointer. Exposed for NativeAudioEngine which
@@ -53,7 +52,7 @@ class UsbAudioStream(
     init {
         nativeHandle = nativeUsbAudioCreate(
                 fd, interfaceId, endpointOut, endpointFeedback,
-                sampleRate, channelCount, bitDepth, maxPacketSize, packetInterval
+                sampleRate, channelCount, bitDepth, maxPacketSize
         )
         if (nativeHandle == 0L) {
             Log.e(TAG, "nativeUsbAudioCreate returned 0 — check logcat for native errors")
@@ -71,10 +70,6 @@ class UsbAudioStream(
     /** Total frames written to USB since last start(). Used for position tracking. */
     val framesWritten: Long
         get() = if (nativeHandle != 0L) nativeGetFramesWritten(nativeHandle) else 0L
-
-    /** Monotonic DAC clock (not cleared on flush) for drift measurement. */
-    val framesClock: Long
-        get() = if (nativeHandle != 0L) nativeGetFramesClock(nativeHandle) else 0L
 
     /**
      * Select alternate setting on the USB streaming interface.
@@ -165,15 +160,6 @@ class UsbAudioStream(
     }
 
     /**
-     * Pause ISO writes without destroying the ring or resetting clocks.
-     * Resume with [setPaused] false. Does not change [isAlive].
-     */
-    fun setPaused(paused: Boolean) {
-        if (nativeHandle == 0L) return
-        nativeSetPaused(nativeHandle, paused)
-    }
-
-    /**
      * Drain all in-flight URBs. Blocks until every URB is reaped.
      *
      * This MUST be called after [stop] and BEFORE the Kotlin layer calls
@@ -202,8 +188,7 @@ class UsbAudioStream(
 
     private external fun nativeUsbAudioCreate(
             fd: Int, interfaceId: Int, endpointOut: Int, endpointFeedback: Int,
-            sampleRate: Int, channelCount: Int, bitDepth: Int, maxPacketSize: Int,
-            packetInterval: Int
+            sampleRate: Int, channelCount: Int, bitDepth: Int, maxPacketSize: Int
     ): Long
 
     private external fun nativeUsbAudioSetAltSetting(handle: Long, altSetting: Int): Boolean
@@ -213,12 +198,10 @@ class UsbAudioStream(
     private external fun nativeUsbAudioWriteRaw(handle: Long, pcmBuffer: ByteArray, inputBitDepth: Int)
     private external fun nativeUsbAudioStop(handle: Long)
     private external fun nativeFlush(handle: Long)
-    private external fun nativeSetPaused(handle: Long, paused: Boolean)
     private external fun nativeDrainUrbs(handle: Long): Int
     private external fun nativeUsbAudioDestroy(handle: Long)
     private external fun nativeIsRunning(handle: Long): Boolean
     private external fun nativeGetFramesWritten(handle: Long): Long
-    private external fun nativeGetFramesClock(handle: Long): Long
 
     companion object {
         private const val TAG = "UsbAudioStream"

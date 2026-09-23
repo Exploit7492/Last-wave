@@ -16,7 +16,5 @@ data class UsbAudioDeviceInfo(
     val altSettingCount: Int,
     val clockSourceId: Int,
     val bestAltSetting: Int,
-    val bestBitDepth: Int,
-    /** AudioControl interface number used for SET_CUR / GET_CUR wIndex. */
-    val controlInterfaceId: Int = 0,
+    val bestBitDepth: Int
 )

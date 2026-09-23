@@ -8,13 +8,10 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        minSdk = 29
-        consumerProguardFiles("consumer-rules.pro")
-        externalNativeBuild { cmake { cppFlags("") } }
+        minSdk = 24
+        externalNativeBuild { cmake { cppFlags("-fno-fast-math") } }
     }
 
-    // Mirror the app's build types so every app variant (including the
-    // custom rawRelease) resolves a matching library variant.
     buildTypes {
         getByName("debug")
         getByName("release")
@@ -37,5 +34,5 @@ android {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.18.0")
+    implementation("androidx.core:core-ktx:1.15.0")
 }

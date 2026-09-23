@@ -409,6 +409,12 @@ class NativeProcessingAudioSink(
                 exclusiveEnded = false
                 return true
             }
+            // Queue full: the DAC is still running. Return false so ExoPlayer
+            // retries and keeps loading the network. Tearing the session down
+            // here is what left the bar moving with the pause control spinning.
+            if (exclusiveUsb?.isStreamAlive() == true) {
+                return false
+            }
             // A seek discards in-flight URBs. The first write after that can
             // fail once; tearing the USB session down here is what left the
             // DAC silent while the seek bar kept moving.
@@ -753,10 +759,20 @@ class NativeProcessingAudioSink(
         ) {
             return false
         }
+        // Release AudioTrack before claiming the USB interface. While the
+        // mixer still owns the DAC, libusb cannot detach snd-usb-audio and
+        // exclusive start fails closed onto the shared 48 kHz track.
+        runCatching { enhancedDelegate.pause() }
+        runCatching { fallbackDelegate.pause() }
+        runCatching { enhancedDelegate.flush() }
+        runCatching { fallbackDelegate.flush() }
         val started = runCatching { session.configure(format) }.getOrDefault(false)
         if (!started) {
             exclusiveStartFailed = true
             usbExclusive = false
+            if (playing) {
+                runCatching { activeDelegate.play() }
+            }
             return false
         }
         enterExclusiveUsb()
@@ -764,10 +780,6 @@ class NativeProcessingAudioSink(
         processedFormat = null
         lastGainBuffer = null
         usbOutput?.setFormat(null)
-        runCatching { enhancedDelegate.pause() }
-        runCatching { fallbackDelegate.pause() }
-        runCatching { enhancedDelegate.flush() }
-        runCatching { fallbackDelegate.flush() }
         activeDelegate = fallbackDelegate
         syncDelegateVolume()
         notifyPlatformEffectsRequired(false)

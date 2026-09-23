@@ -16,9 +16,8 @@
 #include <linux/usbdevice_fs.h>
 
 /**
- * Number of isochronous packets per URB submission when bInterval is 1.
- * The kernel spaces packets by the endpoint bInterval, so a bInterval of 4
- * is one packet per millisecond and the URB carries fewer packets.
+ * Number of isochronous packets per URB submission.
+ * At USB high-speed (125us microframes), 8 packets = 1ms of audio.
  */
 #define USB_AUDIO_PACKETS_PER_URB 8
 
@@ -34,10 +33,10 @@
 
 /**
  * Max bytes per URB data buffer.
- * Worst case is a 1 ms service interval (bInterval 4) at 384 kHz / 32-bit
- * stereo: 384 frames * 8 bytes * 8 packets. 32 KB leaves headroom.
+ * Worst case: 384kHz * 4 bytes * 2 channels / 8000 microframes * 8 packets
+ *           = 384 * 8 = 3072 bytes per URB. Round up generously.
  */
-#define USB_AUDIO_URB_BUFFER_SIZE 32768
+#define USB_AUDIO_URB_BUFFER_SIZE 4096
 
 /**
  * One slot in the pre-allocated URB ring buffer.
@@ -74,39 +73,14 @@ struct UsbAudioContext {
     int32_t bytesPerSample;
     int32_t bytesPerFrame;
     int32_t maxPacketSize;
-    int32_t isoMicroframes;
-    /** Raw endpoint bInterval (1 = every microframe, 4 = every millisecond). */
-    int32_t bInterval;
-    /** Packets per second the host actually schedules for this bInterval. */
-    int32_t packetsPerSecond;
-    /** ALSA packsize[0] / packsize[1]: frames in a small and a large packet. */
-    int32_t packSmall;
-    int32_t packLarge;
-    /** rate % packetsPerSecond. Added into sampleAccum to choose large packets. */
-    int32_t sampleRem;
-    int32_t sampleAccum;
-    /** How many ISO packets to put in one URB at this bInterval. */
-    int32_t packetsPerUrb;
-    /**
-     * Remainder for the integer packetizer, in microframes of sample-time.
-     * phase += sampleRate * isoMicroframes; frames = phase / 8000; phase %= 8000.
-     */
-    int64_t phase;
-    /** sampleRate * isoMicroframes. Added once per ISO service opportunity. */
-    int64_t serviceNumerator;
-    int64_t packetsSubmitted;
-    /** Consecutive reap timeouts. A single timeout is not fatal. */
-    int32_t reapStalls;
 
     std::atomic<bool> running;
-    std::atomic<bool> paused;
 
     /** Scratch buffer for PCM format conversion (float -> int16/24/32). */
     uint8_t *transferBuffer;
     int32_t transferBufferCapacity;
 
     int64_t framesWritten;
-    std::atomic<int64_t> framesClock;
     bool interfaceClaimed;
 
     // ── Ring buffer ─────────────────────────────────────────────
@@ -125,16 +99,8 @@ struct UsbAudioContext {
     /** Whether ring buffers have been allocated. */
     bool ringAllocated;
 
-    /** Fractional accumulator kept only as a fallback; packet sizes use [microframeIndex]. */
+    /** Fractional accumulator for sample-rate-to-packet-size conversion. */
     double frameAccumulator;
-
-    /**
-     * Monotonic USB microframe index. Packet size is
-     * floor(rate*(n+step)/8000) - floor(rate*n/8000), which is the UAC
-     * pattern (44.1 → 5/6, 88.2 → 11/12, 176.4 → 22/23, 352.8 → 44/45).
-     * Advanced only when the URB is actually submitted.
-     */
-    int64_t microframeIndex;
 
     /**
      * Frames per microframe, calibrated from the DAC's async feedback endpoint.
@@ -179,9 +145,6 @@ void submitPcmToUrbs(UsbAudioContext *ctx, const uint8_t *pcmData, int totalByte
 
 /** 16-bit → 32-bit: shift left 16. */
 void padInt16ToInt32(const uint8_t *src, uint8_t *dst, int numSamples);
-
-/** 16-bit → 24-bit packed: shift left 8. */
-void padInt16ToInt24(const uint8_t *src, uint8_t *dst, int numSamples);
 
 /** 24-bit packed (3 bytes/sample) → 32-bit: sign-extend + shift left 8. */
 void padInt24ToInt32(const uint8_t *src, uint8_t *dst, int numSamples);
