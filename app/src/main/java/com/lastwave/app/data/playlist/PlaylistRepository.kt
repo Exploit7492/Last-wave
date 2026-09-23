@@ -297,21 +297,26 @@ class PlaylistRepository @Inject constructor(
     /**
      * Permanently moves a track within a local playlist and persists the new
      * order to Room (source of truth). No-op for out-of-range indices.
+     * Serialized through [saveMutex]: a drag fires one persist per crossed
+     * row, and concurrent read-modify-writes would otherwise lose moves so
+     * the order snaps back instead of sticking.
      */
     suspend fun moveTrack(id: Long, fromIndex: Int, toIndex: Int): SavedPlaylist? {
         if (fromIndex == toIndex) return getById(id)
         awaitStartupSync()
-        val entity = dao.getById(id) ?: return null
-        val playlist = entity.toDomain()
-        if (fromIndex !in playlist.tracks.indices || toIndex !in playlist.tracks.indices) return playlist
-        val updatedTracks = playlist.tracks.toMutableList().apply {
-            add(toIndex, removeAt(fromIndex))
+        return saveMutex.withLock {
+            val entity = dao.getById(id) ?: return@withLock null
+            val playlist = entity.toDomain()
+            if (fromIndex !in playlist.tracks.indices || toIndex !in playlist.tracks.indices) return@withLock playlist
+            val updatedTracks = playlist.tracks.toMutableList().apply {
+                add(toIndex, removeAt(fromIndex))
+            }
+            val updated = entity.copy(tracksJson = json.encodeToString(updatedTracks.map { it.toStored() }))
+            dao.upsert(updated)
+            syncPublicMirror()
+            _changes.tryEmit(Unit)
+            updated.toDomain()
         }
-        val updated = entity.copy(tracksJson = json.encodeToString(updatedTracks.map { it.toStored() }))
-        dao.upsert(updated)
-        syncPublicMirror()
-        _changes.tryEmit(Unit)
-        return updated.toDomain()
     }
 
     suspend fun getLikedSongs(): SavedPlaylist? =

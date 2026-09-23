@@ -87,6 +87,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -127,6 +129,9 @@ import com.lastwave.app.ui.navigation.ArtistAlbumNavigator
 import com.lastwave.app.ui.player.LocalMusicPlayer
 import com.lastwave.app.ui.player.PlayingWaveBars
 import com.lastwave.app.ui.shell.FloatingNavDefaults
+import com.lastwave.app.ui.theme.isLiquidGlassBackdropSupported
+import com.lastwave.app.ui.theme.liquidGlassSource
+import com.lastwave.app.ui.theme.rememberLayerBackdrop
 
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -195,20 +200,30 @@ fun FeedScreen(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.TopCenter,
     ) {
+        // Floating glass header (nav-dock technique): the header refracts
+        // the feed scrolling beneath it, so it floats above the list on its
+        // own capture. The pager-level backdrop can't be reused — a glass
+        // surface must sit outside its source, and this header lives inside
+        // that one. Unconditional remember keeps composition stable; usage
+        // is gated on glass support below.
+        val backgroundColor = MaterialTheme.colorScheme.background
+        val headerBackdrop = rememberLayerBackdrop {
+            drawRect(backgroundColor)
+            drawContent()
+        }
+        val headerGlass = isLiquidGlassBackdropSupported()
+        var headerHeight by remember { mutableStateOf(0.dp) }
+        val density = LocalDensity.current
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .adaptiveContentWidth(maxWidth = 920.dp),
+                .adaptiveContentWidth(maxWidth = 920.dp)
+                .liquidGlassSource(if (headerGlass) headerBackdrop else null),
         ) {
-            ExpressiveHeader(
-                title = "Home",
-                actions = {
-                    HeaderActionIcon(Icons.Filled.Explore, "Discover Radar", onOpenDiscover)
-                    HeaderActionIcon(Icons.Filled.Search, "Search", onOpenSearch)
-                    HeaderActionIcon(Icons.Filled.Settings, "Settings", onOpenSettings)
-                },
-            )
-
+            // Reserves the overlay header's measured height so list, skeleton
+            // and empty states all start below it; the list keeps its own
+            // 12.dp top gap on top of this.
+            Spacer(Modifier.height(headerHeight))
             PullToRefreshBox(
                 isRefreshing = state.isRefreshing,
                 onRefresh = viewModel::refresh,
@@ -822,6 +837,20 @@ fun FeedScreen(
             }
         }
     }
+        ExpressiveHeader(
+            title = "Home",
+            backdrop = if (headerGlass) headerBackdrop else null,
+            modifier = Modifier
+                .adaptiveContentWidth(maxWidth = 920.dp)
+                .onGloballyPositioned { coordinates ->
+                    headerHeight = with(density) { coordinates.size.height.toDp() }
+                },
+            actions = {
+                HeaderActionIcon(Icons.Filled.Explore, "Discover Radar", onOpenDiscover, backdrop = if (headerGlass) headerBackdrop else null)
+                HeaderActionIcon(Icons.Filled.Search, "Search", onOpenSearch, backdrop = if (headerGlass) headerBackdrop else null)
+                HeaderActionIcon(Icons.Filled.Settings, "Settings", onOpenSettings, backdrop = if (headerGlass) headerBackdrop else null)
+            },
+        )
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter)

@@ -21,6 +21,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -116,7 +117,13 @@ class PlaylistViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            playlistRepository.changes.collect { load() }
+            // Debounced: a single drag-reorder fires one change per crossed
+            // row. Reloading on every one would yank the list mid-drag (full
+            // re-read + YT refresh + sync pass per row) and race the
+            // persists, so the order snaps back instead of sticking. The
+            // optimistic detail update keeps the row under the finger; one
+            // reload after the drag settles confirms the persisted order.
+            playlistRepository.changes.debounce(750L).collect { load() }
         }
         viewModelScope.launch {
             ytMusicLibraryManager.playlists.collect { remote ->
