@@ -39,8 +39,8 @@ import androidx.compose.ui.unit.dp
 import coil.ImageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
-import com.lastwave.app.data.local.PlayableTrack
-import com.lastwave.app.ui.common.ArtworkNormalizer
+import com.lastwave.app.playback.PlayableTrack
+import com.lastwave.app.data.artwork.ArtworkNormalizer
 import com.lastwave.app.ui.common.ArtworkViewModel
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
