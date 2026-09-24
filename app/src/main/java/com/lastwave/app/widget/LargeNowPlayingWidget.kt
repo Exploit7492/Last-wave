@@ -92,7 +92,7 @@ class LargeNowPlayingWidget : GlanceAppWidget() {
 
     @EntryPoint
     @InstallIn(SingletonComponent::class)
-    interface WidgetEntryPoint {
+    interface LargeWidgetEntryPoint {
         fun themeRepository(): ThemeRepository
     }
 
@@ -104,7 +104,7 @@ class LargeNowPlayingWidget : GlanceAppWidget() {
         // Each step now degrades independently so provideContent ALWAYS runs:
         // worst case the widget shows its empty state, never a spinner.
         val entryPoint = runCatching {
-            EntryPointAccessors.fromApplication(context.applicationContext, WidgetEntryPoint::class.java)
+            EntryPointAccessors.fromApplication(context.applicationContext, LargeWidgetEntryPoint::class.java)
         }.getOrNull()
         // NOTE: themeRepository() builds the full app graph — kept OUTSIDE
         // the entry-point lookup above on purpose is what used to crash here,
@@ -146,14 +146,7 @@ class LargeNowPlayingWidget : GlanceAppWidget() {
     }
 }
 
-private fun blendColor(base: Color, tint: Color, fraction: Float): Color = Color(
-    red = base.red + (tint.red - base.red) * fraction,
-    green = base.green + (tint.green - base.green) * fraction,
-    blue = base.blue + (tint.blue - base.blue) * fraction,
-    alpha = 1f,
-)
-
-private data class WidgetUiState(
+private data class LargeWidgetUiState(
     val title: String,
     val artist: String,
     val isPlaying: Boolean,
@@ -167,18 +160,18 @@ private data class WidgetUiState(
  * path + last-modified makes repeated updates pure memory hits while still
  * picking up new art the moment the file changes.
  */
-private val widgetArtCache = object : java.util.LinkedHashMap<String, Bitmap>(2) {
+private val largeWidgetArtCache = object : java.util.LinkedHashMap<String, Bitmap>(2) {
     override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>): Boolean = size > 1
 }
 
-private fun decodeWidgetArt(path: String?): Bitmap? {
+private fun decodeLargeWidgetArt(path: String?): Bitmap? {
     val file = path?.let(::File)?.takeIf(File::exists) ?: return null
     val key = "${file.absolutePath}|${file.lastModified()}"
-    synchronized(widgetArtCache) {
-        widgetArtCache[key]?.let { return it }
+    synchronized(largeWidgetArtCache) {
+        largeWidgetArtCache[key]?.let { return it }
         val decoded = runCatching { BitmapFactory.decodeFile(file.path) }.getOrNull() ?: return null
-        widgetArtCache.clear()
-        widgetArtCache[key] = decoded
+        largeWidgetArtCache.clear()
+        largeWidgetArtCache[key] = decoded
         return decoded
     }
 }
@@ -193,8 +186,8 @@ private fun LargeNowPlayingWidgetContent(
     val hasUsableSession = snapshot.hasSession &&
         (hasNotificationAccess || snapshot.sourcePackage == ownPackage)
     val artPath = snapshot.artPath
-    val art = remember(artPath) { decodeWidgetArt(artPath) }
-    val state = WidgetUiState(
+    val art = remember(artPath) { decodeLargeWidgetArt(artPath) }
+    val state = LargeWidgetUiState(
         title = snapshot.title,
         artist = snapshot.artist,
         isPlaying = snapshot.isPlaying,
@@ -252,7 +245,7 @@ private fun EmptyWidget(hasNotificationAccess: Boolean) {
 }
 
 @Composable
-private fun PlayerWidget(state: WidgetUiState) {
+private fun PlayerWidget(state: LargeWidgetUiState) {
     Column(
         modifier = playerSurface(GlanceModifier)
             .clickable(actionRunCallback<OpenLastWaveAction>())
