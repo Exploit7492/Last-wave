@@ -39,6 +39,13 @@ import androidx.compose.ui.unit.dp
 import coil.ImageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
+import com.lastwave.app.data.local.PlayableTrack
+import com.lastwave.app.ui.common.ArtworkNormalizer
+import com.lastwave.app.ui.common.ArtworkViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.intellij.lang.annotations.Language
@@ -251,12 +258,29 @@ private class AgslFluidRenderer {
 
 @Composable
 fun FluidArtworkBackground(
-    artworkUrl: String?,
+    track: PlayableTrack,
     modifier: Modifier = Modifier,
     extraBlur: Boolean = false,
+    artworkViewModel: ArtworkViewModel = hiltViewModel(),
     fallback: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    val embeddedUrl = track.artworkUrl
+    val isReal = remember(embeddedUrl) { ArtworkNormalizer.isRealImage(embeddedUrl) }
+    
+    val key = remember(track.title, track.artist) { ArtworkNormalizer.cacheKey(track.title, track.artist) }
+    val resolvedUrl by remember(key) {
+        artworkViewModel.resolved.map { it[key] }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = artworkViewModel.resolved.value[key])
+    
+    LaunchedEffect(key) {
+        if (!isReal && resolvedUrl.isNullOrBlank()) {
+            artworkViewModel.resolve(track.title, track.artist)
+        }
+    }
+    
+    val artworkUrl = if (isReal) embeddedUrl else resolvedUrl
+    
     var current by remember { mutableStateOf<Bitmap?>(null) }
     var previous by remember { mutableStateOf<Bitmap?>(null) }
     val crossfade = remember { Animatable(1f) }
