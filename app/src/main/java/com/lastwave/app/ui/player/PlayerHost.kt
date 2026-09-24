@@ -811,7 +811,7 @@ private fun MiniPlayer(
     val shownY by animateFloatAsState(dragY, ExpressiveMotion.spatialSpring(), label = "miniPlayerY")
     val threshold = with(LocalDensity.current) { 72.dp.toPx() }
     val isTablet = isTabletOrWideScreen()
-    val shape = RoundedCornerShape(100)
+    val shape = if (edgeToEdge && !isTablet) RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp) else RoundedCornerShape(100)
     val positionedModifier = if (edgeToEdge && !isTablet) {
         modifier.fillMaxWidth()
     } else {
@@ -856,7 +856,7 @@ private fun MiniPlayer(
         Surface(
             shape = shape,
             // Transparent card when glass (glass draws scrim), 95% primaryContainer otherwise to match theme color.
-            color = if (isGlass) Color.Transparent else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f),
+            color = if (isGlass) Color.Transparent else MaterialTheme.colorScheme.primaryContainer,
             tonalElevation = if (edgeToEdge || isGlass) 0.dp else 6.dp,
             shadowElevation = if (edgeToEdge || isGlass) 0.dp else 12.dp,
             modifier = Modifier.fillMaxWidth().then(
@@ -1655,7 +1655,7 @@ private fun FullPlayer(
 
             Box(Modifier.matchParentSize().liquidGlassSource(if (fullGlass) playerBackdrop else null)) {
             FluidArtworkBackground(
-                artworkUrl = track.artworkUrl,
+                track = track,
                 modifier = Modifier.fillMaxSize(),
                 extraBlur = false,
                 fallback = {
@@ -2697,8 +2697,8 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             modifier = Modifier
-                .width(if (isTranslucent) 140.dp else 148.dp)
-                .height(if (isTranslucent) 72.dp else 76.dp)
+                .width(if (isTranslucent) 180.dp else 188.dp)
+                .height(if (isTranslucent) 56.dp else 60.dp)
                 .graphicsLayer {
                     scaleX = playScale
                     scaleY = playScale
@@ -3150,7 +3150,7 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                     shape = RoundedCornerShape(20.dp),
                     color = liquidGlassContainerColor(
                         if (isCurrent) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.86f),
+                        else MaterialTheme.colorScheme.surfaceContainerHighest,
                     ),
                     contentColor = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer
                     else MaterialTheme.colorScheme.onSurface,
