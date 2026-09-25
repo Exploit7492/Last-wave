@@ -10,6 +10,7 @@ import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbManager
 import android.media.AudioManager
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
@@ -61,6 +62,8 @@ class ExclusiveUsbOutput @Inject constructor(
     @Volatile private var startMediaTimeUs = 0L
     @Volatile private var startMediaTimeNeedsInit = true
     @Volatile private var mediaTimeBaseFrames = 0L
+    @Volatile private var lastWriteElapsedMs = 0L
+    @Volatile private var writingInProgress = false
     @Volatile private var paused = false
     private var pendingVolume = 1f
     private var featureVolume: UacFeatureVolume? = null
@@ -130,23 +133,34 @@ class ExclusiveUsbOutput @Inject constructor(
     fun isPaused(): Boolean = paused
 
     /**
-     * Pause/resume ISO writes without tearing down the USB session.
-     * [pause] on the Media3 sink used to no-op while exclusive, so the DAC
-     * kept consuming PCM after the user pressed pause.
+     * Pause/resume ISO writes without tearing down the USB session or
+     * discarding already-decoded PCM in [pcmQueue]. [flush] clears the queue
+     * on explicit seek/stop.
      */
     fun setPaused(value: Boolean) {
         paused = value
+        if (value) {
+            lastWriteElapsedMs = 0L
+        }
         synchronized(pcmLock) {
-            if (value) {
-                pcmQueue.clear()
-                queuedBytes = 0
-            }
             pcmLock.notifyAll()
         }
     }
 
     /** True while the isochronous stream is still accepting PCM. */
     fun isStreamAlive(): Boolean = active && stream?.isAlive == true
+
+    /**
+     * True while PCM is actively queued/writing to the DAC or a USB write
+     * completed within the last 750 ms. Prevents the UI seekbar from advancing
+     * on wall-clock time when the USB pipeline is starved.
+     */
+    fun isStreamingAudio(): Boolean {
+        if (!active || paused || stream?.isAlive != true) return false
+        if (writingInProgress || queuedBytes > 0) return true
+        val last = lastWriteElapsedMs
+        return last > 0L && (SystemClock.elapsedRealtime() - last) in 0L..750L
+    }
 
     /** Re-anchor the Media3 clock after an explicit seek. */
     fun noteSeek(positionUs: Long) {
@@ -158,9 +172,11 @@ class ExclusiveUsbOutput @Inject constructor(
             "seek timeUs=$timeUs targetFrames=$targetFrames rate=$rate " +
                 "clock=${stream?.framesWritten} alive=${stream?.isAlive}",
         )
-        mediaTimeBaseFrames = stream?.framesWritten ?: 0L
-        startMediaTimeUs = timeUs
-        startMediaTimeNeedsInit = false
+        synchronized(pcmLock) {
+            mediaTimeBaseFrames = stream?.framesWritten ?: 0L
+            startMediaTimeNeedsInit = true
+            lastWriteElapsedMs = 0L
+        }
     }
 
     fun syncListeningGain() {
@@ -262,10 +278,7 @@ class ExclusiveUsbOutput @Inject constructor(
 
     fun getCurrentPositionUs(): Long {
         val running = stream ?: return androidx.media3.exoplayer.audio.AudioSink.CURRENT_POSITION_NOT_SET
-        if (!active || configuredRateHz <= 0) {
-            return androidx.media3.exoplayer.audio.AudioSink.CURRENT_POSITION_NOT_SET
-        }
-        if (startMediaTimeNeedsInit) {
+        if (!active || configuredRateHz <= 0 || startMediaTimeNeedsInit) {
             return androidx.media3.exoplayer.audio.AudioSink.CURRENT_POSITION_NOT_SET
         }
         val frames = (running.framesWritten - mediaTimeBaseFrames).coerceAtLeast(0L)
@@ -283,13 +296,16 @@ class ExclusiveUsbOutput @Inject constructor(
      * isochronous pipeline is that pending audio.
      */
     fun hasPendingData(): Boolean =
-        active && !paused && (queuedBytes > 0 || stream?.isAlive == true)
+        active && (queuedBytes > 0 || (!paused && stream?.isAlive == true))
 
     fun flush() {
         synchronized(pcmLock) {
             pcmQueue.clear()
             queuedBytes = 0
             flushRequested = true
+            lastWriteElapsedMs = 0L
+            mediaTimeBaseFrames = stream?.framesWritten ?: 0L
+            startMediaTimeNeedsInit = true
             // Seek only flushes the sink. ExoPlayer does not call play()
             // again, so a pause flag left set here means every later buffer
             // is refused and the DAC stays silent while the bar moves on.
@@ -542,13 +558,13 @@ class ExclusiveUsbOutput @Inject constructor(
                 val applied = featureVolume?.setNormalized(combined) == true
                 if (!applied) {
                     hardwareVolume = false
-                    softwareGainValue = combined
-                    Log.w(TAG, "Feature Unit SET_CUR failed; falling back to software gain")
+                    softwareGainValue = UacFeatureVolume.perceptualLinearGain(combined)
+                    Log.w(TAG, "Feature Unit SET_CUR failed; falling back to perceptual software gain")
                 }
                 lastAppliedCombined = combined
             }
         } else {
-            softwareGainValue = combined
+            softwareGainValue = UacFeatureVolume.perceptualLinearGain(combined)
             lastAppliedCombined = combined
         }
     }
@@ -582,8 +598,6 @@ class ExclusiveUsbOutput @Inject constructor(
                 if (writerStop) return@synchronized null
                 if (flushRequested) {
                     flushRequested = false
-                    pcmQueue.clear()
-                    queuedBytes = 0
                     return@synchronized FLUSH_MARKER
                 }
                 if (paused || pcmQueue.isEmpty()) return@synchronized IDLE_MARKER
@@ -593,8 +607,6 @@ class ExclusiveUsbOutput @Inject constructor(
             } ?: break
             if (next === FLUSH_MARKER) {
                 runCatching { target.flush() }
-                // Native flush zeroes the frame counter. Rebase or ExoPlayer's
-                // clock stays at the seek point and the loader stops fetching.
                 mediaTimeBaseFrames = target.framesWritten
                 continue
             }
@@ -603,8 +615,15 @@ class ExclusiveUsbOutput @Inject constructor(
                 continue
             }
             if (!target.isAlive) break
-            if (next.floats != null) target.write(next.floats)
-            else if (next.raw != null) target.writeRaw(next.raw, next.encoding)
+            writingInProgress = true
+            lastWriteElapsedMs = SystemClock.elapsedRealtime()
+            try {
+                if (next.floats != null) target.write(next.floats)
+                else if (next.raw != null) target.writeRaw(next.raw, next.encoding)
+            } finally {
+                writingInProgress = false
+                lastWriteElapsedMs = SystemClock.elapsedRealtime()
+            }
         }
     }
 

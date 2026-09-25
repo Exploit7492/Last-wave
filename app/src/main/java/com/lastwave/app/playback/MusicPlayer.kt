@@ -1047,7 +1047,7 @@ class MusicPlayer @Inject constructor(
                 // below, including crossfade handoffs and track mismatches.
                 var cadenceMs = 500L
                 try {
-                    val usbAlive = !exclusiveUsbOutput.isActive() || exclusiveUsbOutput.isStreamAlive()
+                    val usbAlive = !exclusiveUsbOutput.isActive() || exclusiveUsbOutput.isStreamingAudio()
                     val playingNow = _state.value.isPlaying &&
                         !_state.value.isBuffering &&
                         !exclusiveUsbOutput.isPaused() &&
@@ -1692,8 +1692,11 @@ class MusicPlayer @Inject constructor(
         }
         cancelCrossfade()
         val target = positionMs.coerceAtLeast(0)
+        val now = SystemClock.elapsedRealtime()
         lastSeekTargetMs = target
-        lastSeekAtElapsedMs = SystemClock.elapsedRealtime()
+        lastSeekAtElapsedMs = now
+        playheadPosMs = target
+        playheadWallMs = now
         exclusiveUsbOutput.noteSeek(target * 1_000L)
         player.seekTo(target)
         _state.update { it.copy(positionMs = target) }
@@ -1717,15 +1720,15 @@ class MusicPlayer @Inject constructor(
 
     private fun exclusiveAwarePositionMs(fallbackMs: Long): Long {
         if (!exclusiveUsbOutput.isActive()) return fallbackMs
-        val us = exclusiveUsbOutput.getCurrentPositionUs()
-        if (us == androidx.media3.exoplayer.audio.AudioSink.CURRENT_POSITION_NOT_SET) return fallbackMs
-        return (us / 1_000L).coerceAtLeast(0L)
+        return playheadPosMs.coerceAtLeast(0L)
     }
 
     /**
      * Seek bar clock. ExoPlayer's position stays at 0 in normal playback and
-     * at the end in bit-perfect playback, so the bar follows wall time while
-     * the track is actually playing, and a seek target when the user scrubs.
+     * at the end in bit-perfect playback (because AudioSink presentationTimeUs
+     * includes Media3's 1_000_000_000_000 us renderer offset), so the bar
+     * follows wall time while the track is actively streaming audio, and
+     * re-anchors at the seek target when the user scrubs.
      */
     private fun advancePlayhead(playing: Boolean): Long {
         val now = SystemClock.elapsedRealtime()
@@ -1738,6 +1741,9 @@ class MusicPlayer @Inject constructor(
             playheadWallMs = now
             playheadKey = key
             playheadMoving = playing
+            if (playing) {
+                lastSeekTargetMs = -1L
+            }
             return playheadPosMs
         }
         if (key != playheadKey) {
@@ -1753,7 +1759,8 @@ class MusicPlayer @Inject constructor(
                 playheadMoving = false
             }
             playheadWallMs = now
-            return playheadPosMs
+            val dur = _state.value.durationMs
+            return if (dur > 0L) playheadPosMs.coerceAtMost(dur) else playheadPosMs
         }
         if (!playheadMoving) {
             playheadWallMs = now
@@ -4755,18 +4762,23 @@ class MusicPlayer @Inject constructor(
             // transport controls until the new timeline is installed.
             return
         }
+        if (exclusiveUsbOutput.isActive()) {
+            exclusiveUsbOutput.setPaused(!player.playWhenReady)
+        }
         val sameTrack = current?.let { it.title == previous.current?.title && it.artist == previous.current?.artist } == true ||
             (current?.videoId != null && current.videoId == previous.current?.videoId)
-        val rawBuffering = player.playbackState == Player.STATE_BUFFERING ||
-            (player.playWhenReady && player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0)
+        val rawBuffering = player.playWhenReady && (
+            player.playbackState == Player.STATE_BUFFERING ||
+                (player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0)
+            )
         // Screen-off continuity: while the selected track is under explicit
         // lossless-first resolution, ExoPlayer reports not-playing (loader
         // blocked in runBlocking) and refresh() would downgrade the state —
         // releasing the service wake/wifi locks mid-resolve so a locked
         // screen stalls until unlock. Preserve the intended playing state.
         val rawPlaying = player.isPlaying
-        val isBuffering = rawBuffering || (selectionIsResolving && previous.isBuffering)
-        val isPlayingState = rawPlaying || (selectionIsResolving && previous.isPlaying)
+        val isBuffering = player.playWhenReady && (rawBuffering || (selectionIsResolving && previous.isBuffering))
+        val isPlayingState = rawPlaying || (player.playWhenReady && selectionIsResolving && previous.isPlaying)
         // Never zero out a known duration when ExoPlayer briefly reports
         // TIME_UNSET (buffering / container not parsed yet): that reset froze
         // the bar at 0:00 and disabled seeking until the next event.
