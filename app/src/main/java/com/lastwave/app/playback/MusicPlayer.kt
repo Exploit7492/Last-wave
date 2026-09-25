@@ -2176,6 +2176,7 @@ class MusicPlayer @Inject constructor(
                 usbExclusiveActive = exclusive,
                 exclusiveClockMatched = exclusive && exclusiveUsbOutput.isClockMatched(),
                 exclusiveHardwareVolume = hardwareVolume,
+                exclusiveFailureReason = exclusiveUsbOutput.lastFailureReason.takeIf { !exclusive },
             ),
         )
     }
