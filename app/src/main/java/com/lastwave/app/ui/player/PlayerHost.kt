@@ -341,7 +341,7 @@ class PlayerViewModel @Inject constructor(
                 player.chromeState.map { it.current }.distinctUntilChanged(),
                 settingsPreferences.settings.map { it.wordByWordLyrics }.distinctUntilChanged(),
             ) { track, wordByWord -> track to wordByWord }.collect { (track, wordByWord) ->
-                val key = track?.let { "${it.artist}|${it.title}|$wordByWord" }
+                val key = track?.let { "${it.videoId ?: ""}|${it.artist}|${it.title}|$wordByWord" }
                 if (key != currentTrackLyricsKey) {
                     currentTrackLyricsKey = key
                     if (track != null) {
@@ -392,8 +392,14 @@ class PlayerViewModel @Inject constructor(
 
                 val result = try {
                     lyricsRepository.getLyrics(
-                        track.title, track.artist, track.album, durationSeconds, forceRefresh,
+                        title = track.title,
+                        artist = track.artist,
+                        album = track.album,
+                        durationSeconds = durationSeconds
+                            ?: track.durationMs?.takeIf { it > 0 }?.let { (it / 1000).toInt() },
+                        forceRefresh = forceRefresh,
                         wordByWord = settingsPreferences.settings.first().wordByWordLyrics,
+                        videoId = track.videoId,
                         onPartialResult = { partial ->
                             withContext(Dispatchers.Main.immediate) {
                                 coroutineContext.ensureActive()
@@ -419,10 +425,18 @@ class PlayerViewModel @Inject constructor(
     private fun publishLyrics(result: LyricsResult) {
         when (result) {
             is LyricsResult.Success -> {
+                // Single funnel for everything the views draw: de-overlap the
+                // timeline once so word fill, line focus and auto-scroll all
+                // read the same edge-to-edge clock. Word-sync rows render
+                // word-by-word; rows without syllables fall back to
+                // line-by-line focus on the same clock.
+                val lines = if (result.isSynced && result.lines.isNotEmpty() && !result.isInstrumental) {
+                    com.lastwave.app.data.lyrics.LyricsRepository.normalizeLyricTiming(result.lines)
+                } else result.lines
                 _lyricsState.value = LyricsUiState.Success(
-                    lines = result.lines,
+                    lines = lines,
                     isSynced = result.isSynced,
-                    isWordSynced = result.isWordSynced,
+                    isWordSynced = result.isWordSynced || lines.any { it.hasSyllables },
                     plainLyrics = result.plainLyrics,
                     isInstrumental = result.isInstrumental,
                     source = result.source,
@@ -2317,10 +2331,8 @@ private fun FullPlayer(
                                         trackKey = track.videoId ?: "${track.artist}|${track.title}",
                                         wavyEnabled = wavySeekbarEnabled,
                                         onSeek = player::seekTo,
-                                        // Background is always a dark scrim: use the white
-                                        // overlay palette so time labels + waves stay
-                                        // readable in light mode too.
                                         isTranslucent = true,
+                                        fallbackDurationMs = track.durationMs ?: state.durationMs,
                                     )
                                     Spacer(Modifier.height(14.dp))
                                     MainControls(state, player, isTranslucent = true)
@@ -2466,13 +2478,15 @@ private fun SeekBar(
     wavyEnabled: Boolean = true,
     onSeek: (Long) -> Unit,
     isTranslucent: Boolean = false,
+    fallbackDurationMs: Long = 0L,
 ) {
     val progress by progressState.collectAsStateWithLifecycle()
+    val effectiveDurationMs = if (progress.durationMs > 0L) progress.durationMs else fallbackDurationMs.coerceAtLeast(0L)
 
     if (wavyEnabled) {
         WavySeekBar(
             positionMs = progress.positionMs,
-            durationMs = progress.durationMs,
+            durationMs = effectiveDurationMs,
             isPlaying = isPlaying,
             onSeek = onSeek,
             isTranslucent = isTranslucent,
@@ -2493,7 +2507,7 @@ private fun SeekBar(
         if (!frameworkDragging) dragFraction = null
     }
 
-    val boundedDurationMs = progress.durationMs.coerceAtLeast(0L)
+    val boundedDurationMs = effectiveDurationMs.coerceAtLeast(0L)
     val currentFraction = if (boundedDurationMs > 0L) {
         (progress.positionMs.toDouble() / boundedDurationMs.toDouble()).toFloat().coerceIn(0f, 1f)
     } else {
@@ -2685,15 +2699,28 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
             }
         }
         val pillShape = RoundedCornerShape(100)
+        // Single source of truth for "glass is actually refracting": the
+        // container helper returns Transparent only when setting + device
+        // capability + backdrop all hold. The old contentColor checked only
+        // the *setting*, so setting-ON with an inactive effect (incapable
+        // device, missing backdrop) rendered a white icon on the solid-white
+        // fallback below — the "whole white" play button. Gating content on
+        // the same active flag closes that mismatch for every path.
+        val isPillGlassActive = LocalLiquidGlass.current &&
+            isLiquidGlassBackdropSupported() &&
+            LocalLiquidGlassBackdrop.current != null
         LiquidGlassSurface(
             glassModifier = Modifier.liquidGlassChrome(pillShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls, interactionSource = playInteraction),
             onClick = player::togglePlayPause,
             interactionSource = playInteraction,
             shape = pillShape,
-            color = liquidGlassContainerColor(if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
-            contentColor = if (LocalLiquidGlass.current) {
+            // Fallback matches the sibling prev/next buttons (14% white veil,
+            // never solid white): on the full player's dark scrim the white
+            // icon stays readable with or without refraction.
+            color = liquidGlassContainerColor(if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
+            contentColor = if (isPillGlassActive) {
                 if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary
-            } else if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
+            } else if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onPrimary,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             modifier = Modifier
