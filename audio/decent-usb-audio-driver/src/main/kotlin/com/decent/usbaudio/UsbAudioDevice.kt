@@ -259,11 +259,44 @@ class UsbAudioDevice private constructor(private val context: Context) {
         connection = conn
         currentDevice = device
 
-        // Auto-detect Clock Source ID and best alt setting from USB descriptors
+        // Auto-detect Clock Source ID, best alt setting, and UAC version from USB descriptors
+        val uacVersion = parseUacVersion(conn)
         val clockSourceId = parseClockSourceId(conn)
-        val (bestAlt, bestBits) = parseBestAltSetting(conn)
+        val (bestAlt, bestBits) = parseBestAltSetting(conn, uacVersion)
+        val bestAltInterface = (0 until device.interfaceCount)
+            .map { device.getInterface(it) }
+            .firstOrNull {
+                it.interfaceClass == UsbConstants.USB_CLASS_AUDIO &&
+                    it.interfaceSubclass == 2 &&
+                    it.alternateSetting == bestAlt
+            }
+        val bestAltOut = bestAltInterface?.let { iface ->
+            (0 until iface.endpointCount).map { iface.getEndpoint(it) }
+                .firstOrNull {
+                    it.type == UsbConstants.USB_ENDPOINT_XFER_ISOC &&
+                        it.direction == UsbConstants.USB_DIR_OUT
+                }
+        }
+        val bestAltFeedback = bestAltInterface?.let { iface ->
+            (0 until iface.endpointCount).map { iface.getEndpoint(it) }
+                .firstOrNull {
+                    it.type == UsbConstants.USB_ENDPOINT_XFER_ISOC &&
+                        it.direction == UsbConstants.USB_DIR_IN
+                }
+        }
+        if (bestAltOut != null) {
+            endpointOut = bestAltOut.address
+            maxPacketSize = bestAltOut.maxPacketSize
+        }
+        if (bestAltFeedback != null) endpointFeedback = bestAltFeedback.address
+        val dataInterval = bestAltOut?.interval ?: 1
+        val feedbackPacketSize = bestAltFeedback?.maxPacketSize ?: 4
+        val feedbackInterval = bestAltFeedback?.interval ?: dataInterval
         Log.i(TAG, "Auto-detected: clockSourceId=0x${clockSourceId.toString(16)}, " +
-                "bestAlt=$bestAlt, bestBits=$bestBits")
+                "bestAlt=$bestAlt, bestBits=$bestBits, uacVersion=$uacVersion, " +
+                "epOut=0x${endpointOut.toString(16)}, maxPacket=$maxPacketSize, " +
+                "dataInterval=$dataInterval, epFb=0x${endpointFeedback.toString(16)}, " +
+                "fbPacket=$feedbackPacketSize, fbInterval=$feedbackInterval")
 
         val info = UsbAudioDeviceInfo(
                 connection = conn,
@@ -273,10 +306,14 @@ class UsbAudioDevice private constructor(private val context: Context) {
                 endpointOutAddress = endpointOut,
                 endpointFeedbackAddress = endpointFeedback,
                 maxPacketSize = maxPacketSize,
+                dataInterval = dataInterval,
+                feedbackPacketSize = feedbackPacketSize,
+                feedbackInterval = feedbackInterval,
                 altSettingCount = altSettingCount,
                 clockSourceId = clockSourceId,
                 bestAltSetting = bestAlt,
-                bestBitDepth = bestBits
+                bestBitDepth = bestBits,
+                uacVersion = uacVersion,
         )
         cachedDeviceInfo = info
         return info
@@ -366,7 +403,7 @@ class UsbAudioDevice private constructor(private val context: Context) {
     /** Parsed alt setting: (altNumber, bitResolution) */
     private var parsedAltSettings: List<Pair<Int, Int>> = emptyList()
 
-    private fun parseBestAltSetting(conn: UsbDeviceConnection): Pair<Int, Int> {
+    private fun parseBestAltSetting(conn: UsbDeviceConnection, uacVersion: Int): Pair<Int, Int> {
         val raw = conn.rawDescriptors ?: return Pair(1, 16)
         val altSettings = mutableListOf<Pair<Int, Int>>()
 
@@ -396,15 +433,25 @@ class UsbAudioDevice private constructor(private val context: Context) {
             if (inAudioStreaming && bDescriptorType == 0x24 && bLength >= 6) {
                 val bDescriptorSubtype = raw[i + 2].toInt() and 0xFF
                 if (bDescriptorSubtype == 0x02) {
-                    val bSubslotSize = raw[i + 4].toInt() and 0xFF
-                    val bBitResolution = raw[i + 5].toInt() and 0xFF
-                    Log.i(TAG, "parseBestAltSetting: alt=$currentAlt subslotSize=$bSubslotSize bitResolution=$bBitResolution")
+                    val bSubslotSize: Int
+                    val bBitResolution: Int
+                    if (uacVersion == 100) {
+                        // UAC 1.0: bSubframeSize is at offset 5, bBitResolution at offset 6
+                        bSubslotSize = if (bLength >= 7) raw[i + 5].toInt() and 0xFF else 2
+                        bBitResolution = if (bLength >= 7) raw[i + 6].toInt() and 0xFF else 16
+                    } else {
+                        // UAC 2.0/3.0: bSubslotSize is at offset 4, bBitResolution at offset 5
+                        bSubslotSize = raw[i + 4].toInt() and 0xFF
+                        bBitResolution = raw[i + 5].toInt() and 0xFF
+                    }
+                    val containerBits = bSubslotSize * 8
+                    Log.i(TAG, "parseBestAltSetting: alt=$currentAlt subslotSize=$bSubslotSize bitResolution=$bBitResolution containerBits=$containerBits")
 
                     if (currentAlt > 0) {
-                        altSettings.add(Pair(currentAlt, bBitResolution))
+                        altSettings.add(Pair(currentAlt, containerBits))
                     }
-                    if (bBitResolution > bestBits && currentAlt > 0) {
-                        bestBits = bBitResolution
+                    if (containerBits > bestBits && currentAlt > 0) {
+                        bestBits = containerBits
                         bestAlt = currentAlt
                     }
                 }
@@ -416,6 +463,63 @@ class UsbAudioDevice private constructor(private val context: Context) {
         parsedAltSettings = altSettings
         Log.i(TAG, "parseBestAltSetting: best alt=$bestAlt bits=$bestBits, all=$altSettings")
         return Pair(bestAlt, bestBits)
+    }
+
+    /**
+     * Parse the USB Audio Class version from the AudioControl interface header descriptor.
+     *
+     * Reads the `bcdADC` field (bytes 3–4 of the AC Header CS_INTERFACE descriptor,
+     * subtype 0x01) to distinguish UAC 1.0 (0x0100) from UAC 2.0 (0x0200).
+     *
+     * - UAC 1.0 → returns 100 (simple USB headsets, e.g. Apple EarPods USB-C)
+     * - UAC 2.0 → returns 200 (audiophile DACs with Clock Source entities)
+     * - Unknown  → returns 0
+     *
+     * This is used to gate UAC 2.0-only features (exclusive isochronous output,
+     * SET_CUR clock control) away from simple headsets that do not implement them.
+     */
+    fun parseUacVersion(conn: UsbDeviceConnection): Int {
+        val raw = conn.rawDescriptors ?: return 0
+        var i = 0
+        var inAudioControl = false
+
+        while (i + 1 < raw.size) {
+            val bLength = raw[i].toInt() and 0xFF
+            if (bLength < 2) break
+            if (i + bLength > raw.size) break
+
+            val bDescriptorType = raw[i + 1].toInt() and 0xFF
+
+            // Interface descriptor (type 0x04)
+            if (bDescriptorType == 0x04 && bLength >= 9) {
+                val bInterfaceClass    = raw[i + 5].toInt() and 0xFF
+                val bInterfaceSubClass = raw[i + 6].toInt() and 0xFF
+                inAudioControl = (bInterfaceClass == 1 && bInterfaceSubClass == 1)
+            }
+
+            // CS_INTERFACE (0x24) inside AudioControl — subtype 0x01 = AC Header
+            if (inAudioControl && bDescriptorType == 0x24 && bLength >= 5) {
+                val bDescriptorSubtype = raw[i + 2].toInt() and 0xFF
+                if (bDescriptorSubtype == 0x01) {
+                    // bcdADC: bytes at offset 3 (LSB) and 4 (MSB)
+                    val bcdLo = raw[i + 3].toInt() and 0xFF
+                    val bcdHi = raw[i + 4].toInt() and 0xFF
+                    val bcd = (bcdHi shl 8) or bcdLo
+                    val version = when (bcd) {
+                        0x0100 -> 100  // UAC 1.0
+                        0x0200 -> 200  // UAC 2.0
+                        0x0300 -> 300  // UAC 3.0 (rare)
+                        else   -> 0
+                    }
+                    Log.i(TAG, "parseUacVersion: bcdADC=0x${bcd.toString(16).padStart(4,'0')} -> UAC $version")
+                    return version
+                }
+            }
+
+            i += bLength
+        }
+        Log.w(TAG, "parseUacVersion: no AC Header descriptor found, returning 0")
+        return 0
     }
 
     /**
