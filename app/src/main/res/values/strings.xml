@@ -42,9 +42,9 @@
     <string name="settings_downloads_empty">No offline songs downloaded</string>
 
     <string name="settings_modules_title">Provider Modules</string>
-    <string name="settings_modules_sub">Extra sources queried alongside the backend</string>
+    <string name="settings_modules_sub">Extra sources queried alongside the addon</string>
     <string name="settings_modules_query_title">Query modules during playback</string>
-    <string name="settings_modules_query_sub">On • module hits play instantly when the backend misses</string>
+    <string name="settings_modules_query_sub">On • module hits play instantly when the addon misses</string>
     <string name="settings_modules_add">Add module</string>
     <string name="settings_modules_add_sub">Install an encrypted .lwp package</string>
     <string name="settings_modules_empty">No modules installed</string>

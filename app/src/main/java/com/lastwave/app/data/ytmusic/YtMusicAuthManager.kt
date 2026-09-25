@@ -94,6 +94,49 @@ class YtMusicAuthManager @Inject constructor(
      *  owned by whoever signed in previously. */
     suspend fun signOut() = preferences.clearConnection()
 
+    /**
+     * Attempts to read updated session cookies from Android's system CookieManager.
+     * If valid credentials are found and differ from the active connection,
+     * updates the connection in preferences automatically.
+     * Returns true if fresh cookies were found and saved.
+     */
+    suspend fun refreshCookiesFromCookieManager(): Boolean {
+        return try {
+            val cm = android.webkit.CookieManager.getInstance()
+            val musicCookies = cm.getCookie("https://music.youtube.com").orEmpty()
+            val ytCookies = cm.getCookie("https://www.youtube.com").orEmpty()
+            val combined = when {
+                musicCookies.isBlank() -> ytCookies
+                ytCookies.isBlank() -> musicCookies
+                else -> "$musicCookies; $ytCookies"
+            }
+            if (combined.isBlank()) return false
+            val cookies = parseCookieHeader(combined)
+            val hasSapisid = listOf(COOKIE_SAPISID_PRIMARY, "SAPISID", "APISID").any { cookies.containsKey(it) }
+            val hasLogin = cookies.containsKey("LOGIN_INFO")
+            if (!hasSapisid || !hasLogin) return false
+
+            val current = connection.value
+            if (current.isConnected && current.cookies == cookies) return false
+
+            preferences.saveConnection(
+                cookies = cookies,
+                accountName = current.accountName.ifBlank { "Google account" },
+                channelHandle = current.channelHandle,
+                photoUrl = current.photoUrl,
+                onBehalfOfUser = current.onBehalfOfUser,
+                authUserIndex = current.authUserIndex,
+                pageId = current.pageId,
+            )
+            Log.i(TAG, "Auto-refreshed YouTube Music session cookies from CookieManager")
+            true
+        } catch (e: Throwable) {
+            Log.w(TAG, "Could not auto-refresh cookies from CookieManager", e)
+            false
+        }
+    }
+
+
     private fun parseCookieHeader(raw: String): Map<String, String> =
         raw.split(';')
             .mapNotNull { pair ->

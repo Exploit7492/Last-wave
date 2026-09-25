@@ -153,8 +153,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
 
         val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         playbackWifiLock = wifiManager?.createWifiLock(
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) WifiManager.WIFI_MODE_FULL_LOW_LATENCY
-            else WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+            WifiManager.WIFI_MODE_FULL_HIGH_PERF,
             "LastWave:PlaybackWifiLock",
         )?.apply { setReferenceCounted(false) }
 

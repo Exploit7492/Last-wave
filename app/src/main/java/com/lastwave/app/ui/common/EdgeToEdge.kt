@@ -11,8 +11,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 
 import android.app.Activity
+import android.content.Context
 import android.content.ContextWrapper
+import android.graphics.RenderEffect
+import android.graphics.Shader
 import android.os.Build
+import android.view.View
 import android.view.ViewParent
 import android.view.Window
 import android.view.WindowManager
@@ -40,46 +44,102 @@ fun safeDrawingBottomPadding(): Dp =
 fun EdgeToEdgeDialogWindow() {
     val view = LocalView.current
     DisposableEffect(view) {
-        var current: ViewParent? = view.parent
-        var window: Window? = null
+        var dialogWindow: Window? = null
         var isDialog = false
+
+        var current: ViewParent? = view.parent
         while (current != null) {
             if (current is DialogWindowProvider) {
-                window = current.window
+                dialogWindow = current.window
                 isDialog = true
                 break
             }
+            // NOTE: android.app.Dialog extends neither Context nor ViewParent,
+            // so `is Dialog` checks are provably dead (compiler error) and a
+            // Dialog never appears in a view-parent chain either. Dialog
+            // windows are found via DialogWindowProvider above.
             current = current.parent
         }
-        if (window == null) {
-            var ctx = view.context
-            while (ctx is ContextWrapper) {
-                if (ctx is Activity) {
-                    window = ctx.window
+
+        var activity: Activity? = null
+        var actCtx: Context? = view.context
+        while (actCtx is ContextWrapper) {
+            if (actCtx is Activity) {
+                activity = actCtx
+                break
+            }
+            actCtx = actCtx.baseContext
+        }
+        if (activity == null) {
+            var rootCtx: Context? = view.rootView.context
+            while (rootCtx is ContextWrapper) {
+                if (rootCtx is Activity) {
+                    activity = rootCtx
                     break
                 }
-                ctx = ctx.baseContext
+                rootCtx = rootCtx.baseContext
             }
         }
-        window?.let { w ->
-            WindowCompat.setDecorFitsSystemWindows(w, false)
-            w.navigationBarColor = android.graphics.Color.TRANSPARENT
-            w.statusBarColor = android.graphics.Color.TRANSPARENT
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                w.isNavigationBarContrastEnforced = false
-                w.isStatusBarContrastEnforced = false
-            }
-            if (isDialog) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    w.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-                    val lp = w.attributes
-                    lp.setBlurBehindRadius(150)
-                    w.attributes = lp
-                    runCatching { w.setBackgroundBlurRadius(150) }
+
+        val actDecor = activity?.window?.decorView
+        if (dialogWindow == null && view.rootView != actDecor) {
+            isDialog = true
+        }
+
+        val targetWindow = dialogWindow ?: activity?.window
+        targetWindow?.let { w ->
+            runCatching {
+                WindowCompat.setDecorFitsSystemWindows(w, false)
+                w.navigationBarColor = android.graphics.Color.TRANSPARENT
+                w.statusBarColor = android.graphics.Color.TRANSPARENT
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    w.isNavigationBarContrastEnforced = false
+                    w.isStatusBarContrastEnforced = false
                 }
-                w.setDimAmount(0.18f)
+                if (isDialog) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        w.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                        val lp = w.attributes
+                        lp.setBlurBehindRadius(120)
+                        w.attributes = lp
+                        runCatching { w.setBackgroundBlurRadius(120) }
+                    }
+                    w.setDimAmount(0.28f)
+                }
             }
         }
-        onDispose {}
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val lp = view.rootView.layoutParams as? WindowManager.LayoutParams
+            if (lp != null && view.rootView != actDecor) {
+                runCatching {
+                    lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
+                    lp.setBlurBehindRadius(120)
+                    val wm = view.context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+                    wm?.updateViewLayout(view.rootView, lp)
+                }
+            }
+        }
+
+        var blurredView: View? = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && activity != null) {
+            val bgView = activity.findViewById<View>(android.R.id.content) ?: actDecor
+            if (bgView != null && bgView != view.rootView) {
+                runCatching {
+                    bgView.setRenderEffect(
+                        RenderEffect.createBlurEffect(32f, 32f, Shader.TileMode.CLAMP)
+                    )
+                    blurredView = bgView
+                }
+            }
+        }
+
+        onDispose {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                runCatching {
+                    blurredView?.setRenderEffect(null)
+                }
+            }
+        }
     }
 }

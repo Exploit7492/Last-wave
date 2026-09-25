@@ -63,7 +63,7 @@ android {
         versionCode = 20
         versionName = "4.2.0"
 
-        // All backend secrets (URL, API key, module key) live strictly in native .so via
+        // Native secrets (addon client lock) live strictly in native .so via
         // SecretsBridge_generated.h (tools/generate_native_secrets.py).
         // No secret fields are exposed in DEX / BuildConfig.
 
@@ -307,9 +307,7 @@ tasks.withType<Test> {
 }
 
 // Generate native secrets header before CMake configures.
-// CI provides PROVIDER_MODULE_KEY / URL_SECRET / BASE_URL /
-// RELEASE_CERT_SHA256 via env/secrets. Public forks get empty header ->
-// native returns empty -> YouTube fallback, no leak.
+// CI provides ADDON_CLIENT_SECRET / RELEASE_CERT_SHA256 via env/secrets.
 val generateNativeSecrets by tasks.registering(Exec::class) {
     workingDir = rootProject.projectDir
     val py = org.gradle.internal.os.OperatingSystem.current().let {

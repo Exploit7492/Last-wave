@@ -804,12 +804,11 @@ class NativeProcessingAudioSink(
         runCatching { fallbackDelegate.pause() }
         runCatching { enhancedDelegate.flush() }
         runCatching { fallbackDelegate.flush() }
-        // Same-family fallback: when the DAC descriptor lacks the source
-        // rate, open the stream at the supported family rate and convert
-        // below (88.2 -> 44.1). Strictly below the source rate — never
-        // upsample, never touch natively-supported rates.
+        // Fallback target: when the DAC descriptor lacks the source rate,
+        // open the stream at the supported rate (e.g. 88.2 -> 44.1, 44.1 -> 48 kHz)
+        // and convert through native soxr so the DAC receives a supported clock rate.
         val fallbackTarget = exclusiveFallbackRateHz
-            ?.takeIf { it in 1 until format.sampleRate }
+            ?.takeIf { it > 0 && it != format.sampleRate }
         val started = runCatching { session.configure(format, fallbackTarget) }.getOrDefault(false)
         if (!started) {
             exclusiveStartFailed = true
@@ -962,7 +961,7 @@ class NativeProcessingAudioSink(
             // Failing closed here returns false and the render watchdog
             // owns the worst case — never feed unconverted bytes.
             val target = source?.let {
-                exclusiveFallbackRateHz?.takeIf { hz -> hz in 1 until it.sampleRate }
+                exclusiveFallbackRateHz?.takeIf { hz -> hz > 0 && hz != it.sampleRate }
             } ?: return false
             if (!setupExclusiveConverter(source, target)) return false
         }

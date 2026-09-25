@@ -47,6 +47,7 @@ class ExclusiveUsbOutput @Inject constructor(
     @Volatile private var configuredRateHz = 0
     @Volatile private var listeningGain = 1f
     @Volatile private var softwareGainValue = 1f
+    @Volatile private var lastHardwareRate = 0
 
     private val usbAudio = UsbAudioDevice.getInstance(appContext)
     private var stream: UsbAudioStream? = null
@@ -132,6 +133,8 @@ class ExclusiveUsbOutput @Inject constructor(
     fun softwareGain(): Float = if (!active || hardwareVolume) 1f else softwareGainValue
 
     fun currentRateHz(): Int = if (active) configuredRateHz else 0
+
+    fun lastHardwareRateHz(): Int = lastHardwareRate
 
     fun framesWritten(): Long = stream?.framesWritten ?: 0L
 
@@ -233,6 +236,7 @@ class ExclusiveUsbOutput @Inject constructor(
                     if (rateOverrideHz != null) 24 else sourceBits,
                     floatSource,
                     if (rateOverrideHz != null) C.ENCODING_PCM_FLOAT else format.pcmEncoding,
+                    rateOverrideHz,
                 )
             }.onFailure { error ->
                 Log.w(TAG, "Exclusive USB configure failed", error)
@@ -406,6 +410,7 @@ class ExclusiveUsbOutput @Inject constructor(
         sourceBits: Int,
         floatSource: Boolean,
         pcmEncoding: Int,
+        rateOverrideHz: Int? = null,
     ): Boolean {
         val manager = appContext.getSystemService(Context.USB_SERVICE) as UsbManager
         val usbDevice = manager.deviceList.values.firstOrNull { dev ->
@@ -437,8 +442,11 @@ class ExclusiveUsbOutput @Inject constructor(
         val info = usbAudio.openDevice(usbDevice) ?: return failLocked("openDevice failed")
 
         val (alt, wireBits) = usbAudio.findAltSettingForBitDepth(bits)
-        usbAudio.setSampleRate(sampleRate)
+        val rateSetBefore = usbAudio.setSampleRate(sampleRate)
         if (!usbAudio.setAltSetting(alt)) return failLocked("setAltSetting $alt failed")
+        if (!rateSetBefore || usbAudio.readSampleRate() != sampleRate) {
+            usbAudio.setSampleRate(sampleRate)
+        }
         val selected = (0 until usbDevice.interfaceCount)
             .map { usbDevice.getInterface(it) }
             .firstOrNull {
@@ -497,7 +505,12 @@ class ExclusiveUsbOutput @Inject constructor(
         startMediaTimeUs = 0L
         mediaTimeBaseFrames = 0L
         val reported = usbAudio.readSampleRate()
-        clockMatched = reported == sampleRate
+        if (reported > 0) {
+            lastHardwareRate = reported
+            clockMatched = reported == sampleRate
+        } else {
+            clockMatched = rateSetBefore || rateOverrideHz != null
+        }
         clockRechecked = true
         val controlId = (0 until usbDevice.interfaceCount)
             .map { usbDevice.getInterface(it) }
@@ -530,7 +543,10 @@ class ExclusiveUsbOutput @Inject constructor(
     private fun recheckClockLocked() {
         if (clockRechecked) return
         val reported = usbAudio.readSampleRate()
-        clockMatched = reported == configuredRateHz && reported > 0
+        if (reported > 0) {
+            lastHardwareRate = reported
+            clockMatched = reported == configuredRateHz
+        }
         clockRechecked = true
     }
 

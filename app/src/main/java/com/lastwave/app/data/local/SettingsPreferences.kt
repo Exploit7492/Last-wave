@@ -9,9 +9,14 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -53,10 +58,14 @@ enum class LyricsProvider(val id: String, val title: String, val subtitle: Strin
     LYRICS_PLUS("lyrics_plus", "LyricsPlus", "Word-synced lyrics first"),
     BETTER_LYRICS("better_lyrics", "BetterLyrics", "Word-synced lyrics first"),
     KUGOU("kugou", "Kugou", "KRC word-synced lyrics first"),
+    BINI_LYRICS("bini_lyrics", "Syllable-Sync", "Recording-matched syllable lyrics first"),
+    SIMP_MUSIC("simp_music", "Video-Match", "Matched on the playing video first"),
+    MUSIXMATCH("musixmatch", "Catalog", "Largest catalogue line-sync first"),
     LRCLIB("lrclib", "LRCLIB", "Line-synced community lyrics first");
 
     val isWordProvider: Boolean get() =
-        this == APPLE_MUSIC || this == LYRICS_PLUS || this == BETTER_LYRICS || this == KUGOU
+        this == APPLE_MUSIC || this == LYRICS_PLUS || this == BETTER_LYRICS || this == KUGOU ||
+            this == BINI_LYRICS || this == SIMP_MUSIC || this == MUSIXMATCH
 
     companion object {
         fun fromId(id: String?): LyricsProvider =
@@ -84,14 +93,14 @@ data class MiscSettings(
      *  directly from lossless CDN when a high-confidence match exists. Falls back to YouTube Music. */
     val preferLosslessStreaming: Boolean = true,
     /** When true, the player also queries installed provider modules in
-     *  parallel with the backend; a module hit plays instantly on miss. */
+     *  parallel with the addon; a module hit plays instantly on miss. */
     val preferProviderModules: Boolean = true,
     /** Preferred quality preset for lossless streaming (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k).
      *  If a track does not support the requested quality, the worker automatically selects the highest available. */
     val losslessQuality: Int = 27,
     /** Preferred quality preset for downloads (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k, -1: YouTube Music). */
     val downloadQuality: Int = 27,
-    /** When true, queries both Tidal and Qobuz in parallel for Dolby Atmos / max resolution audio. */
+    /** When true, queries for Dolby Atmos / max resolution audio. */
     val dolbyAtmosEnabled: Boolean = false,
     /** Optional studio-clarity curve. On by default; Bit-Perfect disables it. */
     val isStudioMasterClarityEnabled: Boolean = true,
@@ -134,6 +143,12 @@ data class MiscSettings(
     val useAlbumArtistForFolders: Boolean = true,
     /** When true, folder names use only the primary artist (strips feat./collaborators). */
     val primaryArtistOnly: Boolean = true,
+    /** User configured HTTP Addon URL (e.g. http://localhost:8787/a/<token>/). */
+    val addonUrl: String = "",
+    /** Display name discovered from the addon's manifest. */
+    val addonName: String = "",
+    /** When true, the addon is active for search, streaming, and downloads. */
+    val addonEnabled: Boolean = true,
     /** Ids of Home tab sections the user hid ([HomeSection.id]).
      *  Empty = everything visible. Unknown ids are dropped on read. */
     val hiddenHomeSections: Set<String> = emptySet(),
@@ -232,6 +247,9 @@ class SettingsPreferences @Inject constructor(
         val USE_ALBUM_ARTIST_FOLDERS = booleanPreferencesKey("lw_use_album_artist_folders")
         val PRIMARY_ARTIST_ONLY = booleanPreferencesKey("lw_primary_artist_only")
         val HIDDEN_HOME_SECTIONS = stringSetPreferencesKey("lw_hidden_home_sections")
+        val ADDON_URL = stringPreferencesKey("lw_addon_url")
+        val ADDON_NAME = stringPreferencesKey("lw_addon_name")
+        val ADDON_ENABLED = booleanPreferencesKey("lw_addon_enabled")
     }
 
     val settings: Flow<MiscSettings> = dataStore.data
@@ -267,8 +285,41 @@ class SettingsPreferences @Inject constructor(
                 hiddenHomeSections = p.readSafely(Keys.HIDDEN_HOME_SECTIONS)
                     ?.filter { id -> HomeSection.entries.any { it.id == id } }?.toSet()
                     ?: emptySet(),
+                addonUrl = p.readSafely(Keys.ADDON_URL)?.trim().orEmpty(),
+                addonName = p.readSafely(Keys.ADDON_NAME)?.trim().orEmpty(),
+                addonEnabled = p.readSafely(Keys.ADDON_ENABLED) ?: true,
             )
         }
+
+    val addonUrl: StateFlow<String?> = settings
+        .map { it.addonUrl.takeIf { s -> s.isNotBlank() } }
+        .stateIn(CoroutineScope(Dispatchers.IO + SupervisorJob()), SharingStarted.Eagerly, null)
+
+    val addonName: StateFlow<String?> = settings
+        .map { it.addonName.takeIf { s -> s.isNotBlank() } }
+        .stateIn(CoroutineScope(Dispatchers.IO + SupervisorJob()), SharingStarted.Eagerly, null)
+
+    val addonEnabled: StateFlow<Boolean> = settings
+        .map { it.addonEnabled }
+        .stateIn(CoroutineScope(Dispatchers.IO + SupervisorJob()), SharingStarted.Eagerly, true)
+
+    suspend fun setAddonUrl(url: String?) {
+        dataStore.edit {
+            if (url.isNullOrBlank()) it.remove(Keys.ADDON_URL)
+            else it[Keys.ADDON_URL] = url.trim()
+        }
+    }
+
+    suspend fun setAddonName(name: String?) {
+        dataStore.edit {
+            if (name.isNullOrBlank()) it.remove(Keys.ADDON_NAME)
+            else it[Keys.ADDON_NAME] = name.trim()
+        }
+    }
+
+    suspend fun setAddonEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.ADDON_ENABLED] = enabled }
+    }
 
     suspend fun setDynamicNowPlaying(enabled: Boolean) {
         dataStore.edit { it[Keys.DYNAMIC_NOW_PLAYING] = enabled }

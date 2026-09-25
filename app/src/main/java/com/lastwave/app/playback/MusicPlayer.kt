@@ -167,6 +167,7 @@ data class PlaybackChromeState(
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,
     val queueSize: Int = 0,
+    val shuffleEnabled: Boolean = false,
 )
 
 /** The small, frequently changing state consumed only by progress UI. */
@@ -314,6 +315,8 @@ class MusicPlayer @Inject constructor(
     private val playHistory = ArrayDeque<String>()
     /** Guards the near-end late-preload so it fires once per upcoming item. */
     private var latePreloadKey: String? = null
+    /** Last steady-state preload retry (elapsedRealtime); throttles the 30s ensure. */
+    private var lastPreloadRetryMs = 0L
     /**
      * Debounce for the natural-end auto-advance safety net: ExoPlayer can
      * emit STATE_ENDED repeatedly (plus the ticker watchdog) for the same
@@ -361,6 +364,7 @@ class MusicPlayer @Inject constructor(
                 isPlaying = it.isPlaying,
                 isBuffering = it.isBuffering,
                 queueSize = it.queue.size,
+                shuffleEnabled = it.shuffleEnabled,
             )
         }
         .distinctUntilChanged()
@@ -1104,9 +1108,6 @@ class MusicPlayer @Inject constructor(
                 )
                 setHandleAudioBecomingNoisy(true)
                 setWakeMode(C.WAKE_MODE_NETWORK)
-                trackSelectionParameters = trackSelectionParameters.buildUpon()
-                    .setConstrainAudioChannelCountToDeviceCapabilities(true)
-                    .build()
                 addListener(object : Player.Listener {
                     override fun onAudioSessionIdChanged(audioSessionId: Int) {
                         effects.attach(audioSessionId)
@@ -1224,6 +1225,28 @@ class MusicPlayer @Inject constructor(
                             if (updateCrossfade(pos)) {
                                 cadenceMs = 60L
                             } else {
+
+                    // Steady-state ensure: if the track-start preload failed or
+                    // was cancelled, don't wait for the 30s second-chance —
+                    // retry every 30s so the next track is resolved well
+                    // BEFORE the fade window (crossfade needs processed
+                    // bytes, not a last-second scramble). Stops firing once
+                    // the item is replaced; also tightens gapless natural
+                    // advances, not just fades.
+                    if (player.isPlaying && outgoingPlayer == null && preloadJob?.isActive != true) {
+                        val nowMs = SystemClock.elapsedRealtime()
+                        if (nowMs - lastPreloadRetryMs >= 30_000L) {
+                            val upcomingIndex = player.nextMediaItemIndex
+                            if (upcomingIndex != C.INDEX_UNSET &&
+                                upcomingIndex in 0 until player.mediaItemCount &&
+                                upcomingIndex != player.currentMediaItemIndex &&
+                                player.getMediaItemAt(upcomingIndex).localConfiguration?.uri?.scheme == "lastwave"
+                            ) {
+                                lastPreloadRetryMs = nowMs
+                                preloadNextQueueItem(player.currentMediaItemIndex)
+                            }
+                        }
+                    }
 
                     // Second-chance preload: the track-start preload may have
                     // failed, been skipped (paused then) or resolved too slowly.
@@ -1423,6 +1446,7 @@ class MusicPlayer @Inject constructor(
         unavailableMediaIds.clear()
         playHistory.clear()
         latePreloadKey = null
+        lastPreloadRetryMs = 0L
         radioQueueActive = startRadio
         startResolvedQueuePlayback(
             tracks = listOf(track),
@@ -1473,6 +1497,7 @@ class MusicPlayer @Inject constructor(
         // (Same-queue navigations via startResolvedQueuePlayback keep it.)
         playHistory.clear()
         latePreloadKey = null
+        lastPreloadRetryMs = 0L
 
         startResolvedQueuePlayback(
             tracks = tracks,
@@ -1620,6 +1645,7 @@ class MusicPlayer @Inject constructor(
                     if (ytFallback != null && generation == playRequestGeneration.get()) {
                         withContext(Dispatchers.Main.immediate) {
                             if (generation != playRequestGeneration.get()) return@withContext
+                            val isShuffle = startShuffled || (playerDelegate.isInitialized() && player.shuffleModeEnabled)
                             registerPreparedStream(ytFallback)
                             publishResolvedQuality(ytFallback)
                             cacheCurrentTrackStream(ytFallback)
@@ -2010,7 +2036,22 @@ class MusicPlayer @Inject constructor(
         val remainingMs = trueDurationMs - positionMs
         if (remainingMs <= 0L || remainingMs > fadeMs + 2_500L) return false
         val nextItem = player.getMediaItemAt(nextIndex)
-        if (nextItem.localConfiguration?.uri?.scheme == "lastwave") return false
+        if (nextItem.localConfiguration?.uri?.scheme == "lastwave") {
+            // The next track hasn't been resolved yet (slow or failed
+            // preload). Giving up here turns every such fade into a hard
+            // cut at track end — with slow lossless backends that is most
+            // fades. Kick an in-place resolve and retry on later ticks
+            // instead. Throttled: re-kicking every tick would restart the
+            // preload delay loop forever and resolve nothing.
+            if (preloadJob?.isActive != true) {
+                android.util.Log.i(
+                    "MusicPlayer",
+                    "Crossfade: next item still a placeholder, (re)kicking preload for index $nextIndex",
+                )
+                preloadNextTrack(nextIndex, nextItem.toPlayableTrack())
+            }
+            return false
+        }
         val stream = nextItem.localConfiguration?.customCacheKey?.let(preparedStreams::get)
         if (stream?.isExpired() == true) return false
 
@@ -2064,6 +2105,11 @@ class MusicPlayer @Inject constructor(
         standby.addListener(listener)
         standby.setAudioAttributes(standby.audioAttributes, true)
         standby.play()
+        android.util.Log.i(
+            "MusicPlayer",
+            "Crossfade: handing off '${outgoing.currentMediaItem?.mediaMetadata?.title}' -> " +
+                "'${standby.currentMediaItem?.mediaMetadata?.title}' (overlap ${overlapDurationMs}ms)",
+        )
         listener.onMediaItemTransition(standby.currentMediaItem, Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
         refresh(standby)
         return true

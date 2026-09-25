@@ -382,13 +382,11 @@ fun TrackContextMenuSheet(
         sheetState = sheetState,
         modifier = if (LocalLiquidGlass.current) Modifier.liquidGlassChrome(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), true) else Modifier,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        // Liquid-glass sheet: the window behind is already blurred by
-        // EdgeToEdgeDialogWindow (blur-behind, API 31+), so the solid panel
-        // just hides it. Go transparent + lighter scrim and every row card
-        // floats on its own over the blurred content. Glass off keeps the
-        // classic solid panel.
-        containerColor = if (LocalLiquidGlass.current) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerLow,
-        scrimColor = if (LocalLiquidGlass.current) Color.Black.copy(alpha = 0.12f) else BottomSheetDefaults.ScrimColor,
+        // The background behind is smoothly blurred by EdgeToEdgeDialogWindow.
+        // A translucent/transparent container lets the soft blur shine through
+        // while the individual action cards float with clean contrast on top.
+        containerColor = if (LocalLiquidGlass.current) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.65f),
+        scrimColor = Color.Black.copy(alpha = 0.32f),
         contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         dragHandle = {
             Surface(

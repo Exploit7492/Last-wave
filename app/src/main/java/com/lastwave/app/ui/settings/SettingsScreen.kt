@@ -955,7 +955,7 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                                 title = "Dolby Atmos / Spatial Audio",
                                 subtitle = if (misc.dolbyAtmosEnabled) {
-                                    "Direct Tidal multi-channel spatial audio (skips Qobuz)"
+                                    "Direct multi-channel spatial audio"
                                 } else {
                                     "Off \u2022 Streams standard stereo lossless audio"
                                 },
@@ -1674,7 +1674,7 @@ fun SettingsScreen(
 
     if (showQualityDialog) {
         val tiers = listOf(
-            Triple(28, "Dolby Atmos", "Spatial Immersive Audio • Tidal Master" to "ATMOS"),
+            Triple(28, "Dolby Atmos", "Spatial Immersive Audio • Master Audio" to "ATMOS"),
             Triple(27, "Max Quality", "Up to 24-bit / 192 kHz • Lossless Studio FLAC" to "24-BIT / 192k"),
             Triple(7, "Hi-Res Audio", "24-bit / 96 kHz • Lossless Studio FLAC" to "24-BIT / 96k"),
             Triple(6, "CD Lossless", "16-bit / 44.1 kHz • Lossless CD FLAC" to "16-BIT / 44.1k"),
@@ -1824,7 +1824,7 @@ fun SettingsScreen(
 
     if (showDownloadQualityDialog) {
         val downloadTiers = listOf(
-            Triple(28, "Dolby Atmos", "Spatial Immersive Audio • Tidal Master" to "ATMOS"),
+            Triple(28, "Dolby Atmos", "Spatial Immersive Audio • Master Audio" to "ATMOS"),
             Triple(27, "Max Quality", "Up to 24-bit / 192 kHz • Studio Master FLAC" to "24-BIT / 192k"),
             Triple(7, "Hi-Res Audio", "24-bit / 96 kHz • Studio FLAC" to "24-BIT / 96k"),
             Triple(6, "CD Lossless", "16-bit / 44.1 kHz • Bit-Exact CD FLAC" to "16-BIT / 44.1k"),

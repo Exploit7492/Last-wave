@@ -194,3 +194,88 @@ fun LyricLine.splitKaraokeToFit(
         )
     }
 }
+
+/**
+ * Gives every line-sync row (no syllables) an explicit duration reaching the
+ * next row's start, so downstream wrapping and focus math never divide an
+ * unknown span. Word-sync rows are untouched — their timing is exact.
+ */
+fun backfillLineSyncDurations(lines: List<LyricLine>): List<LyricLine> {
+    if (lines.isEmpty()) return lines
+    return lines.mapIndexed { i, line ->
+        if (line.durationMs > 0 || line.syllables.isNotEmpty()) line
+        else if (i < lines.lastIndex) {
+            val nextStart = lines[i + 1].timeMs
+            if (nextStart > line.timeMs) {
+                val gap = nextStart - line.timeMs
+                line.copy(durationMs = if (gap <= 6000L) gap else 4500L)
+            } else line
+        } else line.copy(durationMs = 4500L)
+    }
+}
+
+/**
+ * Balanced pre-split for line-sync rows, mirroring [splitKaraokeToFit]: an
+ * overlong row is partitioned into word-balanced chunks that each fit
+ * [maxWidthPx], so the karaoke canvas can never freeze a giant row
+ * off-screen. Spaceless (CJK) rows split by character.
+ *
+ * Timing stays contiguous: the row's own [timeMs, timeMs + durationMs] span
+ * is sliced proportionally to measured chunk width, so focus sweeps the
+ * chunks in order with no gaps. Returns `listOf(this)` untouched when the
+ * row already fits, has no splittable units, or carries no duration to
+ * slice (call [backfillLineSyncDurations] first).
+ */
+fun LyricLine.splitLineSyncToFit(
+    maxWidthPx: Float,
+    measureWidth: (String) -> Float,
+): List<LyricLine> {
+    if (hasSyllables || maxWidthPx <= 0f) return listOf(this)
+    if (text.isBlank()) return listOf(this)
+    val spanMs = durationMs
+    if (spanMs <= 0L) return listOf(this)
+    val spaced = text.contains(' ') || text.contains('\u00A0')
+    val units: List<String> = if (spaced) {
+        text.split(Regex("""\s+""")).filter { it.isNotEmpty() }
+    } else {
+        text.map { it.toString() }
+    }
+    if (units.size <= 1) return listOf(this)
+    // Trailing-space measuring mirrors the canvas: separators are
+    // display-only and the last unit of a row carries none.
+    val unitWidths = if (spaced) units.map { measureWidth("$it ") } else units.map(measureWidth)
+    if (unitWidths.sum() <= maxWidthPx) return listOf(this)
+    val rows = packBalanced(unitWidths, maxWidthPx)
+    if (rows.size <= 1) return listOf(this)
+
+    val endMs = timeMs + spanMs
+    val totalW = unitWidths.sum().takeIf { it > 0f }
+    val boundaries = mutableListOf(timeMs)
+    var accW = 0f
+    rows.dropLast(1).forEach { row ->
+        row.forEach { accW += unitWidths[it] }
+        val cut = if (totalW != null) {
+            timeMs + ((spanMs * (accW / totalW)).toLong()).coerceIn(0L, spanMs)
+        } else {
+            timeMs + (spanMs * (boundaries.size) / rows.size)
+        }
+        // Boundaries must advance strictly so no chunk is empty.
+        boundaries.add(maxOf(cut, boundaries.last() + 1))
+    }
+    boundaries.add(endMs)
+
+    return rows.mapIndexed { chunkIndex, row ->
+        val start = boundaries[chunkIndex].coerceAtMost(endMs)
+        val end = boundaries[chunkIndex + 1].coerceAtLeast(start)
+        LyricLine(
+            timeMs = start,
+            durationMs = (end - start).coerceAtLeast(0L),
+            text = if (spaced) {
+                row.joinToString(" ") { units[it] }
+            } else {
+                row.joinToString("") { units[it] }
+            },
+            transliteration = if (chunkIndex == 0) transliteration else null,
+        )
+    }
+}
