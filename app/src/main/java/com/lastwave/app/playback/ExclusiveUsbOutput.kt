@@ -124,6 +124,8 @@ class ExclusiveUsbOutput @Inject constructor(
 
     fun isClockMatched(): Boolean = active && clockMatched
 
+    fun isClockFallbackActive(): Boolean = active && currentFallbackNegotiated
+
     fun usesHardwareVolume(): Boolean = active && hardwareVolume
 
     /**
@@ -135,6 +137,40 @@ class ExclusiveUsbOutput @Inject constructor(
     fun currentRateHz(): Int = if (active) configuredRateHz else 0
 
     fun lastHardwareRateHz(): Int = lastHardwareRate
+
+    fun supportedHardwareRatesHz(): List<Int> = usbAudio.querySupportedSampleRates()
+
+    private fun pickPlayableHardwareRate(sourceHz: Int, supportedHz: List<Int>): Int? {
+        val supported = supportedHz.filter { it > 0 }.toSet()
+        if (supported.isEmpty()) return null
+        if (sourceHz in supported) return sourceHz
+        // When a DAC lacks a high-rate 44.1 kHz crystal (88.2 / 176.4 / 352.8 / 705.6 kHz),
+        // prefer its native 48 kHz-family hardware crystal (96 / 192 / 384 / 48 kHz) where
+        // USB High-Speed 125us microframes have exact integer frame counts (12 / 24 / 48 / 6).
+        if (sourceHz > 44100 && sourceHz % 44100 == 0) {
+            val family48 = supported.filter { it % 48000 == 0 }
+            if (family48.isNotEmpty()) {
+                val hiRes48 = family48.filter { it >= sourceHz }.minOrNull()
+                    ?: family48.maxOrNull()
+                if (hiRes48 != null) return hiRes48
+            }
+        }
+        // 1. Highest supported integer divisor in the same clock family (e.g. 192 -> 96 -> 48 kHz)
+        val divisors = supported.filter { it < sourceHz && sourceHz % it == 0 }
+        divisors.maxOrNull()?.let { return it }
+        // 2. Lowest supported integer multiple in the same clock family (e.g. 44.1 -> 88.2 kHz)
+        val multiples = supported.filter { it > sourceHz && it % sourceHz == 0 }
+        multiples.minOrNull()?.let { return it }
+        // 3. Same clock family (44.1k vs 48k), closest to source
+        val is441 = sourceHz % 44100 == 0
+        val is48 = sourceHz % 48000 == 0
+        val sameFamily = supported.filter { (is441 && it % 44100 == 0) || (is48 && it % 48000 == 0) }
+        sameFamily.minByOrNull { kotlin.math.abs(it - sourceHz) }?.let { return it }
+        // 4. Highest high-res rate <= sourceHz (e.g. 96 kHz or 48 kHz)
+        val belowOrEqual = supported.filter { it <= sourceHz }
+        belowOrEqual.maxOrNull()?.let { return it }
+        return supported.minByOrNull { kotlin.math.abs(it - sourceHz) }
+    }
 
     fun framesWritten(): Long = stream?.framesWritten ?: 0L
 
@@ -189,8 +225,6 @@ class ExclusiveUsbOutput @Inject constructor(
 
     fun syncListeningGain() {
         val stream = readStreamMusicGain() ?: return
-        if (ignoreStreamMusicMax && stream >= 0.999f) return
-        if (stream < 0.999f) ignoreStreamMusicMax = false
         val next = stream
         if (lastAppliedCombined.isFinite() &&
             kotlin.math.abs(next - listeningGain) < 1e-4f
@@ -212,7 +246,11 @@ class ExclusiveUsbOutput @Inject constructor(
      * native source-rate behavior. The clock check below compares against
      * the actually-requested rate either way.
      */
-    fun configure(format: Format, rateOverrideHz: Int? = null): Boolean {
+    fun configure(
+        format: Format,
+        rateOverrideHz: Int? = null,
+        bitDepthHint: Int? = null,
+    ): Boolean {
         if (!wanted) return false
         if (format.sampleMimeType != MimeTypes.AUDIO_RAW ||
             format.sampleRate <= 0 ||
@@ -224,6 +262,12 @@ class ExclusiveUsbOutput @Inject constructor(
         val floatSource = format.pcmEncoding == C.ENCODING_PCM_FLOAT || rateOverrideHz != null
         val sourceBits = sourceBitDepth(format.pcmEncoding)
         if (!floatSource && sourceBits == 0) return false
+        val resolvedBits = when {
+            sourceBits > 0 -> sourceBits
+            bitDepthHint != null && bitDepthHint > 0 -> bitDepthHint
+            rateOverrideHz != null -> 24
+            else -> 16
+        }
         synchronized(lock) {
             if (!wanted) return false
             return runCatching {
@@ -233,7 +277,7 @@ class ExclusiveUsbOutput @Inject constructor(
                 configureLocked(
                     targetRate,
                     format.channelCount,
-                    if (rateOverrideHz != null) 24 else sourceBits,
+                    resolvedBits,
                     floatSource,
                     if (rateOverrideHz != null) C.ENCODING_PCM_FLOAT else format.pcmEncoding,
                     rateOverrideHz,
@@ -245,7 +289,11 @@ class ExclusiveUsbOutput @Inject constructor(
         }
     }
 
-    fun write(buffer: ByteBuffer, presentationTimeUs: Long): Boolean {
+    fun write(
+        buffer: ByteBuffer,
+        presentationTimeUs: Long,
+        isFloatBuffer: Boolean = useFloatWrite,
+    ): Boolean {
         if (!buffer.hasRemaining()) return true
         if (paused) return false
         val running = stream
@@ -264,36 +312,17 @@ class ExclusiveUsbOutput @Inject constructor(
             startMediaTimeNeedsInit = false
         }
         recheckClockLocked()
-        val chunk = if (useFloatWrite) {
+        val chunk = if (isFloatBuffer) {
             val floats = FloatArray(size / Float.SIZE_BYTES)
             buffer.order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer().get(floats)
             buffer.position(buffer.limit())
             QueuedPcm(floats, null, 0, size)
         } else {
-            val wireBits = activeWireBits
-            val sourceBits = sourceBitDepth(sourceEncoding)
-
-            if (sourceBits == 16 && wireBits == 24) {
-                // Upconvert 16-bit to 24-bit (zero-padded)
-                val frames = size / 2
-                val bytes = ByteArray(frames * 3)
-                buffer.order(ByteOrder.LITTLE_ENDIAN)
-                var destPos = 0
-                for (i in 0 until frames) {
-                    val sample = buffer.getShort()
-                    // 24-bit little endian: low byte 0, mid byte = low 16, high byte = high 16
-                    bytes[destPos++] = 0
-                    bytes[destPos++] = (sample.toInt() and 0xFF).toByte()
-                    bytes[destPos++] = ((sample.toInt() shr 8) and 0xFF).toByte()
-                }
-                QueuedPcm(null, bytes, RAW_PCM24, frames * 3)
-            } else {
-                val encoding = writeRawEncoding(sourceEncoding)
-                if (encoding < 0) return false
-                val bytes = ByteArray(size)
-                buffer.get(bytes)
-                QueuedPcm(null, bytes, encoding, size)
-            }
+            val encoding = writeRawEncoding(sourceEncoding)
+            if (encoding < 0) return false
+            val bytes = ByteArray(size)
+            buffer.get(bytes)
+            QueuedPcm(null, bytes, encoding, size)
         }
         synchronized(pcmLock) {
             if (paused || writerStop) return false
@@ -380,6 +409,7 @@ class ExclusiveUsbOutput @Inject constructor(
         }
         startMediaTimeNeedsInit = true
         startMediaTimeUs = 0L
+        currentFallbackNegotiated = false
         mediaTimeBaseFrames = stream?.framesWritten ?: 0L
     }
 
@@ -420,14 +450,16 @@ class ExclusiveUsbOutput @Inject constructor(
         } ?: return failLocked("no USB audio device")
         if (!manager.hasPermission(usbDevice)) return failLocked("USB permission missing")
 
-        val bits = if (floatSource || sourceBits == 0) 24 else sourceBits
+        val bits = if (sourceBits > 0) sourceBits else (if (floatSource) 24 else 16)
         val reuse = stream
         if (reuse != null &&
             reuse.isAlive &&
             configuredRateHz == sampleRate &&
             active &&
-            sourceEncoding == pcmEncoding
+            sourceEncoding == pcmEncoding &&
+            useFloatWrite == floatSource
         ) {
+            currentFallbackNegotiated = rateOverrideHz != null
             paused = false
             startMediaTimeNeedsInit = true
             mediaTimeBaseFrames = reuse.framesWritten
@@ -440,13 +472,78 @@ class ExclusiveUsbOutput @Inject constructor(
         usbAudio.closeDevice()
         connection = null
         val info = usbAudio.openDevice(usbDevice) ?: return failLocked("openDevice failed")
+        val hwRates = usbAudio.querySupportedSampleRates()
 
-        val (alt, wireBits) = usbAudio.findAltSettingForBitDepth(bits)
-        val rateSetBefore = usbAudio.setSampleRate(sampleRate)
-        if (!usbAudio.setAltSetting(alt)) return failLocked("setAltSetting $alt failed")
-        if (!rateSetBefore || usbAudio.readSampleRate() != sampleRate) {
-            usbAudio.setSampleRate(sampleRate)
+        var effectiveRate = sampleRate
+        var effectiveBits = bits
+        var effectiveFloatSource = floatSource
+        var effectiveEncoding = pcmEncoding
+        var autoNegotiatedFallback = rateOverrideHz != null
+
+        // If the USB Clock Source / Format descriptors explicitly report the
+        // DAC's supported rates and the requested rate (e.g. 88.2 / 176.4 / 352.8 kHz)
+        // is not in that hardware table, immediately select the best supported rate.
+        if (rateOverrideHz == null && hwRates.isNotEmpty() && effectiveRate !in hwRates) {
+            val fallback = pickPlayableHardwareRate(effectiveRate, hwRates)
+            if (fallback != null && fallback != effectiveRate) {
+                Log.i(
+                    TAG,
+                    "DAC hardware descriptor lacks ${effectiveRate}Hz (supports $hwRates); " +
+                        "switching exclusive clock to ${fallback}Hz for soxr resampling",
+                )
+                effectiveRate = fallback
+                effectiveBits = 24
+                effectiveFloatSource = true
+                effectiveEncoding = C.ENCODING_PCM_FLOAT
+                autoNegotiatedFallback = true
+            }
         }
+
+        var (alt, wireBits) = usbAudio.findAltSettingForBitDepth(effectiveBits)
+        var rateSetBefore = usbAudio.setSampleRate(effectiveRate)
+        if (!usbAudio.setAltSetting(alt)) return failLocked("setAltSetting $alt failed")
+        var reported = usbAudio.readSampleRate()
+        if (!rateSetBefore || (reported > 0 && reported != effectiveRate)) {
+            rateSetBefore = usbAudio.setSampleRate(effectiveRate)
+            reported = usbAudio.readSampleRate()
+        }
+
+        // If the DAC's internal clock still rejected or clamped the requested rate
+        // (e.g. reported 44.1 / 48 / 96 kHz when asked for 88.2 / 176.4 / 352.8 kHz),
+        // fall back to a rate the DAC's internal clock actually locks to.
+        if (reported > 0 && reported != effectiveRate) {
+            val candidates = (hwRates + reported).distinct()
+            val candidateRate = pickPlayableHardwareRate(sampleRate, candidates) ?: reported
+            Log.w(
+                TAG,
+                "DAC internal clock reported ${reported}Hz instead of ${effectiveRate}Hz; " +
+                    "negotiating fallback clock ${candidateRate}Hz",
+            )
+            val candidateSet = if (candidateRate != reported) {
+                usbAudio.setSampleRate(candidateRate)
+            } else {
+                true
+            }
+            val afterFallback = usbAudio.readSampleRate().takeIf { it > 0 } ?: candidateRate
+            effectiveRate = if (candidateSet && afterFallback == candidateRate) {
+                candidateRate
+            } else {
+                afterFallback
+            }
+            effectiveBits = 24
+            effectiveFloatSource = true
+            effectiveEncoding = C.ENCODING_PCM_FLOAT
+            autoNegotiatedFallback = true
+            val updatedAlt = usbAudio.findAltSettingForBitDepth(effectiveBits)
+            if (updatedAlt.first != alt) {
+                if (usbAudio.setAltSetting(updatedAlt.first)) {
+                    alt = updatedAlt.first
+                    wireBits = updatedAlt.second
+                }
+            }
+            reported = usbAudio.readSampleRate()
+        }
+
         val selected = (0 until usbDevice.interfaceCount)
             .map { usbDevice.getInterface(it) }
             .firstOrNull {
@@ -480,7 +577,7 @@ class ExclusiveUsbOutput @Inject constructor(
             info.interfaceId,
             selectedOut.address,
             selectedFeedback?.address ?: 0,
-            sampleRate,
+            effectiveRate,
             channelCount,
             wireBits,
             maxPacket,
@@ -494,22 +591,22 @@ class ExclusiveUsbOutput @Inject constructor(
         }
         connection = info.connection
         stream = created
-        sourceEncoding = pcmEncoding
+        sourceEncoding = effectiveEncoding
         activeWireBits = wireBits
-        useFloatWrite = floatSource
-        configuredRateHz = sampleRate
+        useFloatWrite = effectiveFloatSource
+        configuredRateHz = effectiveRate
+        currentFallbackNegotiated = autoNegotiatedFallback
         active = true
         lastFailureReason = null
         paused = false
         startMediaTimeNeedsInit = true
         startMediaTimeUs = 0L
         mediaTimeBaseFrames = 0L
-        val reported = usbAudio.readSampleRate()
         if (reported > 0) {
             lastHardwareRate = reported
-            clockMatched = reported == sampleRate
+            clockMatched = reported == effectiveRate && !autoNegotiatedFallback
         } else {
-            clockMatched = rateSetBefore || rateOverrideHz != null
+            clockMatched = rateSetBefore && !autoNegotiatedFallback
         }
         clockRechecked = true
         val controlId = (0 until usbDevice.interfaceCount)
@@ -540,12 +637,14 @@ class ExclusiveUsbOutput @Inject constructor(
         return true
     }
 
+    @Volatile private var currentFallbackNegotiated = false
+
     private fun recheckClockLocked() {
         if (clockRechecked) return
         val reported = usbAudio.readSampleRate()
         if (reported > 0) {
             lastHardwareRate = reported
-            clockMatched = reported == configuredRateHz
+            clockMatched = reported == configuredRateHz && !currentFallbackNegotiated
         }
         clockRechecked = true
     }
@@ -586,21 +685,9 @@ class ExclusiveUsbOutput @Inject constructor(
         }
     }
 
-    /**
-     * USB connect often reports STREAM_MUSIC at max while the DAC analog
-     * path is still 0 dB. Prefer the last non-max key level so Feature Unit
-     * SET_CUR matches what the user hears after the first volume press.
-     */
     private fun listeningGainForDac(): Float {
-        val stream = readStreamMusicGain() ?: listeningGain
-        if (stream >= 0.999f && lastNonMaxListeningGain.isFinite() &&
-            lastNonMaxListeningGain in 0.01f..0.999f
-        ) {
-            ignoreStreamMusicMax = true
-            return lastNonMaxListeningGain
-        }
         ignoreStreamMusicMax = false
-        return stream
+        return readStreamMusicGain() ?: listeningGain
     }
 
     private fun syncListeningGainLocked() {
@@ -707,6 +794,7 @@ class ExclusiveUsbOutput @Inject constructor(
         ignoreStreamMusicMax = false
         hardwareVolume = false
         clockMatched = false
+        currentFallbackNegotiated = false
         configuredRateHz = 0
         active = false
         softwareGainValue = 1f

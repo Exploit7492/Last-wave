@@ -609,6 +609,7 @@ class MusicPlayer @Inject constructor(
                     ?.let(preparedStreams::get)
                     ?.let { stream ->
                         publishResolvedQuality(stream)
+                        applyDacRoutingFor(dacRateFor(stream), stream.audioCodec)
                         if (!stream.isLossless && stream.audioCodec != "DOLBY ATMOS") {
                             scheduleQualityUpgrade(
                                 track = currentTrack,
@@ -617,6 +618,8 @@ class MusicPlayer @Inject constructor(
                                 currentStream = stream,
                             )
                         }
+                    } ?: run {
+                        applyDacRoutingFor(currentSourceRateHz())
                     }
                 if (outgoingPlayer == null) cancelCrossfade()
                 // Queue placeholders are intentionally non-playable until
@@ -941,6 +944,15 @@ class MusicPlayer @Inject constructor(
                     // to the next track (44.1 PCM written into a 96 kHz alt).
                     exclusiveUsb = if (handleAudioFocus) exclusiveUsbOutput else null,
                 ).also { sink ->
+                    sink.onConfiguredFormat = { rateHz, encoding, _ ->
+                        onDecodedPcmFormatConfigured(rateHz, encoding)
+                    }
+                    sink.bitDepthHintProvider = {
+                        val s = _state.value
+                        parseQualityFromCodec(s.audioCodec)?.substringBefore('/')?.toIntOrNull()
+                            ?: s.bitDepth
+                            ?: inferBitDepth(s)
+                    }
                     val isSpatial = isSpatialAudioCodec(_state.value.audioCodec)
                     sink.setBitPerfectRequested(!isSpatial && (bitPerfectEnabled || usbExclusivePrefEnabled))
                     sink.syncExclusiveUsb(handleAudioFocus && exclusiveUsbWanted())
@@ -1057,7 +1069,8 @@ class MusicPlayer @Inject constructor(
                             C.ENCODING_PCM_8BIT -> 8
                             C.ENCODING_PCM_16BIT -> 16
                             C.ENCODING_PCM_24BIT -> 24
-                            C.ENCODING_PCM_32BIT, C.ENCODING_PCM_FLOAT -> 32
+                            C.ENCODING_PCM_32BIT -> 32
+                            // Note: C.ENCODING_PCM_FLOAT is internal decoder float representation, NOT source bit depth
                             else -> null
                         }
                         _state.update { snapshot ->
@@ -1071,21 +1084,33 @@ class MusicPlayer @Inject constructor(
                                 val kHz = rateHz / 1000.0
                                 if (updated.samplingRateKHz != kHz) updated = updated.copy(samplingRateKHz = kHz)
                             }
-                            if (depth != null && (updated.bitDepth == null || depth > (updated.bitDepth ?: 0))) {
+                            if (depth != null && updated.bitDepth == null) {
                                 updated = updated.copy(bitDepth = depth)
                             } else if (updated.bitDepth == null && (updated.samplingRateKHz ?: 0.0) > 48.0) {
                                 updated = updated.copy(bitDepth = 24)
+                            } else if (updated.bitDepth == null && (detectedCodec == "FLAC" || isFlacLikeCodec(updated.audioCodec))) {
+                                updated = updated.copy(bitDepth = 16)
                             }
                             if (isSpatialAudioCodec(detectedCodec)) {
                                 updated = updated.copy(audioCodec = detectedCodec, isLossless = false)
                             } else if (!isSpatialAudioCodec(updated.audioCodec) && detectedCodec != null) {
+                                val currentIsExplicit = isExplicitQuality(updated.audioCodec, updated.bitDepth, updated.samplingRateKHz)
                                 val detectedBadge = when {
+                                    detectedCodec == "FLAC" && rateHz > 0 -> {
+                                        val d = updated.bitDepth ?: (if (rateHz > 48_000) 24 else 16)
+                                        "$d/${formatSampleRateKHz(rateHz / 1000.0)}kHz"
+                                    }
                                     detectedCodec == "FLAC" &&
                                         ((updated.bitDepth ?: 0) > 16 || rateHz > 48_000) -> "HI-RES FLAC"
                                     else -> detectedCodec
                                 }
+                                val finalCodec = if (currentIsExplicit && updated.audioCodec != "FLAC" && updated.audioCodec != "HI-RES FLAC" && updated.audioCodec != "LOSSLESS") {
+                                    updated.audioCodec
+                                } else {
+                                    detectedBadge
+                                }
                                 updated = updated.copy(
-                                    audioCodec = detectedBadge,
+                                    audioCodec = finalCodec,
                                     bitrateKbps = updated.bitrateKbps ?: bitrate ?: if (detectedCodec == "OPUS") 160 else null,
                                     isLossless = detectedCodec == "FLAC",
                                 )
@@ -1114,6 +1139,37 @@ class MusicPlayer @Inject constructor(
                     }
                 })
             }
+    }
+
+    private fun onDecodedPcmFormatConfigured(rateHz: Int, encoding: Int) {
+        if (rateHz <= 0) return
+        val depth = when (encoding) {
+            C.ENCODING_PCM_16BIT -> 16
+            C.ENCODING_PCM_24BIT -> 24
+            C.ENCODING_PCM_32BIT -> 32
+            else -> null
+        }
+        decodedSampleRateHz = rateHz
+        val rateKHz = rateHz / 1000.0
+        _state.update { current ->
+            val isSpatial = isSpatialAudioCodec(current.audioCodec)
+            if (isSpatial) return@update current
+            val effectiveDepth = current.bitDepth ?: depth ?: inferBitDepth(current) ?: (if (rateHz > 48000) 24 else 16)
+            val isFlac = isFlacLikeCodec(current.audioCodec) || current.isLossless
+            val hasExplicit = isExplicitQuality(current.audioCodec, current.bitDepth, current.samplingRateKHz)
+            val updatedCodec = if (isFlac && (!hasExplicit || current.audioCodec == "FLAC" || current.audioCodec == "HI-RES FLAC" || current.audioCodec == "LOSSLESS")) {
+                "$effectiveDepth/${formatSampleRateKHz(rateKHz)}kHz"
+            } else {
+                current.audioCodec
+            }
+            current.copy(
+                samplingRateKHz = rateKHz,
+                bitDepth = effectiveDepth,
+                audioCodec = updatedCodec,
+                isLossless = if (isFlac) true else current.isLossless,
+            )
+        }
+        updateBitPerfectState()
     }
 
     private val playerDelegate: Lazy<ExoPlayer> = lazy {
@@ -2287,11 +2343,17 @@ class MusicPlayer @Inject constructor(
         // native rate (or no DAC / not exclusive): today's behavior.
         // The signal path stays honest automatically — the resampler check
         // fails, so a converted track can never report gold.
-        val dacRates = if (dac != null && dac.sampleRatesHz.isNotEmpty()) {
-            dac.sampleRatesHz
-        } else {
-            val known = exclusiveUsbOutput.lastHardwareRateHz()
-            if (known > 0) listOf(known) else emptyList()
+        val usbRates = exclusiveUsbOutput.supportedHardwareRatesHz()
+        val platformRates = dac?.sampleRatesHz.orEmpty()
+        val dacRates = when {
+            usbRates.isNotEmpty() && platformRates.isNotEmpty() ->
+                usbRates.filter { it in platformRates }.ifEmpty { usbRates }
+            usbRates.isNotEmpty() -> usbRates
+            platformRates.isNotEmpty() -> platformRates
+            else -> {
+                val known = exclusiveUsbOutput.lastHardwareRateHz()
+                if (known > 0) listOf(known) else emptyList()
+            }
         }
         val fallbackHz = if (exclusiveWanted && dac != null) {
             selectExclusiveRateFallback(effectiveRateHz, dacRates)
@@ -2307,7 +2369,7 @@ class MusicPlayer @Inject constructor(
         audioSinks.forEach { sink ->
             runCatching { sink.setPreferredDevice(if (exclusive) null else device) }
             runCatching { sink.setOutputSampleRateOverride(if (isSpatial) null else effectiveRateHz) }
-            runCatching { sink.setExclusiveFallbackRateHz(fallbackHz) }
+            runCatching { sink.setExclusiveFallbackRateHz(fallbackHz, effectiveRateHz) }
         }
         android.util.Log.i(
             "MusicPlayer",
@@ -2384,6 +2446,10 @@ class MusicPlayer @Inject constructor(
         val exclusive = exclusiveUsbOutput.isActive() || audioSinks.any { sink ->
             runCatching { sink.isExclusiveUsbActive() }.getOrDefault(false)
         }
+        val isConverting = audioSinks.any { sink ->
+            runCatching { sink.isExclusiveConverting() }.getOrDefault(false)
+        } || exclusiveUsbOutput.isClockFallbackActive()
+        val clockFallback = exclusive && isConverting
         val exclusiveRate = exclusiveUsbOutput.currentRateHz()
         val appRateHz = if (exclusive && exclusiveRate > 0) {
             exclusiveRate
@@ -2394,7 +2460,10 @@ class MusicPlayer @Inject constructor(
         }
         val sourceRateHz = if (isSpatialAudioCodec(snapshot.audioCodec)) 48000
         else snapshot.samplingRateKHz?.times(1000.0)?.toInt()?.takeIf { it > 0 }
-            ?: appRateHz.takeIf { exclusive && it > 0 }
+            ?: (if (!clockFallback) appRateHz.takeIf { exclusive && it > 0 } else null)
+            ?: audioSinks.firstNotNullOfOrNull { sink ->
+                runCatching { sink.exclusiveSourceSampleRateHz() }.getOrNull()?.takeIf { it > 0 }
+            }
         val platformRateHz = runCatching { audioManager?.mixerRateHz() }.getOrNull() ?: 0
         val speed = if (initialized) {
             runCatching { player.playbackParameters.speed }.getOrDefault(snapshot.speed)
@@ -2435,8 +2504,8 @@ class MusicPlayer @Inject constructor(
         val sinkStale = !exclusive && audioSinks.any { sink ->
             runCatching { sink.isBitPerfectConfigStale() }.getOrDefault(false)
         }
-        val dspBypassActuallyActive =
-            exclusive || (bitPerfectEnabled && nativeBitPerfectApplied && sinkDirect && !sinkStale)
+        val dspBypassActuallyActive = !clockFallback &&
+            (exclusive || (bitPerfectEnabled && nativeBitPerfectApplied && sinkDirect && !sinkStale))
         val mixerBypassGranted = audioSinks.any {
             runCatching { it.isPlatformBitPerfectConfigured() }.getOrDefault(false)
         }
@@ -2455,7 +2524,10 @@ class MusicPlayer @Inject constructor(
             SignalPathInput(
                 sourceLabel = srcLabel,
                 sourceRateHz = sourceRateHz,
-                sourceBitDepth = snapshot.bitDepth?.takeIf { it > 0 },
+                sourceBitDepth = parseQualityFromCodec(srcLabel)?.substringBefore('/')?.toIntOrNull()
+                    ?: parseQualityFromCodec(snapshot.audioCodec)?.substringBefore('/')?.toIntOrNull()
+                    ?: snapshot.bitDepth?.takeIf { it > 0 }
+                    ?: inferBitDepth(snapshot),
                 isLossless = snapshot.isLossless,
                 appOutputRateHz = appRateHz,
                 platformMixerRateHz = platformRateHz,
@@ -2469,14 +2541,15 @@ class MusicPlayer @Inject constructor(
                 systemVolumeFixed = sysFixed || hardwareVolume,
                 dac = dac,
                 routedToDac = routedRequested,
-                routeVerified = exclusive && exclusiveUsbOutput.isClockMatched(),
+                routeVerified = exclusive && !clockFallback && exclusiveUsbOutput.isClockMatched(),
                 driftPpm = healthTracker.driftPpm,
                 glitchCount = healthTracker.glitchCount,
                 isPlaying = snapshot.isPlaying,
                 usbExclusiveActive = exclusive,
-                exclusiveClockMatched = exclusive && exclusiveUsbOutput.isClockMatched(),
+                exclusiveClockMatched = exclusive && !clockFallback && exclusiveUsbOutput.isClockMatched(),
                 exclusiveHardwareVolume = hardwareVolume,
                 exclusiveFailureReason = exclusiveUsbOutput.lastFailureReason.takeIf { !exclusive },
+                clockFallbackResampled = clockFallback,
             ),
         )
     }
@@ -4642,11 +4715,13 @@ class MusicPlayer @Inject constructor(
             else -> null
         }
         val badge = when {
-            manifestCodecBadge != null -> manifestCodecBadge
             stream.audioCodecOverride != null -> stream.audioCodecOverride
-            stream.formatId == LosslessMusicApi.QUALITY_DOLBY_ATMOS -> "DOLBY ATMOS"
+            stream.formatId == LosslessMusicApi.QUALITY_DOLBY_ATMOS ||
+                manifestCodecBadge == "DOLBY ATMOS" || manifestCodecBadge == "SPATIAL AUDIO" ->
+                manifestCodecBadge ?: "DOLBY ATMOS"
             stream.bitDepth > 0 && stream.samplingRate > 0.0 ->
                 "${stream.bitDepth}/${formatSampleRateKHz(stream.samplingRate)}kHz"
+            manifestCodecBadge != null -> manifestCodecBadge
             stream.bitDepth > 16 || stream.samplingRate > 48.0 -> "HI-RES FLAC"
             stream.formatId == LosslessMusicApi.QUALITY_MP3_320 -> "MP3 320k"
             stream.formatId == LosslessMusicApi.QUALITY_DATA_SAVER -> "HE-AAC"
@@ -5270,6 +5345,9 @@ class MusicPlayer @Inject constructor(
                     isLossless = isFlac,
                 )
             }
+            onMain {
+                applyDacRoutingFor(currentSourceRateHz())
+            }
             updateBitPerfectState()
         } catch (_: Exception) {
             val isFlac = url.endsWith(".flac", ignoreCase = true)
@@ -5280,6 +5358,9 @@ class MusicPlayer @Inject constructor(
                     samplingRateKHz = if (isFlac) 44.1 else null,
                     isLossless = isFlac,
                 )
+            }
+            onMain {
+                applyDacRoutingFor(currentSourceRateHz())
             }
             updateBitPerfectState()
         } finally {
@@ -5494,7 +5575,7 @@ class MusicPlayer @Inject constructor(
         updateSignalPath()
     }
 
-    private companion object {
+    companion object {
         /**
          * Fallback target when the DAC descriptor lacks the source rate.
          * Resamples to a clock rate supported by the DAC (including 48kHz, 96kHz, etc.)
@@ -5512,7 +5593,19 @@ class MusicPlayer @Inject constructor(
             val supported = supportedHz.filter { it > 0 }.toSet()
             if (supported.isEmpty() || src in supported) return null
 
-            // 1. Same-family integer divisor (e.g. 88.2 -> 44.1, 192 -> 96 or 48)
+            // When a DAC lacks a high-rate 44.1 kHz crystal (88.2 / 176.4 / 352.8 / 705.6 kHz),
+            // prefer its native 48 kHz-family hardware crystal (96 / 192 / 384 / 48 kHz) where
+            // USB High-Speed 125us microframes have exact integer frame counts (12 / 24 / 48 / 6).
+            if (src > 44100 && src % 44100 == 0) {
+                val family48 = supported.filter { it % 48000 == 0 }
+                if (family48.isNotEmpty()) {
+                    val hiRes48 = family48.filter { it >= src }.minOrNull()
+                        ?: family48.maxOrNull()
+                    if (hiRes48 != null) return hiRes48
+                }
+            }
+
+            // 1. Same-family integer divisor (e.g. 192 -> 96 or 48)
             val divisors = supported.filter { it < src && src % it == 0 }
             divisors.maxOrNull()?.let { return it }
 
