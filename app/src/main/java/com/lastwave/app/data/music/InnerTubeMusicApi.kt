@@ -1945,6 +1945,7 @@ class InnerTubeMusicApi @Inject constructor(
             val videoDetails = root.obj("videoDetails")
             var title = videoDetails?.string("title")
             var artist = videoDetails?.string("author")
+            val durationSec = videoDetails?.string("lengthSeconds")?.toIntOrNull()
             val thumbs = videoDetails?.obj("thumbnail")?.array("thumbnails")
             val artworkUrl = thumbs?.lastOrNull()?.let { (it as? JsonObject)?.string("url") }
 
@@ -1964,6 +1965,7 @@ class InnerTubeMusicApi @Inject constructor(
                     title = title,
                     artist = artist,
                     artworkUrl = artworkUrl ?: "https://i.ytimg.com/vi/$videoId/hqdefault.jpg",
+                    durationSeconds = durationSec,
                 )
             }
         } catch (_: Exception) {}
@@ -2781,12 +2783,20 @@ class InnerTubeMusicApi @Inject constructor(
         val best = validCandidates.asSequence()
             .filter { candidate ->
                 val titleMatch = maxOf(similarity(candidate.title, title), similarity(baseTitle(candidate.title), baseTitle(title))) >= 60
-                val artistMatch = cleanArtist.isBlank() || similarity(candidate.artist, cleanArtist) >= 35
+                val artistMatch = cleanArtist.isBlank() ||
+                    similarity(candidate.artist, cleanArtist) >= 35 ||
+                    normalize(candidate.artist).contains(normalize(cleanArtist)) ||
+                    normalize(candidate.title).contains(normalize(cleanArtist))
                 titleMatch && artistMatch
             }
             .maxByOrNull { candidate -> matchScore(candidate, title, cleanArtist) }
-            ?: validCandidates.maxByOrNull { candidate -> matchScore(candidate, title, cleanArtist) }
-            ?: validCandidates.firstOrNull()
+            ?: validCandidates.filter { candidate ->
+                cleanArtist.isBlank() ||
+                    similarity(candidate.artist, cleanArtist) >= 30 ||
+                    normalize(candidate.artist).contains(normalize(cleanArtist)) ||
+                    normalize(candidate.title).contains(normalize(cleanArtist))
+            }.maxByOrNull { candidate -> matchScore(candidate, title, cleanArtist) }
+            ?: if (cleanArtist.isBlank()) validCandidates.firstOrNull() else null
             ?: throw IOException("No reliable YouTube Music match found for $title by $artist")
         return best.also {
             if (matchCache.size > MAX_MATCH_CACHE_ENTRIES) matchCache.clear()

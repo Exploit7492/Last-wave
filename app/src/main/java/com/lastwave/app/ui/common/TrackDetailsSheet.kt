@@ -548,8 +548,22 @@ class TrackDetailsViewModel @Inject constructor(
         }
     }
 
-    fun downloadNow(title: String, artist: String, album: String?, artworkUrl: String?) {
-        downloadManager.downloadTrack(title, artist, album, artworkUrl)
+    fun downloadNow(
+        title: String,
+        artist: String,
+        album: String?,
+        artworkUrl: String?,
+        videoId: String? = null,
+        durationMs: Long? = null,
+    ) {
+        downloadManager.downloadTrack(
+            title = title,
+            artist = artist,
+            album = album,
+            artworkUrl = artworkUrl,
+            videoId = videoId,
+            durationMs = durationMs,
+        )
         _specs.value = _specs.value?.copy(isDownloading = true)
     }
 }
@@ -561,6 +575,8 @@ fun TrackDetailsSheet(
     artist: String,
     album: String? = null,
     artworkUrl: String? = null,
+    videoId: String? = null,
+    durationMs: Long? = null,
     onDismiss: () -> Unit,
     onPlayTrack: (() -> Unit)? = null,
     viewModel: TrackDetailsViewModel = hiltViewModel(),
@@ -692,7 +708,14 @@ fun TrackDetailsSheet(
 
                 FilledTonalButton(
                     onClick = {
-                        viewModel.downloadNow(title, artist, album, artworkUrl)
+                        viewModel.downloadNow(
+                            title = title,
+                            artist = artist,
+                            album = album,
+                            artworkUrl = artworkUrl,
+                            videoId = videoId,
+                            durationMs = durationMs ?: currentSpecs.durationMs,
+                        )
                     },
                     enabled = currentSpecs.downloadedEntity == null && !currentSpecs.isDownloading,
                     shape = CircleShape,

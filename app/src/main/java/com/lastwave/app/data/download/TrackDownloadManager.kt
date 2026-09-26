@@ -410,6 +410,8 @@ class TrackDownloadManager @Inject constructor(
         album: String? = null,
         artworkUrl: String? = null,
         year: String? = null,
+        videoId: String? = null,
+        durationMs: Long? = null,
     ) {
         val key = makeDownloadKey(title, artist)
         if (!activeKeys.add(key)) return
@@ -533,28 +535,37 @@ class TrackDownloadManager @Inject constructor(
                 var resolvedAlbum = safeAlbumInput?.takeIf { it.isNotBlank() }
                 var preloadedBestMatch: YouTubeMusicTrack? = null
 
-                if (resolvedArtworkUrl == null || resolvedAlbum == null) {
+                if (!videoId.isNullOrBlank()) {
+                    preloadedBestMatch = runCatching {
+                        innerTube.fetchSongDetails(videoId)
+                    }.getOrNull()
+                }
+
+                if (preloadedBestMatch == null && (resolvedArtworkUrl == null || resolvedAlbum == null)) {
                     preloadedBestMatch = runCatching {
                         innerTube.findBestMatch(effTitle, effArtistForLookup, prefetchStreams = false)
                     }.getOrNull()
-                    // Never trust a counter string coming back as artist/album.
-                    val cleanMatchArtist = preloadedBestMatch?.artist
-                        ?.takeUnless { ArtistHelper.isPlayCountOrStat(it) }
+                }
+
+                if (preloadedBestMatch != null) {
+                    val cleanMatchArtist = preloadedBestMatch.artist
+                        .takeUnless { ArtistHelper.isPlayCountOrStat(it) }
                     if (artistWasStat && cleanMatchArtist != null && cleanMatchArtist.isNotBlank()) {
                         safeArtist = cleanMatchArtist.trim()
                     }
                     if (resolvedArtworkUrl == null) {
-                        resolvedArtworkUrl = preloadedBestMatch?.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
+                        resolvedArtworkUrl = preloadedBestMatch.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
                     }
                     if (resolvedAlbum == null) {
-                        resolvedAlbum = preloadedBestMatch?.album?.trim()
-                            ?.takeUnless { ArtistHelper.isPlayCountOrStat(it) }
-                            ?.takeIf { it.isNotBlank() }
-                    } else {
-                        resolvedAlbum = resolvedAlbum?.trim()
+                        resolvedAlbum = preloadedBestMatch.album?.trim()
                             ?.takeUnless { ArtistHelper.isPlayCountOrStat(it) }
                             ?.takeIf { it.isNotBlank() }
                     }
+                }
+                if (resolvedAlbum != null) {
+                    resolvedAlbum = resolvedAlbum?.trim()
+                        ?.takeUnless { ArtistHelper.isPlayCountOrStat(it) }
+                        ?.takeIf { it.isNotBlank() }
                 }
                 // Final sanitized values for tagging, filenames, folders and DB.
                 // safeArtist may have been recovered above; effArtist was snapshotted
@@ -629,11 +640,13 @@ class TrackDownloadManager @Inject constructor(
 
                 if (!isYouTubeRequested) {
                     try {
+                        val expectedDurationSec = durationMs?.takeIf { it > 0 }?.let { (it / 1000L).toInt() }
+                            ?: preloadedBestMatch?.durationSeconds?.takeIf { it > 0 }
                         val losslessStream = runCatching {
                             losslessMusicApi.resolveStream(
                                 title = finalTitle,
                                 artist = finalArtist,
-                                expectedDurationSeconds = preloadedBestMatch?.durationSeconds?.takeIf { it > 0 },
+                                expectedDurationSeconds = expectedDurationSec,
                                 expectedAlbum = resolvedAlbum,
                                 preferredQuality = downloadQuality,
                                 isDownload = true,
@@ -918,16 +931,17 @@ class TrackDownloadManager @Inject constructor(
                             )
                         )
                         val lookupArtist = safeArtist?.trim()?.takeIf { it.isNotBlank() } ?: ""
-                        val bestMatch = preloadedBestMatch
-                            ?: innerTube.findBestMatch(finalTitle, lookupArtist, prefetchStreams = false)
-                        val videoId = bestMatch.videoId ?: throw IOException("No audio source found for $finalTitle")
+                        val targetVideoId = videoId?.takeIf { it.isNotBlank() }
+                            ?: preloadedBestMatch?.videoId
+                            ?: innerTube.findBestMatch(finalTitle, lookupArtist, prefetchStreams = false).videoId
+                        val actualVideoId = targetVideoId ?: throw IOException("No audio source found for $finalTitle")
                         if (resolvedArtworkUrl == null) {
-                            resolvedArtworkUrl = bestMatch.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
+                            resolvedArtworkUrl = preloadedBestMatch?.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
                         }
-                        if (resolvedAlbum == null) resolvedAlbum = bestMatch.album?.trim()
+                        if (resolvedAlbum == null) resolvedAlbum = preloadedBestMatch?.album?.trim()
                             ?.takeUnless { ArtistHelper.isPlayCountOrStat(it) }
                             ?.takeIf { it.isNotBlank() }
-                        val ytStream = innerTube.resolveDownloadStream(videoId)
+                        val ytStream = innerTube.resolveDownloadStream(actualVideoId)
                         resolvedUrl = ytStream.url
                         downloadHeaders = ytStream.requestHeaders
                         expectedContentLength = ytStream.contentLength

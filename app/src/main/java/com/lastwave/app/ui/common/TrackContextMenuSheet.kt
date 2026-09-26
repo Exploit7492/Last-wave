@@ -159,8 +159,22 @@ class DownloadMenuViewModel @Inject constructor(
         return TrackDownloadStatus.NOT_DOWNLOADED
     }
 
-    fun download(title: String, artist: String, album: String? = null, artworkUrl: String? = null) {
-        downloadManager.downloadTrack(title, artist, album, artworkUrl)
+    fun download(
+        title: String,
+        artist: String,
+        album: String? = null,
+        artworkUrl: String? = null,
+        videoId: String? = null,
+        durationMs: Long? = null,
+    ) {
+        downloadManager.downloadTrack(
+            title = title,
+            artist = artist,
+            album = album,
+            artworkUrl = artworkUrl,
+            videoId = videoId,
+            durationMs = durationMs,
+        )
     }
 }
 
@@ -318,6 +332,8 @@ fun TrackContextMenuSheet(
             artist = target.artist,
             album = playable.album,
             artworkUrl = playable.artworkUrl,
+            videoId = playable.videoId,
+            durationMs = playable.durationMs,
             onDismiss = {
                 showDetailsSheet = false
                 onDismiss()
@@ -488,7 +504,14 @@ fun TrackContextMenuSheet(
                             }
                             else -> {
                                 MenuActionRow(Icons.Filled.Download, downloadLabel, position = pos) {
-                                    downloadViewModel.download(t.name, t.artist, playable.album, playable.artworkUrl)
+                                    downloadViewModel.download(
+                                        title = t.name,
+                                        artist = t.artist,
+                                        album = playable.album,
+                                        artworkUrl = playable.artworkUrl,
+                                        videoId = playable.videoId,
+                                        durationMs = playable.durationMs,
+                                    )
                                     onDismiss()
                                 }
                             }
