@@ -2796,7 +2796,7 @@ class InnerTubeMusicApi @Inject constructor(
                     normalize(candidate.artist).contains(normalize(cleanArtist)) ||
                     normalize(candidate.title).contains(normalize(cleanArtist))
             }.maxByOrNull { candidate -> matchScore(candidate, title, cleanArtist) }
-            ?: if (cleanArtist.isBlank()) validCandidates.firstOrNull() else null
+            ?: validCandidates.firstOrNull().takeIf { cleanArtist.isBlank() }
             ?: throw IOException("No reliable YouTube Music match found for $title by $artist")
         return best.also {
             if (matchCache.size > MAX_MATCH_CACHE_ENTRIES) matchCache.clear()

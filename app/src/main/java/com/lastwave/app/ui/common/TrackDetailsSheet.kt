@@ -714,7 +714,8 @@ fun TrackDetailsSheet(
                             album = album,
                             artworkUrl = artworkUrl,
                             videoId = videoId,
-                            durationMs = durationMs ?: currentSpecs.durationMs,
+                            durationMs = durationMs
+                                ?: currentSpecs.downloadedEntity?.durationMs?.takeIf { it > 0L },
                         )
                     },
                     enabled = currentSpecs.downloadedEntity == null && !currentSpecs.isDownloading,
