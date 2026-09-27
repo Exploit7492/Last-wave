@@ -1,9 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- THE one now-playing widget layout. A single instance adapts to every
-     size purely by hiding rows (compact <280dp, standard 280–420dp,
-     expanded >420dp) — elements are cut at small sizes, never shrunk.
-     Framework views only: the launcher process inflates this. Empty +
-     content live in one file so initialLayout is always real content. -->
+<!-- Modern now-playing widget layout: responsive, polished, hardware-grade aesthetic. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
@@ -11,9 +7,12 @@
     android:background="@drawable/widget_background"
     android:gravity="center_vertical"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:paddingStart="14dp"
+    android:paddingTop="12dp"
+    android:paddingEnd="14dp"
+    android:paddingBottom="12dp">
 
-    <!-- Empty state: no session or no notification access -->
+    <!-- Empty state: no active session or media access needed -->
     <LinearLayout
         android:id="@+id/widget_empty_group"
         android:layout_width="match_parent"
@@ -24,15 +23,15 @@
 
         <ImageView
             android:id="@+id/widget_empty_icon"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:contentDescription="@null"
-            android:src="@drawable/ic_launcher_foreground" />
+            android:src="@drawable/widget_art_placeholder" />
 
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
+            android:layout_marginStart="14dp"
             android:layout_weight="1"
             android:orientation="vertical">
 
@@ -45,22 +44,23 @@
                 android:maxLines="1"
                 android:text="@string/widget_name"
                 android:textColor="@color/widget_on_surface"
-                android:textSize="14sp" />
+                android:textSize="15sp" />
 
             <TextView
                 android:id="@+id/widget_empty_sub"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="3dp"
                 android:ellipsize="end"
+                android:fontFamily="sans-serif"
                 android:maxLines="1"
                 android:text="@string/widget_description"
                 android:textColor="@color/widget_on_surface_variant"
-                android:textSize="11sp" />
+                android:textSize="12sp" />
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Player state -->
+    <!-- Active player state -->
     <LinearLayout
         android:id="@+id/widget_content_group"
         android:layout_width="match_parent"
@@ -74,22 +74,23 @@
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
+            <!-- Prominent Album Artwork with squircle shape -->
             <ImageView
                 android:id="@+id/widget_art"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
                 android:contentDescription="@null"
                 android:scaleType="centerCrop"
-                android:src="@drawable/ic_launcher_foreground" />
+                android:src="@drawable/widget_art_placeholder" />
 
-            <!-- 0dp + weight: this column only ever shrinks. Buttons can
-                 never be pushed out or overlapped, even at minResizeWidth. -->
+            <!-- Title & Artist Column -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="12dp"
-                android:layout_marginEnd="8dp"
+                android:layout_marginEnd="10dp"
                 android:layout_weight="1"
+                android:gravity="center_vertical"
                 android:orientation="vertical">
 
                 <TextView
@@ -101,12 +102,12 @@
                     android:maxLines="1"
                     android:text="Unknown track"
                     android:textColor="@color/widget_on_surface"
-                    android:textSize="17sp" />
+                    android:textSize="15sp" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
+                    android:layout_marginTop="3dp"
                     android:gravity="center_vertical"
                     android:orientation="horizontal">
 
@@ -116,18 +117,18 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:ellipsize="end"
-                        android:fontFamily="sans-serif-light"
+                        android:fontFamily="sans-serif"
                         android:maxLines="1"
                         android:text="Unknown artist"
                         android:textColor="@color/widget_on_surface_variant"
-                        android:textSize="13sp" />
+                        android:textSize="12.5sp" />
 
-                    <!-- Status: animated EQ bars + light label (expanded only) -->
+                    <!-- Live Equalizer Animation -->
                     <LinearLayout
                         android:id="@+id/widget_eq_group"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
+                        android:layout_marginStart="6dp"
                         android:gravity="center_vertical"
                         android:orientation="horizontal">
 
@@ -144,54 +145,64 @@
                             android:layout_height="wrap_content"
                             android:layout_marginStart="4dp"
                             android:fontFamily="sans-serif-light"
-                            android:letterSpacing="0.12"
+                            android:letterSpacing="0.08"
                             android:maxLines="1"
                             android:text="Paused"
                             android:textAllCaps="true"
                             android:textColor="@color/widget_on_surface_variant"
-                            android:textSize="10sp" />
+                            android:textSize="10sp"
+                            android:visibility="gone" />
                     </LinearLayout>
                 </LinearLayout>
             </LinearLayout>
 
-            <ImageButton
-                android:id="@+id/widget_prev"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:background="@drawable/widget_circle"
-                android:contentDescription="@string/desc_previous"
-                android:padding="8dp"
-                android:src="@drawable/ic_widget_skip_previous" />
+            <!-- Control Buttons -->
+            <LinearLayout
+                android:id="@+id/widget_controls_group"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
-            <!-- Hero action: clearly larger than prev/next. -->
-            <ImageButton
-                android:id="@+id/widget_play_pause"
-                android:layout_width="52dp"
-                android:layout_height="36dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/widget_play_pill"
-                android:contentDescription="@string/desc_play_pause"
-                android:padding="8dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_widget_play" />
+                <ImageButton
+                    android:id="@+id/widget_prev"
+                    android:layout_width="34dp"
+                    android:layout_height="34dp"
+                    android:background="@drawable/widget_circle"
+                    android:contentDescription="@string/desc_previous"
+                    android:padding="8dp"
+                    android:src="@drawable/ic_widget_skip_previous" />
 
-            <ImageButton
-                android:id="@+id/widget_next"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/widget_circle"
-                android:contentDescription="@string/desc_next"
-                android:padding="8dp"
-                android:src="@drawable/ic_widget_skip_next" />
+                <!-- Hero Action: Circular FAB with vibrant crimson gradient -->
+                <ImageButton
+                    android:id="@+id/widget_play_pause"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/widget_play_pill"
+                    android:contentDescription="@string/desc_play_pause"
+                    android:padding="11dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_widget_play" />
+
+                <ImageButton
+                    android:id="@+id/widget_next"
+                    android:layout_width="34dp"
+                    android:layout_height="34dp"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/widget_circle"
+                    android:contentDescription="@string/desc_next"
+                    android:padding="8dp"
+                    android:src="@drawable/ic_widget_skip_next" />
+            </LinearLayout>
         </LinearLayout>
 
-        <!-- Progress: thin accent line along the bottom edge (expanded only) -->
+        <!-- Progress: Sleek accent line along bottom -->
         <LinearLayout
             android:id="@+id/widget_progress_row"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="9dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
@@ -199,10 +210,10 @@
                 android:id="@+id/widget_progress"
                 style="?android:attr/progressBarStyleHorizontal"
                 android:layout_width="match_parent"
-                android:layout_height="3dp"
+                android:layout_height="3.5dp"
                 android:max="1000"
-                android:maxHeight="3dp"
-                android:minHeight="3dp"
+                android:maxHeight="3.5dp"
+                android:minHeight="3.5dp"
                 android:progress="0"
                 android:progressBackgroundTint="@color/widget_track"
                 android:progressTint="@color/widget_primary" />

@@ -9,6 +9,8 @@ import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
+import android.os.Build
+import android.util.SizeF
 import android.view.View
 import android.widget.RemoteViews
 import androidx.core.app.NotificationManagerCompat
@@ -17,22 +19,21 @@ import com.lastwave.app.R
 import java.io.File
 
 /**
- * Single-widget RemoteViews factory. One rule: this NEVER throws.
+ * Multi-size responsive RemoteViews factory. One rule: this NEVER throws.
  * Every decode / lookup is guarded and falls back to placeholders, so
  * onUpdate always pushes valid content.
  *
- * One layout ([R.layout.widget_now_playing]) serves every size. The
- * launcher's measured width picks the breakpoint and the binder only
- * toggles visibility — elements are cut at small sizes, never shrunk:
- * - Compact  (<280dp): art + title + play. Artist, prev/next, EQ status
- *   and progress are hidden entirely.
- * - Standard (280–420dp): + artist, prev/next. EQ status + progress hidden.
- * - Expanded (>420dp): everything, incl. animated EQ + progress bar.
+ * Provides dedicated layout archetypes for every slot ratio:
+ * - Compact horizontal (<220dp width, e.g. 2x1): art + title/artist + play FAB.
+ * - Standard horizontal (>=220dp width, <115dp height, e.g. 3x1, 4x1, 5x1): art + track + EQ + controls + bottom progress bar.
+ * - Square / tall (<250dp width, >=115dp height, e.g. 2x2, 3x2, 3x3): centered large art + info + progress + centered controls.
+ * - Expanded (>=250dp width, >=115dp height, e.g. 4x2, 5x2, 4x3): 88dp hero art + brand + title + artist + controls + progress.
+ *
+ * On Android 12+ (API 31+), responsive size-mapping delivers fluid resizing.
+ * On Android 10/11, options-based selection picks the best matching layout.
  */
 internal object WidgetViews {
 
-    private const val COMPACT_MAX_DP = 280
-    private const val STANDARD_MAX_DP = 420
     private const val PROGRESS_MAX = 1000
 
     private val eqFrames = intArrayOf(
@@ -64,6 +65,12 @@ internal object WidgetViews {
         options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
     }.getOrDefault(0)
 
+    /** Reads the launcher's measured height for this exact widget id. */
+    private fun minHeightDp(context: Context, appWidgetId: Int): Int = runCatching {
+        val options = AppWidgetManager.getInstance(context).getAppWidgetOptions(appWidgetId)
+        options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)
+    }.getOrDefault(0)
+
     fun build(
         context: Context,
         appWidgetId: Int,
@@ -71,8 +78,50 @@ internal object WidgetViews {
         progressOverride: Float? = null,
     ): RemoteViews {
         val resolved = resolve(context)
-        val views = RemoteViews(context.packageName, R.layout.widget_now_playing)
-        bind(context, views, resolved, appWidgetId, eqFrame, progressOverride)
+        val artBitmap = resolveArtBitmap(resolved.snapshot.artPath)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val sizeMap = mapOf(
+                SizeF(120f, 50f) to buildLayout(context, R.layout.widget_now_playing_compact, resolved, appWidgetId, eqFrame, progressOverride, artBitmap),
+                SizeF(220f, 50f) to buildLayout(context, R.layout.widget_now_playing, resolved, appWidgetId, eqFrame, progressOverride, artBitmap),
+                SizeF(120f, 115f) to buildLayout(context, R.layout.widget_now_playing_square, resolved, appWidgetId, eqFrame, progressOverride, artBitmap),
+                SizeF(250f, 115f) to buildLayout(context, R.layout.widget_now_playing_expanded, resolved, appWidgetId, eqFrame, progressOverride, artBitmap),
+            )
+            return RemoteViews(sizeMap)
+        }
+
+        // On Android 10/11 fallback using launcher options
+        val width = minWidthDp(context, appWidgetId)
+        val height = minHeightDp(context, appWidgetId)
+        val layoutId = when {
+            height >= 115 && width < 250 -> R.layout.widget_now_playing_square
+            height >= 115 && width >= 250 -> R.layout.widget_now_playing_expanded
+            width in 1 until 220 -> R.layout.widget_now_playing_compact
+            else -> R.layout.widget_now_playing
+        }
+        return buildLayout(context, layoutId, resolved, appWidgetId, eqFrame, progressOverride, artBitmap)
+    }
+
+    private fun buildLayout(
+        context: Context,
+        layoutId: Int,
+        resolved: Resolved,
+        appWidgetId: Int,
+        eqFrame: Int?,
+        progressOverride: Float?,
+        artBitmap: Bitmap?,
+    ): RemoteViews {
+        val views = RemoteViews(context.packageName, layoutId)
+        bind(
+            context = context,
+            views = views,
+            resolved = resolved,
+            appWidgetId = appWidgetId,
+            eqFrame = eqFrame,
+            progressOverride = progressOverride,
+            artBitmap = artBitmap,
+            isCompact = (layoutId == R.layout.widget_now_playing_compact),
+        )
         return views
     }
 
@@ -83,11 +132,14 @@ internal object WidgetViews {
         appWidgetId: Int,
         eqFrame: Int?,
         progressOverride: Float?,
+        artBitmap: Bitmap?,
+        isCompact: Boolean,
     ) {
         val snapshot = resolved.snapshot
         if (!resolved.usableSession) {
             views.setViewVisibility(R.id.widget_empty_group, View.VISIBLE)
             views.setViewVisibility(R.id.widget_content_group, View.GONE)
+            views.setImageViewResource(R.id.widget_empty_icon, R.drawable.widget_art_placeholder)
             if (resolved.hasAccess) {
                 views.setTextViewText(R.id.widget_empty_title, context.getString(R.string.widget_name))
                 views.setTextViewText(R.id.widget_empty_sub, "Start a song in any media app")
@@ -103,17 +155,17 @@ internal object WidgetViews {
         views.setViewVisibility(R.id.widget_empty_group, View.GONE)
         views.setViewVisibility(R.id.widget_content_group, View.VISIBLE)
 
-        // Breakpoint by measured width; unknown (0) degrades to standard —
-        // the safe middle that never clips and never hides essentials.
-        val width = minWidthDp(context, appWidgetId)
-        val compact = width in 1 until COMPACT_MAX_DP
-        val expanded = width > STANDARD_MAX_DP
-
-        views.setViewVisibility(R.id.widget_subtitle, if (compact) View.GONE else View.VISIBLE)
-        views.setViewVisibility(R.id.widget_prev, if (compact) View.GONE else View.VISIBLE)
-        views.setViewVisibility(R.id.widget_next, if (compact) View.GONE else View.VISIBLE)
-        views.setViewVisibility(R.id.widget_eq_group, if (expanded) View.VISIBLE else View.GONE)
-        views.setViewVisibility(R.id.widget_progress_row, if (expanded) View.VISIBLE else View.GONE)
+        if (isCompact) {
+            views.setViewVisibility(R.id.widget_prev, View.GONE)
+            views.setViewVisibility(R.id.widget_next, View.GONE)
+            views.setViewVisibility(R.id.widget_eq_group, View.GONE)
+            views.setViewVisibility(R.id.widget_progress_row, View.GONE)
+        } else {
+            views.setViewVisibility(R.id.widget_prev, View.VISIBLE)
+            views.setViewVisibility(R.id.widget_next, View.VISIBLE)
+            views.setViewVisibility(R.id.widget_eq_group, View.VISIBLE)
+            views.setViewVisibility(R.id.widget_progress_row, View.VISIBLE)
+        }
 
         views.setTextViewText(
             R.id.widget_title,
@@ -132,48 +184,32 @@ internal object WidgetViews {
             R.id.widget_play_pause,
             if (playing) R.drawable.ic_widget_pause else R.drawable.ic_widget_play,
         )
-        // Animated EQ while playing (ticker cycles frames); frozen first
-        // frame while paused. Neutral bars — the accent stays reserved for
-        // the play button + progress fill.
+
+        // Animated EQ while playing; frozen first frame while paused.
         runCatching {
             val frame = if (playing) eqFrames[(eqFrame ?: 0).mod(eqFrames.size)]
             else eqFrames[0]
             views.setImageViewResource(R.id.widget_eq_icon, frame)
         }
 
-        // Progress: live ticker override wins, else last persisted fraction.
+        // Live progress bar
         runCatching {
             val fraction = (progressOverride ?: snapshot.progress).coerceIn(0f, 1f)
             views.setProgressBar(R.id.widget_progress, PROGRESS_MAX, (fraction * PROGRESS_MAX).toInt(), false)
         }
 
-        // Prev/next vectors are drawn white (for the red pill); tint them to
-        // on-surface-variant so they read as light gray on either theme —
-        // never near-black-on-black.
+        // Prev/next vectors: tint to widget_icon_tint for crisp contrast on glass surfaces
         runCatching {
-            val tint = ContextCompat.getColor(context, R.color.widget_on_surface_variant)
+            val tint = ContextCompat.getColor(context, R.color.widget_icon_tint)
             views.setInt(R.id.widget_prev, "setColorFilter", tint)
             views.setInt(R.id.widget_next, "setColorFilter", tint)
         }
 
-        // Artwork: file cache written by WidgetUpdater (max 384px), finished
-        // with soft rounded corners (RemoteViews ImageViews can't clip, so
-        // the bitmap itself carries the radius). Any failure -> launcher
-        // placeholder, never a crash.
-        val artSet = runCatching {
-            val path = snapshot.artPath
-            val file = if (path.isNullOrBlank()) null else File(path)
-            if (file != null && file.exists()) {
-                BitmapFactory.decodeFile(file.absolutePath)?.let { decoded ->
-                    val art = roundedCorners(decoded, 0.24f)
-                    if (art !== decoded) runCatching { decoded.recycle() }
-                    views.setImageViewBitmap(R.id.widget_art, art)
-                    true
-                } ?: false
-            } else false
-        }.getOrDefault(false)
-        if (!artSet) {
-            runCatching { views.setImageViewResource(R.id.widget_art, R.drawable.ic_launcher_foreground) }
+        // Artwork: pre-decoded squircle bitmap or fallback
+        if (artBitmap != null && !artBitmap.isRecycled) {
+            views.setImageViewBitmap(R.id.widget_art, artBitmap)
+        } else {
+            views.setImageViewResource(R.id.widget_art, R.drawable.widget_art_placeholder)
         }
 
         views.setOnClickPendingIntent(R.id.widget_root, WidgetActions.openAppPending(context))
@@ -192,7 +228,21 @@ internal object WidgetViews {
     }
 
     /**
-     * Softens square album art into a rounded card. Pure bitmap math —
+     * Pre-decodes and rounds artwork once per push to minimize memory and IPC payload.
+     */
+    private fun resolveArtBitmap(path: String?): Bitmap? = runCatching {
+        if (path.isNullOrBlank()) return null
+        val file = File(path)
+        if (!file.exists()) return null
+        BitmapFactory.decodeFile(file.absolutePath)?.let { decoded ->
+            val art = roundedCorners(decoded, 0.22f)
+            if (art !== decoded) runCatching { decoded.recycle() }
+            art
+        }
+    }.getOrNull()
+
+    /**
+     * Softens square album art into a rounded squircle. Pure bitmap math —
      * safe to run in any process, including the widget bind path.
      */
     private fun roundedCorners(src: Bitmap, radiusFraction: Float): Bitmap = runCatching {
