@@ -1,3 +1,4 @@
+import androidx.compose.material.icons.filled.Download
 package com.lastwave.app.ui.home
 
 import androidx.compose.ui.graphics.graphicsLayer
@@ -558,8 +559,10 @@ private fun ProfileAvatar(avatarUrl: String?, modifier: Modifier = Modifier) {
                 )
             }
         }
+        }
     }
 }
+
 
 @Composable
 private fun LocalStatsBanner(

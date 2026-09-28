@@ -1565,6 +1565,9 @@ private fun AddToPlaylistDialog(
                             }
                         }
                     }
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
