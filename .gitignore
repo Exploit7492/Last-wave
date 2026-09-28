@@ -66,3 +66,9 @@ provider.json
 # Native generated secrets (CI only, never commit)
 app/src/main/cpp/SecretsBridge_generated.h
 
+
+# Addon service & credentials (never commit)
+lastwave-addon-service/
+*.zip
+credentials_backup*
+

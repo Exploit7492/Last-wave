@@ -2254,14 +2254,10 @@ class InnerTubeMusicApi @Inject constructor(
         jobs += launch(Dispatchers.IO) {
             try {
                 val config = configDeferred.await()
-                // Do NOT await signatureTimestampDeferred here: it goes
-                // through NewPipe's player-JS download and used to hold back
-                // every direct client for 10-20s on a cold cache. Only the
-                // web clients below actually need it, and they await it
-                // lazily inside their own job.
-                val poTokenResult = kotlinx.coroutines.withTimeoutOrNull(1_500L) { poTokenDeferred.await() }
-                val poToken = poTokenResult?.playerToken
-                val gvsPoToken = poTokenResult?.sessionToken?.takeIf { config.visitorData != null }
+                // Do NOT await signatureTimestampDeferred or poTokenDeferred here:
+                // only web/auth clients require them and they await them lazily inside
+                // their own job. Direct app/VR/TV clients (ANDROID_VR, VISIONOS, TVHTML5)
+                // run immediately without waiting for player-JS or BotGuard.
                 val availableClients = playerClients(config).filter { candidate ->
                     now >= (failedClientsUntil[clientFailureKey(videoId, candidate.key, authScope)] ?: 0L)
                 }
@@ -2278,14 +2274,16 @@ class InnerTubeMusicApi @Inject constructor(
 
                         clientJobs += launch(Dispatchers.IO) {
                             try {
-                                // Only web clients must present a signature
-                                // timestamp; app/TV clients play without one.
-                                // Awaiting it here keeps the NewPipe player-JS
-                                // fetch off the critical path of every client
-                                // that doesn't need it.
                                 val signatureTimestamp = if (client.needsSignatureTimestamp) {
                                     runCatching { signatureTimestampDeferred.await() }.getOrNull()
                                 } else null
+                                val poTokenResult = if (client.needsPoToken) {
+                                    runCatching {
+                                        kotlinx.coroutines.withTimeoutOrNull(2_500L) { poTokenDeferred.await() }
+                                    }.getOrNull()
+                                } else null
+                                val poToken = poTokenResult?.playerToken
+                                val gvsPoToken = poTokenResult?.sessionToken?.takeIf { config.visitorData != null }
                                 val stream = resolveDirectClientStream(
                                     videoId = videoId,
                                     client = client,
@@ -2823,7 +2821,9 @@ class InnerTubeMusicApi @Inject constructor(
      *  first playback's fast path can attach visitor data without an extra
      *  blocking fetch. Safe to call from a startup coroutine; never throws. */
     suspend fun preWarmPlayback() {
-        runCatching { getWebConfig() }
+        val config = runCatching { getWebConfig() }.getOrNull()
+        val visitor = config?.visitorData ?: FALLBACK_TOKEN_SESSION
+        runCatching { BotGuardTokenGenerator.preWarm(visitor) }
     }
 
     private suspend fun getWebConfig(): WebConfig {
@@ -3516,6 +3516,8 @@ class InnerTubeMusicApi @Inject constructor(
          *  request; app/TV clients resolve fine without one. */
         val needsSignatureTimestamp: Boolean
             get() = name == "WEB_REMIX" || name == "WEB_EMBEDDED_PLAYER" || name == "MWEB"
+        val needsPoToken: Boolean
+            get() = name == "WEB_REMIX" || name == "WEB_EMBEDDED_PLAYER" || name == "MWEB" || name == "ANDROID_MUSIC" || name == "ANDROID"
         val origin = if (name == "WEB_REMIX") YOUTUBE_MUSIC_ORIGIN else YOUTUBE_ORIGIN
         val referer = when (name) {
             "WEB_REMIX" -> "$YOUTUBE_MUSIC_ORIGIN/"
