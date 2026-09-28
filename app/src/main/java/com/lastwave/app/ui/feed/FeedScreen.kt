@@ -205,7 +205,7 @@ fun FeedScreen(
             ExpressiveHeader(
                 title = "Home",
                 actions = {
-                    HeaderActionIcon(androidx.compose.material.icons.filled.Download, "Downloads", onOpenDownloads)
+                    HeaderActionIcon(Icons.Filled.Download, "Downloads", onOpenDownloads)
                     HeaderActionIcon(Icons.Filled.Search, "Search", onOpenSearch)
                     HeaderActionIcon(Icons.Filled.Settings, "Settings", onOpenSettings)
                 },
