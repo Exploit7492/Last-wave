@@ -11,7 +11,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * A live, in-app, in-memory log of exactly what MediaScrobbleListenerService
+ * A live, in-app, in-memory log of exactly what the scrobbler
  * is doing — added after three separate rounds of blind hypothesis-fixes
  * (crash guarding, duration=0 fallback, MediaSession.Token identity) didn't
  * resolve a still-reported "never scrobbles" issue with no way to see WHY

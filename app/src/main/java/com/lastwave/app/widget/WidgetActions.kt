@@ -9,7 +9,6 @@ import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.provider.Settings
 import com.lastwave.app.MainActivity
-import com.lastwave.app.service.MediaScrobbleListenerService
 import kotlinx.coroutines.delay
 
 /**
@@ -83,25 +82,9 @@ object WidgetActions {
             val state = runCatching { it.playbackState?.state }.getOrNull()
             if (state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_BUFFERING) return it
         }
-        val resolved = runCatching {
-            val manager = context.getSystemService(MediaSessionManager::class.java) ?: return@runCatching null
-            val listener = ComponentName(context, MediaScrobbleListenerService::class.java)
-            manager.getActiveSessions(listener)
-                .filter { it.metadata != null }
-                .maxByOrNull { controllerRank(it.playbackState?.state) }
-                ?.also { ActiveMediaSessionHolder.controller = it }
-        }.getOrNull()
-        return resolved ?: held ?: ActiveMediaSessionHolder.ownToken?.let { token ->
+        return held ?: ActiveMediaSessionHolder.ownToken?.let { token ->
             runCatching { MediaController(context, token) }.getOrNull()
         }
-    }
-
-    private fun controllerRank(state: Int?): Int = when (state) {
-        PlaybackState.STATE_PLAYING -> 5
-        PlaybackState.STATE_BUFFERING, PlaybackState.STATE_CONNECTING -> 4
-        PlaybackState.STATE_PAUSED -> 3
-        PlaybackState.STATE_FAST_FORWARDING, PlaybackState.STATE_REWINDING -> 2
-        else -> 1
     }
 
     /**

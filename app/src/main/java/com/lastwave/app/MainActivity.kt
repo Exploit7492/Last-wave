@@ -171,18 +171,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     override fun onResume() {
         super.onResume()
         requestHighestSupportedRefreshRate()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            runCatching {
-                val hasAccess = androidx.core.app.NotificationManagerCompat
-                    .getEnabledListenerPackages(this)
-                    .contains(packageName)
-                if (hasAccess) {
-                    android.service.notification.NotificationListenerService.requestRebind(
-                        android.content.ComponentName(this, com.lastwave.app.service.MediaScrobbleListenerService::class.java),
-                    )
-                }
-            }
-        }
     }
 
     /**

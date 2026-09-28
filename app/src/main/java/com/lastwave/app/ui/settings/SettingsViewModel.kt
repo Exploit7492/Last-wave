@@ -782,11 +782,6 @@ class SettingsViewModel @Inject constructor(
         }.getOrNull() ?: "unknown"
         sb.appendLine("app=${context.packageName} version=$versionName ($versionCode)")
         sb.appendLine("device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} sdk=${android.os.Build.VERSION.SDK_INT}")
-        val hasNotificationAccess = runCatching {
-            androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(context)
-                .contains(context.packageName)
-        }.getOrDefault(false)
-        sb.appendLine("notificationListenerAccess=$hasNotificationAccess")
         val snapshot = runCatching { com.lastwave.app.widget.NowPlayingWidgetSnapshot.read(context) }.getOrNull()
         if (snapshot == null) {
             sb.appendLine("widgetSnapshot=<unreadable>")

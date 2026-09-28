@@ -28,7 +28,7 @@ private const val TICK_INTERVAL_MS = 600L
  * Single-widget publisher: plain SharedPreferences + AppWidgetManager.
  *
  * Same public API as before (publish / clear / setPlaying / sync /
- * refreshTheme) so MediaScrobbleListenerService, MusicPlaybackService,
+ * refreshTheme) so MusicPlaybackService,
  * MusicPlayer and LastWaveApplication keep compiling unchanged — but the
  * inside is dependency-free: no Glance, no Hilt, no theme repo.
  *

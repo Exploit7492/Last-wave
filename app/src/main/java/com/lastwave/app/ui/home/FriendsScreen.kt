@@ -39,7 +39,7 @@ private val FriendsContainerShape = androidx.compose.foundation.shape.RoundedCor
  * A real pushed screen now, not a Dialog/ModalBottomSheet — see the long
  * comment trail this replaced in HomeScreen.kt's old FriendsSheet for the
  * full history. Every other pushed screen in this app (Settings, Search,
- * Discover, Genres, ScrobblerApps) already renders correctly edge-to-edge
+ * Discover, Genres) already renders correctly edge-to-edge
  * using this exact Scaffold-less ExpressiveHeader + Column pattern, so
  * Friends now just follows the same proven structure instead of being a
  * one-off overlay fighting Compose's Dialog/BottomSheet sizing quirks.

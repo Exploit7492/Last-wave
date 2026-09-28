@@ -22,7 +22,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 
 /**
- * The two signed calls LastWave's own scrobbler (MediaScrobbleListenerService)
+ * The two signed calls LastWave's own scrobbler (MusicPlaybackService)
  * needs — both require a real session key (`sk`), which is only obtained if
  * the user opts into AuthRepository.obtainSessionKey.
  *

@@ -388,11 +388,6 @@ enum class SettingsTab(
         subtitle = "Account connection, Scrobbling sync & API credentials",
         icon = Icons.Filled.Album,
     ),
-    SCROBBLER(
-        title = "Notification Scrobbler",
-        subtitle = "Background scrobbler, Delay slider, App tracking",
-        icon = Icons.Filled.Group,
-    ),
     LIBRARY(
         title = "Library & Content",
         subtitle = "Home layout, Playlist imports, Downloads, Exclusions",
@@ -415,7 +410,6 @@ enum class SettingsTab(
 fun SettingsScreen(
     onBack: () -> Unit = {},
     onLoggedOut: () -> Unit = {},
-    onOpenChooseApps: () -> Unit = {},
     onOpenDownloads: () -> Unit = {},
     onOpenModules: () -> Unit = {},
     onOpenHomeSections: () -> Unit = {},
@@ -429,7 +423,6 @@ fun SettingsScreen(
     val avatarUrl by viewModel.avatarUrl.collectAsStateWithLifecycle()
     val theme by viewModel.theme.collectAsStateWithLifecycle()
     val misc by viewModel.misc.collectAsStateWithLifecycle()
-    val scrobbler by viewModel.scrobbler.collectAsStateWithLifecycle()
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val downloadCount by viewModel.downloadCount.collectAsStateWithLifecycle()
     val downloadTotalBytes by viewModel.downloadTotalBytes.collectAsStateWithLifecycle()
@@ -484,17 +477,6 @@ fun SettingsScreen(
 
     // Sends the user to Android's own Notification Listener access screen
     // — the one permission this feature needs that the app can never grant
-    // itself, only deep-link to. There's no reliable "is it already
-    // granted for THIS app" API pre-33 short of parsing a settings string,
-    // so this always opens the picker rather than guessing; picking
-    // LastWave again there if it's already on is harmless.
-    fun openNotificationAccessSettings() {
-        val opened = startActivitySafely(
-            context,
-            Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS),
-        ) || startActivitySafely(context, Intent(android.provider.Settings.ACTION_SETTINGS))
-        if (!opened) viewModel.showToast("Android Settings is unavailable on this ROM")
-    }
 
     // "*/*" rather than "application/json": many document providers (Drive,
     // Downloads, some file managers) report a .json file as
@@ -705,7 +687,7 @@ fun SettingsScreen(
                         item {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 SectionLabel("Playback & UI")
-                                SettingsGroup(rowCount = 4) { index, position ->
+                                SettingsGroup(rowCount = 3) { index, position ->
                                     when (index) {
                                         0 -> SettingsActionCard(
                                             icon = Icons.Filled.GraphicEq,
@@ -725,15 +707,6 @@ fun SettingsScreen(
                                             onClick = { activeTab = SettingsTab.APPEARANCE },
                                             position = position,
                                         )
-                                        2 -> SettingsActionCard(
-                                            icon = Icons.Filled.Group,
-                                            iconContainer = MaterialTheme.colorScheme.primaryContainer,
-                                            iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            title = "Notification Scrobbler",
-                                            subtitle = "Background scrobbler, Delay slider, App tracking",
-                                            onClick = { activeTab = SettingsTab.SCROBBLER },
-                                            position = position,
-                                        )
                                         else -> SettingsActionCard(
                                             icon = Icons.Filled.QueueMusic,
                                             iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -741,7 +714,7 @@ fun SettingsScreen(
                                             title = "Library & Content",
                                             subtitle = run {
                                                 val count = downloadCount
-                                                if (count > 0) "$count songs downloaded \u2022 Imports, Home layout" else "Home layout, Playlist imports, Downloads, Exclusions"
+                                                if (count > 0) "$count songs downloaded • Imports, Home layout" else "Home layout, Playlist imports, Downloads, Exclusions"
                                             },
                                             onClick = { activeTab = SettingsTab.LIBRARY },
                                             position = position,
@@ -1476,58 +1449,7 @@ fun SettingsScreen(
             }
                     }
 
-                    SettingsTab.SCROBBLER -> {
-                        item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionLabel(stringResource(R.string.settings_section_scrobbler))
-                    SettingsGroup(rowCount = 4) { index, position ->
-                        when (index) {
-                            0 -> SettingsToggleCard(
-                                icon = Icons.Filled.GraphicEq,
-                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = stringResource(R.string.settings_scrobble),
-                                subtitle = if (scrobbler.enabled) "Watching ${scrobbler.selectedPackages.size} app(s)" else "Detect and submit plays from other apps",
-                                checked = scrobbler.enabled,
-                                onCheckedChange = { enabled ->
-                                    if (enabled) openNotificationAccessSettings()
-                                    viewModel.setScrobblerEnabled(enabled)
-                                },
-                                position = position,
-                                isHighlighted = (highlightedSettingId == "scrobbler.master_toggle"),
-                            )
-                            1 -> SettingsActionCard(
-                                icon = Icons.Filled.Apps,
-                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = stringResource(R.string.settings_choose_apps),
-                                subtitle = if (scrobbler.selectedPackages.isEmpty()) "None selected yet" else "${scrobbler.selectedPackages.size} app(s) selected",
-                                onClick = onOpenChooseApps,
-                                position = position,
-                                isHighlighted = (highlightedSettingId == "scrobbler.choose_apps"),
-                            )
-                            2 -> SettingsToggleCard(
-                                icon = Icons.Filled.NotificationsActive,
-                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                title = stringResource(R.string.settings_now_playing),
-                                subtitle = stringResource(R.string.settings_now_playing_sub),
-                                checked = scrobbler.submitNowPlaying,
-                                onCheckedChange = viewModel::setSubmitNowPlaying,
-                                position = position,
-                                isHighlighted = (highlightedSettingId == "scrobbler.now_playing"),
-                            )
-                            3 -> ScrobbleThresholdRow(
-                                percent = scrobbler.scrobblePercent,
-                                onPercentChange = viewModel::setScrobblePercent,
-                                position = position,
-                                isHighlighted = (highlightedSettingId == "scrobbler.threshold"),
-                            )
-                        }
-                    }
-                }
-            }
-                    }
+
 
                     SettingsTab.LIBRARY -> {
                         item {
@@ -2696,55 +2618,7 @@ private fun SettingsToggleCard(
     }
 }
 
-/** The percent-of-track threshold before a scrobble is submitted — same
- *  idea as Pano Scrobbler's "Percent" slider, minus its separate parallel
- *  "Minutes" slider: Last.fm's own scrobble rule already caps the wait at
- *  4 minutes regardless of percent, so that second slider would only ever
- *  matter for tracks over 8 minutes long, a genuine edge case not worth
- *  the extra UI here. */
-@Composable
-private fun ScrobbleThresholdRow(
-    percent: Int,
-    onPercentChange: (Int) -> Unit,
-    position: GroupPosition = GroupPosition.SINGLE,
-    isHighlighted: Boolean = false,
-) {
-    var sliderValue by remember(percent) { mutableStateOf(percent.coerceIn(25, 90).toFloat()) }
-    val shape = groupShape(position)
-    Card(
-        shape = shape,
-        colors = CardDefaults.cardColors(
-            containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceContainerHigh
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .settingHighlightGlow(isHighlighted = isHighlighted, shape = shape),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconBadge(Icons.Filled.Timer, MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer)
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Scrobble after", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                    Text(
-                        "${sliderValue.toInt()}% played (capped at 4 min)",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            Slider(
-                value = sliderValue,
-                onValueChange = { sliderValue = it },
-                onValueChangeFinished = { onPercentChange(sliderValue.toInt()) },
-                valueRange = 25f..90f,
-                steps = 12,
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            )
-        }
-    }
-}
+
 
 @Composable
 private fun CrossfadeDurationRow(

@@ -6,8 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.service.notification.NotificationListenerService
-import com.lastwave.app.service.MediaScrobbleListenerService
+
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -75,13 +74,6 @@ class ObsidianGlassWidgetReceiver : AppWidgetProvider() {
 
     override fun onEnabled(context: Context) {
         super.onEnabled(context)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            runCatching {
-                NotificationListenerService.requestRebind(
-                    ComponentName(context, MediaScrobbleListenerService::class.java),
-                )
-            }
-        }
         ioScope.launch { runCatching { WidgetUpdater.sync(context) } }
     }
 }
