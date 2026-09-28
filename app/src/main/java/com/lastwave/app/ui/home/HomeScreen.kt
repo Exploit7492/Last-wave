@@ -562,6 +562,7 @@ private fun ProfileAvatar(avatarUrl: String?, modifier: Modifier = Modifier) {
         }
     }
 }
+}
 
 
 @Composable
