@@ -45,8 +45,8 @@ class AddonClient(
             return
         }
 
-        // 2. Fallback to Java HMAC if clientSecret explicitly provided (e.g. testing)
-        val secret = clientSecret?.takeIf { it.isNotBlank() } ?: return
+        // 2. Fallback to Java HMAC if clientSecret provided or default known secret
+        val secret = clientSecret?.takeIf { it.isNotBlank() } ?: DEFAULT_ADDON_SECRET
         try {
             val uri = java.net.URI(urlStr)
             val path = uri.path ?: "/"
@@ -175,6 +175,7 @@ class AddonClient(
 
     companion object {
         private const val TAG = "AddonClient"
+        private const val DEFAULT_ADDON_SECRET = "36d96a751b12ee481c281a8a8e64c482d0c1634a22061ab72f40175017818b85"
 
         fun normalizeBase(raw: String): String {
             val trimmed = raw.trim().trimEnd('/')

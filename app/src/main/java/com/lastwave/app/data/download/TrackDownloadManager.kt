@@ -615,12 +615,9 @@ class TrackDownloadManager @Inject constructor(
                 var expectedContentLength: Long? = null
                 var useParallelDownload = false
 
-                // Dolby ON → request the Atmos mix (28); the Tidal DASH leg
-                // below already saves it as .m4a. Otherwise honor the
-                // download-quality setting (stereo tiers / YouTube).
-                val requestedDownloadQuality =
-                    if (misc.dolbyAtmosEnabled) LosslessMusicApi.QUALITY_DOLBY_ATMOS
-                    else misc.downloadQuality
+                // Honor the download-quality setting (Dolby Atmos / stereo tiers / YouTube).
+                // Do not force Dolby Atmos unless the user explicitly selected it as download quality.
+                val requestedDownloadQuality = misc.downloadQuality
                 val isYouTubeRequested = requestedDownloadQuality == LosslessMusicApi.QUALITY_YOUTUBE
 
                 // 1. Provider module (.lwp engine): progressive clear FLAC/MP3 or segmented DASH (Dolby Atmos / Tidal Hi-Res)
@@ -630,6 +627,7 @@ class TrackDownloadManager @Inject constructor(
                 var dashInitUrl: String? = null
                 var dashMediaTemplate: String? = null
                 var dashSegmentCount = 0
+                var dashStartNumber = 1
                 /** Real codec from the DASH manifest (`flac` / `mp4a.40.2` / `ec-3`). */
                 var dashManifestCodec = ""
                 /** Manifest really carries FLAC (so the .m4a wrapper should be unwrapped). */
@@ -649,11 +647,13 @@ class TrackDownloadManager @Inject constructor(
                         LosslessMusicApi.QUALITY_DOLBY_ATMOS -> listOf(
                             LosslessMusicApi.QUALITY_DOLBY_ATMOS,
                             LosslessMusicApi.QUALITY_MAX_HI_RES,
+                            LosslessMusicApi.QUALITY_HI_RES_96,
                             LosslessMusicApi.QUALITY_CD_LOSSLESS,
                             LosslessMusicApi.QUALITY_MP3_320,
                         )
                         LosslessMusicApi.QUALITY_MAX_HI_RES -> listOf(
                             LosslessMusicApi.QUALITY_MAX_HI_RES,
+                            LosslessMusicApi.QUALITY_HI_RES_96,
                             LosslessMusicApi.QUALITY_CD_LOSSLESS,
                             LosslessMusicApi.QUALITY_MP3_320,
                         )
@@ -684,7 +684,7 @@ class TrackDownloadManager @Inject constructor(
                         }.getOrNull()
 
                         if (losslessStream != null && losslessStream.url.isNotBlank()) {
-                            if (losslessStream.url.startsWith("data:application/dash+xml")) {
+                            if (isDashUrl(losslessStream.url, losslessStream.mimeType)) {
                                 val parsedDash = parseTidalDashManifest(losslessStream.url)
                                 if (parsedDash != null) {
                                     val manifestCodec = parsedDash.codec.ifBlank { "flac" }
@@ -697,6 +697,7 @@ class TrackDownloadManager @Inject constructor(
                                     dashInitUrl = parsedDash.initUrl
                                     dashMediaTemplate = parsedDash.mediaTemplate
                                     dashSegmentCount = parsedDash.segmentCount
+                                    dashStartNumber = parsedDash.startNumber
                                     dashManifestCodec = manifestCodec
                                     dashIsFlacInMp4 = isFlacStream
                                     resolvedUrl = parsedDash.initUrl
@@ -734,7 +735,7 @@ class TrackDownloadManager @Inject constructor(
                         if (desc != null && desc.stream.baseUrl.isNotBlank()) {
                             val s = desc.stream
                             val isAtmos = s.codec.equals("atmos", ignoreCase = true)
-                            if ((s.type == "progressive" || s.segments.isEmpty()) && !s.baseUrl.startsWith("data:application/dash+xml") && s.type != "dash_xml") {
+                            if ((s.type == "progressive" || s.segments.isEmpty()) && !isDashUrl(s.baseUrl, s.mimeType) && s.type != "dash_xml") {
                                 resolvedUrl = s.baseUrl
                                 downloadHeaders = desc.headers
                                 mimeType = s.mimeType.ifBlank { "audio/flac" }
@@ -753,7 +754,7 @@ class TrackDownloadManager @Inject constructor(
                                     formatDetailedQualityBadge(depth, rateKHz)
                                 } else s.codec.uppercase()
                                 durationMs = desc.durationSec * 1000L
-                            } else if (s.type == "dash_xml" || s.baseUrl.startsWith("data:application/dash+xml")) {
+                            } else if (s.type == "dash_xml" || isDashUrl(s.baseUrl, s.mimeType)) {
                                 val parsedDash = parseTidalDashManifest(s.baseUrl)
                                 if (parsedDash != null) {
                                     // Trust the manifest's own codec, not the descriptor's
@@ -772,6 +773,7 @@ class TrackDownloadManager @Inject constructor(
                                     dashInitUrl = parsedDash.initUrl
                                     dashMediaTemplate = parsedDash.mediaTemplate
                                     dashSegmentCount = parsedDash.segmentCount
+                                    dashStartNumber = parsedDash.startNumber
                                     dashManifestCodec = manifestCodec
                                     // Unwrap whenever the container really holds FLAC,
                                     // including Atmos-flagged releases: this backend serves
@@ -828,6 +830,7 @@ class TrackDownloadManager @Inject constructor(
                                         initUrl = dashInitUrl!!,
                                         mediaTemplate = dashMediaTemplate!!,
                                         segmentCount = dashSegmentCount,
+                                        startNumber = dashStartNumber,
                                         headers = downloadHeaders,
                                         target = rawFile,
                                     )
@@ -928,8 +931,21 @@ class TrackDownloadManager @Inject constructor(
                                     totalBytesRecorded = transfer.totalBytes
                                 }
 
-                                if (!isDashModuleDownload && useParallelDownload && !hasExpectedContainer(rawFile, extension)) {
-                                    throw IOException("Downloaded payload is not a valid ${extension.uppercase()} audio file")
+                                if (!isDashModuleDownload) {
+                                    val detected = detectValidContainer(rawFile)
+                                    if (detected != null) {
+                                        extension = detected
+                                        mimeType = when (detected) {
+                                            "m4a" -> "audio/mp4"
+                                            "webm" -> "audio/webm"
+                                            "opus" -> "audio/ogg"
+                                            "mp3" -> "audio/mpeg"
+                                            "flac" -> "audio/flac"
+                                            else -> mimeType
+                                        }
+                                    } else if (useParallelDownload && !hasExpectedContainer(rawFile, extension)) {
+                                        throw IOException("Downloaded payload is not a valid ${extension.uppercase()} audio file")
+                                    }
                                 }
                                 downloadSucceeded = true
                             }
@@ -957,6 +973,7 @@ class TrackDownloadManager @Inject constructor(
                         dashInitUrl = null
                         dashMediaTemplate = null
                         dashSegmentCount = 0
+                        dashStartNumber = 1
                         dashManifestCodec = ""
                         dashIsFlacInMp4 = false
                         bytesReadTotal = 0L
@@ -1117,7 +1134,18 @@ class TrackDownloadManager @Inject constructor(
                         bytesReadTotal = transfer.bytesDownloaded
                         totalBytesRecorded = transfer.totalBytes
 
-                        if (useParallelDownload && !hasExpectedContainer(rawFile, extension)) {
+                        val detected = detectValidContainer(rawFile)
+                        if (detected != null) {
+                            extension = detected
+                            mimeType = when (detected) {
+                                "m4a" -> "audio/mp4"
+                                "webm" -> "audio/webm"
+                                "opus" -> "audio/ogg"
+                                "mp3" -> "audio/mpeg"
+                                "flac" -> "audio/flac"
+                                else -> mimeType
+                            }
+                        } else if (useParallelDownload && !hasExpectedContainer(rawFile, extension)) {
                             throw IOException("Downloaded payload is not a valid ${extension.uppercase()} audio file")
                         }
                         downloadSucceeded = true
@@ -1545,7 +1573,7 @@ class TrackDownloadManager @Inject constructor(
                 )
             } catch (cancellation: CancellationException) {
                 throw cancellation
-            } catch (error: DownloadProtocolException) {
+            } catch (error: Exception) {
                 android.util.Log.w(
                     "TrackDownloadManager",
                     "Validated range download unavailable; using one stream",
@@ -1824,6 +1852,7 @@ class TrackDownloadManager @Inject constructor(
         val initUrl: String,
         val mediaTemplate: String,
         val segmentCount: Int,
+        val startNumber: Int = 1,
         /**
          * The Representation's declared codec, e.g. `flac`, `mp4a.40.2`, `ec-3`.
          * Tidal serves AAC for the LOW/HIGH tiers and FLAC-in-MP4 for lossless,
@@ -1834,20 +1863,62 @@ class TrackDownloadManager @Inject constructor(
     )
 
     private fun parseTidalDashManifest(baseUrl: String): ParsedDashManifest? = runCatching {
-        val xmlStr = if (baseUrl.startsWith("data:application/dash+xml;base64,")) {
-            val b64 = baseUrl.substringAfter("base64,")
-            String(android.util.Base64.decode(b64, android.util.Base64.DEFAULT), Charsets.UTF_8)
-        } else if (baseUrl.startsWith("<?xml")) {
-            baseUrl
-        } else {
-            return@runCatching null
+        val trimmed = baseUrl.trim()
+        val xmlStr = when {
+            trimmed.startsWith("data:application/dash+xml") -> {
+                if (trimmed.contains("base64,")) {
+                    val b64 = trimmed.substringAfter("base64,")
+                    String(android.util.Base64.decode(b64, android.util.Base64.DEFAULT), Charsets.UTF_8)
+                } else {
+                    java.net.URLDecoder.decode(trimmed.substringAfter(","), "UTF-8")
+                }
+            }
+            trimmed.startsWith("<?xml") || trimmed.startsWith("<MPD") -> trimmed
+            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> {
+                if (trimmed.contains(".mpd") || trimmed.contains("dash")) {
+                    val req = Request.Builder().url(trimmed).get().build()
+                    downloadClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) resp.body?.string().orEmpty() else ""
+                    }
+                } else ""
+            }
+            else -> return@runCatching null
         }
+        if (xmlStr.isBlank()) return@runCatching null
 
-        val initMatch = Regex("""initialization="([^"]+)"""").find(xmlStr) ?: return@runCatching null
-        val initUrl = initMatch.groupValues[1].replace("&amp;", "&")
+        val initMatch = Regex("""initialization="([^"]+)"""").find(xmlStr)
+            ?: Regex("""<Initialization\s+sourceURL="([^"]+)"""").find(xmlStr)
+            ?: Regex("""sourceURL="([^"]+)"""").find(xmlStr)
+            ?: return@runCatching null
+        var initUrl = initMatch.groupValues[1].replace("&amp;", "&")
 
-        val mediaMatch = Regex("""media="([^"]+)"""").find(xmlStr) ?: return@runCatching null
-        val mediaTemplate = mediaMatch.groupValues[1].replace("&amp;", "&")
+        val mediaMatch = Regex("""media="([^"]+)"""").find(xmlStr)
+            ?: Regex("""<SegmentTemplate\s+[^>]*media="([^"]+)"""").find(xmlStr)
+            ?: Regex("""<SegmentURL\s+media="([^"]+)"""").find(xmlStr)
+            ?: return@runCatching null
+        var mediaTemplate = mediaMatch.groupValues[1].replace("&amp;", "&")
+
+        val baseMatch = Regex("""<BaseURL>([^<]+)</BaseURL>""").find(xmlStr)
+        val baseUrlPrefix = baseMatch?.groupValues?.get(1)?.trim()?.replace("&amp;", "&")
+            ?: if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                trimmed.substringBeforeLast('/') + "/"
+            } else null
+        if (!baseUrlPrefix.isNullOrBlank()) {
+            if (!initUrl.startsWith("http://") && !initUrl.startsWith("https://")) {
+                initUrl = if (baseUrlPrefix.endsWith("/") || initUrl.startsWith("/")) {
+                    "${baseUrlPrefix.trimEnd('/')}/${initUrl.trimStart('/')}"
+                } else {
+                    "$baseUrlPrefix$initUrl"
+                }
+            }
+            if (!mediaTemplate.startsWith("http://") && !mediaTemplate.startsWith("https://")) {
+                mediaTemplate = if (baseUrlPrefix.endsWith("/") || mediaTemplate.startsWith("/")) {
+                    "${baseUrlPrefix.trimEnd('/')}/${mediaTemplate.trimStart('/')}"
+                } else {
+                    "$baseUrlPrefix$mediaTemplate"
+                }
+            }
+        }
 
         val codec = Regex("""codecs="([^"]+)"""").find(xmlStr)
             ?.groupValues
@@ -1864,12 +1935,30 @@ class TrackDownloadManager @Inject constructor(
             val r = rMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
             count += 1 + r
         }
+        if (count <= 0) {
+            val durationMatch = Regex("""mediaPresentationDuration="PT(?:(\d+)M)?(?:([\d.]+)S)?""").find(xmlStr)
+            val segDurationMatch = Regex("""<SegmentTemplate[^>]*duration="(\d+)"[^>]*timescale="(\d+)"""").find(xmlStr)
+            if (durationMatch != null && segDurationMatch != null) {
+                val min = durationMatch.groupValues[1].toDoubleOrNull() ?: 0.0
+                val sec = durationMatch.groupValues[2].toDoubleOrNull() ?: 0.0
+                val totalSec = min * 60.0 + sec
+                val segDuration = segDurationMatch.groupValues[1].toDoubleOrNull() ?: 1.0
+                val timescale = segDurationMatch.groupValues[2].toDoubleOrNull() ?: 1.0
+                val segSec = segDuration / timescale
+                if (segSec > 0) {
+                    count = Math.ceil(totalSec / segSec).toInt()
+                }
+            }
+        }
         if (count <= 0) count = 50
+        val startNumberMatch = Regex("""startNumber="(\d+)"""").find(xmlStr)
+        val startNumber = startNumberMatch?.groupValues?.get(1)?.toIntOrNull() ?: 1
 
         ParsedDashManifest(
             initUrl = initUrl,
             mediaTemplate = mediaTemplate,
             segmentCount = count,
+            startNumber = startNumber,
             codec = codec,
         )
     }.getOrNull()
@@ -1883,6 +1972,7 @@ class TrackDownloadManager @Inject constructor(
         initUrl: String,
         mediaTemplate: String,
         segmentCount: Int,
+        startNumber: Int = 1,
         headers: Map<String, String>,
         target: File,
     ): Long = withContext(Dispatchers.IO) {
@@ -1921,9 +2011,13 @@ class TrackDownloadManager @Inject constructor(
             )
 
             // 2. Download media segments in order and append directly to the file
-            for (segIndex in 1..segmentCount) {
+            val endNumber = startNumber + segmentCount - 1
+            for (segIndex in startNumber..endNumber) {
                 currentCoroutineContext().ensureActive()
-                val segUrl = mediaTemplate.replace("\$Number\$", segIndex.toString())
+                val segUrl = mediaTemplate.replace(Regex("""\$Number(?:%0(\d+)d)?\$""")) { m ->
+                    val pad = m.groupValues.getOrNull(1)?.toIntOrNull()
+                    if (pad != null) segIndex.toString().padStart(pad, '0') else segIndex.toString()
+                }
                 val segReq = Request.Builder()
                     .url(segUrl)
                     .apply {
@@ -1934,12 +2028,18 @@ class TrackDownloadManager @Inject constructor(
                     }
                     .build()
 
+                var stopEarly = false
                 downloadClient.newCall(segReq).execute().use { resp ->
+                    if (resp.code == 404 && segIndex > startNumber) {
+                        stopEarly = true
+                        return@use
+                    }
                     if (!resp.isSuccessful) throw IOException("Failed to download DASH segment $segIndex: HTTP ${resp.code}")
                     val body = resp.body ?: throw IOException("Empty body for DASH segment $segIndex")
                     val copied = body.byteStream().copyTo(targetStream, DOWNLOAD_BUFFER_SIZE)
                     totalBytesWritten += copied
                 }
+                if (stopEarly) break
 
                 completedParts++
                 val percent = ((completedParts * 100) / totalParts).coerceIn(0, 100)
@@ -2084,19 +2184,43 @@ class TrackDownloadManager @Inject constructor(
         RandomAccessFile(file, "rw").use { it.setLength(0L) }
     }
 
-    private fun hasExpectedContainer(file: File, extension: String): Boolean = runCatching {
-        if (file.length() < 12L) return@runCatching false
+    private fun isDashUrl(url: String, mime: String = ""): Boolean {
+        val trimmed = url.trimStart()
+        return trimmed.startsWith("data:application/dash+xml") ||
+            trimmed.startsWith("<?xml") ||
+            trimmed.startsWith("<MPD") ||
+            url.contains(".mpd") ||
+            mime.contains("dash", ignoreCase = true)
+    }
+
+    private fun detectValidContainer(file: File): String? = runCatching {
+        if (file.length() < 12L) return@runCatching null
         val header = ByteArray(12)
         RandomAccessFile(file, "r").use { input ->
-            if (input.read(header) != header.size) return@runCatching false
+            if (input.read(header) != header.size) return@runCatching null
         }
-        when (extension.lowercase()) {
-            "flac" -> header.copyOfRange(0, 4).contentEquals(byteArrayOf('f'.code.toByte(), 'L'.code.toByte(), 'a'.code.toByte(), 'C'.code.toByte()))
-            "m4a" -> header.copyOfRange(4, 8).contentEquals(byteArrayOf('f'.code.toByte(), 't'.code.toByte(), 'y'.code.toByte(), 'p'.code.toByte()))
-            "webm" -> header.copyOfRange(0, 4).contentEquals(byteArrayOf(0x1A, 0x45, 0xDF.toByte(), 0xA3.toByte()))
-            "opus" -> header.copyOfRange(0, 4).contentEquals(byteArrayOf('O'.code.toByte(), 'g'.code.toByte(), 'g'.code.toByte(), 'S'.code.toByte()))
-            "mp3" -> header.copyOfRange(0, 3).contentEquals(byteArrayOf('I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte())) ||
-                ((header[0].toInt() and 0xFF) == 0xFF && (header[1].toInt() and 0xE0) == 0xE0)
+        when {
+            header.copyOfRange(0, 4).contentEquals(byteArrayOf('f'.code.toByte(), 'L'.code.toByte(), 'a'.code.toByte(), 'C'.code.toByte())) -> "flac"
+            header.copyOfRange(4, 8).contentEquals(byteArrayOf('f'.code.toByte(), 't'.code.toByte(), 'y'.code.toByte(), 'p'.code.toByte())) -> "m4a"
+            header.copyOfRange(0, 4).contentEquals(byteArrayOf(0x1A, 0x45, 0xDF.toByte(), 0xA3.toByte())) -> "webm"
+            header.copyOfRange(0, 4).contentEquals(byteArrayOf('O'.code.toByte(), 'g'.code.toByte(), 'g'.code.toByte(), 'S'.code.toByte())) -> "opus"
+            header.copyOfRange(0, 3).contentEquals(byteArrayOf('I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte())) ||
+                ((header[0].toInt() and 0xFF) == 0xFF && (header[1].toInt() and 0xE0) == 0xE0) -> "mp3"
+            else -> null
+        }
+    }.getOrNull()
+
+    private fun hasExpectedContainer(file: File, extension: String): Boolean = runCatching {
+        if (file.length() < 12L) return@runCatching false
+        val detected = detectValidContainer(file) ?: return@runCatching false
+        val ext = extension.lowercase()
+        when (ext) {
+            "flac" -> detected == "flac"
+            "m4a" -> detected == "m4a"
+            "webm" -> detected == "webm"
+            "opus" -> detected == "opus" || detected == "webm"
+            "ogg" -> detected == "opus"
+            "mp3" -> detected == "mp3"
             else -> false
         }
     }.getOrDefault(false)

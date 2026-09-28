@@ -185,13 +185,12 @@ class DownloadMenuViewModel @Inject constructor(
  *  Download Quality tiers in SettingsScreen (28/27/7/6/5/4/-1). */
 fun downloadLabelForQuality(quality: Int): String = when (quality) {
     28 -> "Download (Dolby Atmos)"
-    27 -> "Download (Max Quality)"
-    7 -> "Download (Hi-Res)"
+    27, 7 -> "Download (Hi-Res)"
     6 -> "Download (CD Lossless)"
     5 -> "Download (Standard)"
     4 -> "Download (Data Saver)"
     -1 -> "Download (YouTube)"
-    else -> "Download (Max Quality)"
+    else -> "Download (Hi-Res)"
 }
 
 @HiltViewModel

@@ -213,6 +213,13 @@ class LosslessMusicApi @Inject constructor(
             return isAtmosCodec(manifestCodecOf(url))
         }
 
+        /** True when the stream points to a known prank or decoy CDN stream. */
+        fun isDecoyStream(url: String?): Boolean {
+            if (url.isNullOrBlank()) return false
+            val lower = url.lowercase()
+            return lower.contains("pranks-cdn") || lower.contains("definatelynagato")
+        }
+
         /**
          * Pull an MPD URI or inline XML/base64 out of the many JSON shapes the
          * backend has used for `/trackManifests/?atmos=true`.
@@ -475,14 +482,14 @@ class LosslessMusicApi @Inject constructor(
         // order kept within each group). A CD-only master otherwise scores
         // identically to the 24-bit master and backend order wins the coin
         // flip, parking playback at 16-bit forever.
-        val wantsHiRes = qualityParam == "hi_res" && !isAtmosPreferred
+        val wantsHiRes = (qualityParam == "hi_res" || isAtmosPreferred)
         val ordered = if (wantsHiRes) {
             candidates.sortedWith(compareByDescending<TidalCandidateItem> { it.isHiResFlagged() })
         } else {
             candidates
         }
 
-        val qualitiesToTry = if (isAtmosPreferred) listOf("atmos", "lossless", "high") else listOf(qualityParam, "lossless", "high")
+        val qualitiesToTry = if (isAtmosPreferred) listOf("atmos", "hi_res", "lossless", "high") else listOf(qualityParam, "lossless", "high")
         for (q in qualitiesToTry) {
             val wantAtmos = q == "atmos"
             val targetCandidates = if (wantAtmos) {
@@ -503,14 +510,18 @@ class LosslessMusicApi @Inject constructor(
                 val stream = streamResult.getOrNull() ?: continue
 
                 val rawUrl = stream.dataUrl?.takeIf { it.isNotBlank() }
-                    ?: stream.url.takeIf { it.isNotBlank() }
                     ?: stream.manifestXml?.takeIf { it.isNotBlank() }?.let { xml ->
                         val b64 = android.util.Base64.encodeToString(xml.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
                         "data:application/dash+xml;base64,$b64"
                     }
+                    ?: stream.url.takeIf { it.isNotBlank() }
                     ?: continue
 
                 if (rawUrl in excludedUrls) continue
+                if (isDecoyStream(rawUrl) || isDecoyStream(stream.url)) {
+                    Log.w(TAG, "resolveFromAddon: candidate $trackId returned decoy prank stream ($rawUrl); skipping")
+                    continue
+                }
                 if (!wantAtmos && isAtmosStreamUrl(rawUrl)) continue
 
                 // Atmos is a property of the STREAM (audioMode flag or spatial
@@ -556,7 +567,8 @@ class LosslessMusicApi @Inject constructor(
                 // while a 24-bit master sits later in the list. The
                 // "lossless" tier below still accepts 16-bit normally.
                 val isHiResTierHit = formatId == QUALITY_MAX_HI_RES || formatId == QUALITY_HI_RES_96
-                if (wantsHiRes && q == "hi_res" && !isStreamAtmos && !isHiResTierHit) {
+                val isHiResAttempt = q == "hi_res"
+                if (isHiResAttempt && !isStreamAtmos && !isHiResTierHit) {
                     Log.i(TAG, "resolveFromAddon: candidate $trackId answered hi_res with ${effectiveBitDepth}-bit/${effectiveSampleRate}Hz; trying next candidate")
                     continue
                 }

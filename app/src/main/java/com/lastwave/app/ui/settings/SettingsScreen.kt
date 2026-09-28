@@ -769,13 +769,13 @@ fun SettingsScreen(
                     }
                     val downloadQualitySubtitle = when (misc.downloadQuality) {
                         28 -> "Dolby Atmos (Spatial Immersive Audio)"
-                        27 -> "Max (24-bit / 192 kHz FLAC)"
+                        27 -> "Hi-Res (24-bit / 192 kHz FLAC)"
                         7 -> "Hi-Res (24-bit / 96 kHz FLAC)"
                         6 -> "CD Lossless (16-bit / 44.1 kHz FLAC)"
                         5 -> "Standard (320 kbps MP3)"
                         4 -> "Data Saver (96 kbps HE-AAC)"
                         -1 -> "YouTube Music (AAC / Opus)"
-                        else -> "Max (24-bit / 192 kHz FLAC)"
+                        else -> "Hi-Res (24-bit / 192 kHz FLAC)"
                     }
 
                     val isIgnored = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
@@ -2095,7 +2095,7 @@ fun SettingsScreen(
     if (showQualityDialog) {
         val tiers = listOf(
             Triple(28, "Dolby Atmos", "Spatial Immersive Audio • Master Audio" to "ATMOS"),
-            Triple(27, "Max Quality", "Up to 24-bit / 192 kHz • Lossless Studio FLAC" to "24-BIT / 192k"),
+            Triple(27, "Hi-Res Audio (Max)", "Up to 24-bit / 192 kHz • Lossless Studio FLAC" to "24-BIT / 192k"),
             Triple(7, "Hi-Res Audio", "24-bit / 96 kHz • Lossless Studio FLAC" to "24-BIT / 96k"),
             Triple(6, "CD Lossless", "16-bit / 44.1 kHz • Lossless CD FLAC" to "16-BIT / 44.1k"),
             Triple(5, "Standard Quality", "320 kbps • MP3 / AAC" to "320 kbps"),
@@ -2245,7 +2245,7 @@ fun SettingsScreen(
     if (showDownloadQualityDialog) {
         val downloadTiers = listOf(
             Triple(28, "Dolby Atmos", "Spatial Immersive Audio • Master Audio" to "ATMOS"),
-            Triple(27, "Max Quality", "Up to 24-bit / 192 kHz • Studio Master FLAC" to "24-BIT / 192k"),
+            Triple(27, "Hi-Res Audio (Max)", "Up to 24-bit / 192 kHz • Studio Master FLAC" to "24-BIT / 192k"),
             Triple(7, "Hi-Res Audio", "24-bit / 96 kHz • Studio FLAC" to "24-BIT / 96k"),
             Triple(6, "CD Lossless", "16-bit / 44.1 kHz • Bit-Exact CD FLAC" to "16-BIT / 44.1k"),
             Triple(5, "Standard Quality", "320 kbps • High-Bitrate MP3 / AAC" to "320 kbps"),
