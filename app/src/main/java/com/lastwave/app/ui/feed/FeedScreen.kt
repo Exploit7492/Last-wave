@@ -139,6 +139,7 @@ fun FeedScreen(
     onOpenPlaylist: (Long) -> Unit = {},
     onOpenGenerator: () -> Unit = {},
     onOpenFriends: () -> Unit = {},
+    onOpenDownloads: () -> Unit = {},
     onOpenFriendProfile: (username: String, displayName: String?, avatarUrl: String?) -> Unit = { _, _, _ -> },
     onOpenNewReleases: () -> Unit = {},
     viewModel: FeedViewModel = hiltViewModel(),
@@ -203,7 +204,7 @@ fun FeedScreen(
             ExpressiveHeader(
                 title = "Home",
                 actions = {
-                    HeaderActionIcon(Icons.Filled.Explore, "Discover Radar", onOpenDiscover)
+                    HeaderActionIcon(androidx.compose.material.icons.filled.Download, "Downloads", onOpenDownloads)
                     HeaderActionIcon(Icons.Filled.Search, "Search", onOpenSearch)
                     HeaderActionIcon(Icons.Filled.Settings, "Settings", onOpenSettings)
                 },

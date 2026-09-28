@@ -346,26 +346,20 @@ fun TrackContextMenuSheet(
     }
 
     if (showTimerDialog) {
+        var isExpanded by remember { mutableStateOf(false) }
         var customMinutes by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
         val customDuration = customMinutes.toIntOrNull()?.takeIf { it > 0 }
-        AlertDialog(
-            onDismissRequest = { showTimerDialog = false },
-            title = { Text("Sleep timer") },
-            text = {
-                Column {
-                    listOf(0, 15, 30, 60).forEach { minutes ->
-                        TextButton(
-                            onClick = {
-                                musicPlayer.setSleepTimerMinutes(minutes)
-                                showTimerDialog = false
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text(if (minutes == 0) "Off" else "$minutes minutes") }
-                    }
+        var showCustomDialog by remember { mutableStateOf(false) }
+
+        if (showCustomDialog) {
+            AlertDialog(
+                onDismissRequest = { showCustomDialog = false },
+                title = { Text("Custom sleep timer") },
+                text = {
                     OutlinedTextField(
                         value = customMinutes,
                         onValueChange = { customMinutes = it },
-                        label = { Text("Custom time (minutes)") },
+                        label = { Text("Minutes") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
                         isError = customMinutes.isNotEmpty() && customDuration == null,
@@ -376,21 +370,52 @@ fun TrackContextMenuSheet(
                         },
                         modifier = Modifier.fillMaxWidth(),
                     )
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = customDuration != null,
+                        onClick = {
+                            customDuration?.let(musicPlayer::setSleepTimerMinutes)
+                            showCustomDialog = false
+                            showTimerDialog = false
+                        },
+                    ) { Text("Set timer") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showCustomDialog = false }) { Text("Cancel") }
                 }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = customDuration != null,
-                    onClick = {
-                        customDuration?.let(musicPlayer::setSleepTimerMinutes)
-                        showTimerDialog = false
-                    },
-                ) { Text("Set timer") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTimerDialog = false }) { Text("Cancel") }
-            },
-        )
+            )
+        }
+
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showTimerDialog = false }) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Sleep timer", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        androidx.compose.material3.IconButton(onClick = { showCustomDialog = true }) {
+                            Icon(Icons.Filled.Add, "Custom Timer")
+                        }
+                        androidx.compose.material3.IconButton(onClick = { showTimerDialog = false }) {
+                            Icon(Icons.Filled.Close, "Close")
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    listOf(0, 15, 30, 60).forEach { minutes ->
+                        TextButton(
+                            onClick = {
+                                musicPlayer.setSleepTimerMinutes(minutes)
+                                showTimerDialog = false
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(if (minutes == 0) "Off" else "$minutes minutes") }
+                    }
+                }
+            }
+        }
     }
 
     ModalBottomSheet(

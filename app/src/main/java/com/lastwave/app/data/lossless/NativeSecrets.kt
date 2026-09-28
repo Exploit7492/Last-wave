@@ -32,7 +32,7 @@ class NativeSecrets @Inject constructor(
 
     companion object {
         init {
-            System.loadLibrary("lastwave_audio")
+            // System.loadLibrary("lastwave_audio")
         }
 
         @JvmStatic

@@ -21,9 +21,9 @@ android {
         }
     }
 
-    externalNativeBuild {
-        cmake { path("src/main/jni/CMakeLists.txt") }
-    }
+//     externalNativeBuild {
+//         cmake { path("src/main/jni/CMakeLists.txt") }
+//     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

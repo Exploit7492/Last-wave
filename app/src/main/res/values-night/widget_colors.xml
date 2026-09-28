@@ -1,18 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Modern obsidian glass palette: deep charcoal card, pure white typography, crystal hairline. -->
-    <color name="widget_surface">#FF101114</color>
-    <color name="widget_surface_top">#FF1B1D24</color>
-    <color name="widget_surface_variant">#FF242630</color>
+    <color name="widget_surface">#FF9C3645</color>
+    <color name="widget_surface_top">#FF9C3645</color>
+    <color name="widget_surface_variant">#FF9C3645</color>
     <color name="widget_on_surface">#FFFFFFFF</color>
-    <color name="widget_on_surface_variant">#FFA6AAB8</color>
-    <color name="widget_icon_tint">#FFF0F2F6</color>
-    <color name="widget_primary">#FFE83636</color>
-    <color name="widget_primary_deep">#FFCC2020</color>
-    <color name="widget_primary_top">#FFF54A4A</color>
-    <color name="widget_on_primary">#FFFFFFFF</color>
-    <color name="widget_accent">#FFE83636</color>
-    <color name="widget_hairline">#26FFFFFF</color>
-    <color name="widget_track">#28FFFFFF</color>
-    <color name="widget_eq_bar">#FFA6AAB8</color>
+    <color name="widget_on_surface_variant">#FFE0B8BC</color>
+    <color name="widget_icon_tint">#FF3C1117</color>
+    <color name="widget_primary">#FF9C3645</color>
+    <color name="widget_primary_deep">#FF9C3645</color>
+    <color name="widget_primary_top">#FF9C3645</color>
+    <color name="widget_on_primary">#FF3C1117</color>
+    <color name="widget_accent">#FFF1C295</color>
+    <color name="widget_hairline">#00000000</color>
+    <color name="widget_track">#33000000</color>
+    <color name="widget_eq_bar">#FFFFFFFF</color>
 </resources>

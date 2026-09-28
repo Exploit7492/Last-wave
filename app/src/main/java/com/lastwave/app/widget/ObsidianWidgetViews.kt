@@ -151,9 +151,15 @@ internal object ObsidianWidgetViews {
             R.id.widget_state,
             if (playing) "PLAYING" else "PAUSED",
         )
+        
+        // Update new expressive play/pause pill
         views.setImageViewResource(
-            R.id.widget_play_pause,
+            R.id.widget_play_pause_icon,
             if (playing) R.drawable.ic_widget_pause else R.drawable.ic_widget_play,
+        )
+        views.setTextViewText(
+            R.id.widget_play_pause_text,
+            if (playing) "Pause" else "Play",
         )
 
         // Animated EQ while playing

@@ -164,6 +164,7 @@ fun HomeScreen(
     onOpenDiscover: () -> Unit,
     onOpenGenres: () -> Unit,
     onOpenFriends: () -> Unit,
+    onOpenDownloads: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
     artistAlbumNavigator: com.lastwave.app.ui.navigation.ArtistAlbumNavigator = hiltViewModel<ArtistAlbumNavBridgeHome>().navigator,
 ) {
@@ -186,10 +187,10 @@ fun HomeScreen(
                     title = "Statistics",
                     modifier = Modifier.adaptiveContentWidth(maxWidth = 860.dp),
                     actions = {
-                        HeaderActionIcon(Icons.Filled.Explore, "Discover", onOpenDiscover)
+                        HeaderActionIcon(androidx.compose.material.icons.filled.Download, "Downloads", onOpenDownloads)
                         HeaderActionIcon(Icons.Filled.Search, "Search", onOpenSearch)
                         IconButton(onClick = onOpenSettings) {
-                            ProfileAvatar(avatarUrl = uiState.stats?.avatarUrl, modifier = Modifier.size(30.dp))
+                            ProfileAvatar(avatarUrl = uiState.stats?.avatarUrl, modifier = Modifier.size(38.dp))
                         }
                     },
                 )
@@ -529,11 +530,17 @@ private fun formatTimer(totalSeconds: Long): String {
 
 @Composable
 private fun ProfileAvatar(avatarUrl: String?, modifier: Modifier = Modifier) {
-    Surface(
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        modifier = modifier,
+    Box(
+        modifier = modifier
+            .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+            .padding(4.dp),
+        contentAlignment = Alignment.Center
     ) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer,
+            modifier = Modifier.fillMaxSize(),
+        ) {
         if (!avatarUrl.isNullOrBlank()) {
             ArtworkImage(
                 name = "profile",

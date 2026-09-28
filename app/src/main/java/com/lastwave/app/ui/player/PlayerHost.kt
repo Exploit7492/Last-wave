@@ -89,6 +89,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -1374,6 +1375,47 @@ private fun AddToPlaylistDialog(
             ) {}
         },
     ) {
+        var showCreateDialog by remember { mutableStateOf(false) }
+        
+        if (showCreateDialog) {
+            AlertDialog(
+                onDismissRequest = { showCreateDialog = false },
+                title = { Text("Create playlist") },
+                text = {
+                    OutlinedTextField(
+                        value = newPlaylistName,
+                        onValueChange = { newPlaylistName = it },
+                        label = { Text("Playlist name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = newPlaylistName.isNotBlank(),
+                        onClick = {
+                            val cleanName = newPlaylistName.trim()
+                            val existingPlaylist = sanitizedPlaylists.firstOrNull {
+                                it.mode == "custom" && it.title.equals(cleanName, ignoreCase = true)
+                            }
+                            if (existingPlaylist == null) {
+                                onCreate(cleanName)
+                            } else {
+                                selectedPlaylistIds = setOf(existingPlaylist.id)
+                                requestAdd(setOf(existingPlaylist.id))
+                            }
+                            showCreateDialog = false
+                        },
+                    ) {
+                        Text("Create & Add")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showCreateDialog = false }) { Text("Cancel") }
+                },
+            )
+        }
+
         com.lastwave.app.ui.common.EdgeToEdgeDialogWindow()
         Column(
             modifier = Modifier
@@ -1405,6 +1447,12 @@ private fun AddToPlaylistDialog(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
+                }
+                androidx.compose.material3.IconButton(onClick = { showCreateDialog = true }) {
+                    Icon(Icons.Filled.Add, contentDescription = "Create Playlist")
+                }
+                androidx.compose.material3.IconButton(onClick = { onDismiss() }) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close")
                 }
             }
 
@@ -1517,36 +1565,6 @@ private fun AddToPlaylistDialog(
                             }
                         }
                     }
-                }
-            }
-
-            OutlinedTextField(
-                value = newPlaylistName,
-                onValueChange = { newPlaylistName = it },
-                label = { Text("New playlist name") },
-                singleLine = true,
-                trailingIcon = {
-                    IconButton(
-                        enabled = newPlaylistName.isNotBlank(),
-                        onClick = {
-                            val cleanName = newPlaylistName.trim()
-                            val existingPlaylist = sanitizedPlaylists.firstOrNull {
-                                it.mode == "custom" && it.title.equals(cleanName, ignoreCase = true)
-                            }
-                            if (existingPlaylist == null) {
-                                onCreate(cleanName)
-                            } else {
-                                selectedPlaylistIds = setOf(existingPlaylist.id)
-                                requestAdd(setOf(existingPlaylist.id))
-                            }
-                        },
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = "Create playlist and add track")
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
@@ -3432,10 +3450,13 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                     glassModifier = Modifier.liquidGlassChrome(RoundedCornerShape(20.dp), LocalLiquidGlass.current),
                     onClick = { player.seekToQueueItem(index) },
                     shape = RoundedCornerShape(20.dp),
-                    color = liquidGlassContainerColor(
-                        if (isCurrent) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceContainerHighest,
-                    ),
+                    color = if (isCurrent) {
+                        if (LocalLiquidGlass.current) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+                        else MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        if (LocalLiquidGlass.current) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.70f)
+                        else MaterialTheme.colorScheme.surfaceContainerHighest
+                    },
                     contentColor = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer
                     else MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier

@@ -195,6 +195,7 @@ fun MainShell(
     onOpenPlaylist: (Long) -> Unit = {},
     onOpenGenerator: () -> Unit = {},
     onOpenNewReleases: () -> Unit = {},
+    onOpenDownloads: () -> Unit = {},
     mainShellViewModel: MainShellViewModel = hiltViewModel(),
 ) {
     val tabs = MainTab.entries
@@ -247,6 +248,7 @@ fun MainShell(
                         onOpenFriends = onOpenFriends,
                         onOpenFriendProfile = onOpenFriendProfile,
                         onOpenNewReleases = onOpenNewReleases,
+                        onOpenDownloads = onOpenDownloads,
                     )
                     MainTab.STATS -> HomeScreen(
                         onOpenSettings = onOpenSettings,
@@ -254,6 +256,7 @@ fun MainShell(
                         onOpenDiscover = onOpenDiscover,
                         onOpenGenres = onOpenGenres,
                         onOpenFriends = onOpenFriends,
+                        onOpenDownloads = onOpenDownloads,
                     )
                     MainTab.PLAYLISTS -> PlaylistScreen(onOpenPlaylist = onOpenPlaylist)
                 }
