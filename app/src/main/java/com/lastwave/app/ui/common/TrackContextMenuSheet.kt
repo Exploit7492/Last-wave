@@ -1,6 +1,7 @@
+package com.lastwave.app.ui.common
+
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-package com.lastwave.app.ui.common
 
 import android.content.Context
 import android.content.Intent

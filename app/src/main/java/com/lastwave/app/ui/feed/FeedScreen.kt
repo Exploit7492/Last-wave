@@ -1,6 +1,6 @@
-import androidx.compose.material.icons.filled.Download
 package com.lastwave.app.ui.feed
 
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable

@@ -1,6 +1,6 @@
-import androidx.compose.material.icons.filled.Download
 package com.lastwave.app.ui.home
 
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.animation.core.LinearEasing
