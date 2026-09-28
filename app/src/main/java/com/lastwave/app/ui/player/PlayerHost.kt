@@ -2104,6 +2104,9 @@ private fun FullPlayer(
                                         onToggleFullscreen = { lyricsFullscreen = !lyricsFullscreen },
                                         isFullscreen = lyricsFullscreen,
                                         onOpenLyricsOffset = { showLyricsOffsetDialog = true },
+                                        primaryColor = ambientColor,
+                                        secondaryColor = ambientCompanion,
+                                        tertiaryColor = ambientDeep,
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .adaptiveContentWidth(maxWidth = 720.dp),
@@ -2121,6 +2124,9 @@ private fun FullPlayer(
                                         onToggleFullscreen = { lyricsFullscreen = !lyricsFullscreen },
                                         isFullscreen = lyricsFullscreen,
                                         onOpenLyricsOffset = { showLyricsOffsetDialog = true },
+                                        primaryColor = ambientColor,
+                                        secondaryColor = ambientCompanion,
+                                        tertiaryColor = ambientDeep,
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .adaptiveContentWidth(maxWidth = 720.dp),
@@ -2575,6 +2581,9 @@ private fun FullPlayer(
                                         onSeek = player::seekTo,
                                         isTranslucent = LocalLiquidGlass.current,
                                         fallbackDurationMs = track.durationMs ?: state.durationMs,
+                                        primaryColor = ambientColor,
+                                        secondaryColor = ambientCompanion,
+                                        tertiaryColor = ambientDeep,
                                     )
                                     Spacer(Modifier.height(14.dp))
                                     MainControls(state, player, isTranslucent = true)
@@ -2655,9 +2664,11 @@ internal fun PlayerProgressSlider(
     enabled: Boolean,
     modifier: Modifier = Modifier,
     interactionSource: MutableInteractionSource,
+    primaryColor: Color = MaterialTheme.colorScheme.primary,
+    tertiaryColor: Color = MaterialTheme.colorScheme.tertiary,
 ) {
-    val primary = MaterialTheme.colorScheme.primary
-    val tertiary = MaterialTheme.colorScheme.tertiary
+    val primary = primaryColor
+    val tertiary = tertiaryColor
     val inactive = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.20f else 0.12f)
     val range = (valueRange.endInclusive - valueRange.start).coerceAtLeast(0.0001f)
     val fraction = ((value - valueRange.start) / range).coerceIn(0f, 1f)
@@ -2728,6 +2739,9 @@ private fun SeekBar(
     onSeek: (Long) -> Unit,
     isTranslucent: Boolean = false,
     fallbackDurationMs: Long = 0L,
+    primaryColor: Color = MaterialTheme.colorScheme.primary,
+    secondaryColor: Color = MaterialTheme.colorScheme.secondary,
+    tertiaryColor: Color = MaterialTheme.colorScheme.tertiary,
 ) {
     val progress by progressState.collectAsStateWithLifecycle()
     val effectiveDurationMs = if (progress.durationMs > 0L) progress.durationMs else fallbackDurationMs.coerceAtLeast(0L)
@@ -2740,6 +2754,9 @@ private fun SeekBar(
             onSeek = onSeek,
             isTranslucent = isTranslucent,
             trackKey = trackKey,
+            primaryColor = primaryColor,
+            secondaryColor = secondaryColor,
+            tertiaryColor = tertiaryColor,
         )
         return
     }
@@ -2767,11 +2784,11 @@ private fun SeekBar(
         (it * boundedDurationMs).toLong().coerceIn(0L, boundedDurationMs)
     } ?: progress.positionMs.coerceIn(0L, boundedDurationMs)
 
-    val primaryColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary
+    val effectivePrimary = primaryColor
     val inactiveColor = if (isTranslucent) {
         Color.White.copy(alpha = 0.20f)
     } else {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+        effectivePrimary.copy(alpha = 0.28f)
     }
     val textColor = if (isTranslucent) Color.White.copy(alpha = 0.85f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f)
 
@@ -2805,7 +2822,7 @@ private fun SeekBar(
                 // Thick active capsule ending before the vertical thumb.
                 if (activeEndX > 0f) {
                     drawRoundRect(
-                        color = primaryColor,
+                        color = effectivePrimary,
                         topLeft = Offset(0f, centerY - trackHeightPx / 2f),
                         size = Size(activeEndX, trackHeightPx),
                         cornerRadius = cornerRadius,
@@ -2826,7 +2843,7 @@ private fun SeekBar(
                 val endpointX = width - trackHeightPx / 2f
                 if (inactiveStartX < endpointX) {
                     drawCircle(
-                        color = primaryColor.copy(alpha = 0.86f),
+                        color = effectivePrimary.copy(alpha = 0.86f),
                         radius = 2.dp.toPx(),
                         center = Offset(endpointX, centerY),
                     )
@@ -2837,7 +2854,7 @@ private fun SeekBar(
                 val thumbCornerRadius = CornerRadius(thumbWidthPx / 2f, thumbWidthPx / 2f)
 
                 drawRoundRect(
-                    color = primaryColor,
+                    color = effectivePrimary,
                     topLeft = Offset(thumbX, centerY - thumbHeightPx / 2f),
                     size = Size(thumbWidthPx, thumbHeightPx),
                     cornerRadius = thumbCornerRadius,
