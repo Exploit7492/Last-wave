@@ -3707,8 +3707,8 @@ class MusicPlayer @Inject constructor(
                 val previousCount = player.mediaItemCount
                 player.addMediaItems(fresh.map(PlayableTrack::toMediaItem))
                 refresh(player)
-                val isPlayerStoppedAtEnd = player.playbackState == Player.STATE_ENDED ||
-                    (!player.isPlaying && player.currentMediaItemIndex >= previousCount - 1)
+                val isPlayerStoppedAtEnd = player.playbackState == Player.STATE_ENDED &&
+                    player.currentMediaItemIndex >= previousCount - 1
                 if (isPlayerStoppedAtEnd) {
                     val nextToPlay = previousCount.coerceIn(0, player.mediaItemCount - 1)
                     resolveAndPlayQueueItem(nextToPlay)
@@ -4065,8 +4065,8 @@ class MusicPlayer @Inject constructor(
                         _state.update { it.copy(isEndlessQueue = true) }
                         enrichUpcomingQueue(player.currentMediaItemIndex)
 
-                        val isPlayerStoppedAtEnd = player.playbackState == Player.STATE_ENDED ||
-                            (!player.isPlaying && player.currentMediaItemIndex >= previousCount - 1)
+                        val isPlayerStoppedAtEnd = player.playbackState == Player.STATE_ENDED &&
+                            player.currentMediaItemIndex >= previousCount - 1
                         if (isPlayerStoppedAtEnd || resumePlaybackImmediately) {
                             val nextToPlay = previousCount.coerceIn(0, player.mediaItemCount - 1)
                             android.util.Log.i("MusicPlayer", "Queue expired/started: auto-resuming endless playback at index $nextToPlay")
@@ -4146,8 +4146,8 @@ class MusicPlayer @Inject constructor(
                         _state.update { it.copy(isEndlessQueue = true) }
                         enrichUpcomingQueue(currentIndex)
 
-                        val isPlayerStoppedAtEnd = player.playbackState == Player.STATE_ENDED ||
-                            (!player.isPlaying && player.currentMediaItemIndex >= previousCount - 1)
+                        val isPlayerStoppedAtEnd = player.playbackState == Player.STATE_ENDED &&
+                            player.currentMediaItemIndex >= previousCount - 1
                         if (isPlayerStoppedAtEnd) {
                             val nextToPlay = previousCount.coerceIn(0, player.mediaItemCount - 1)
                             android.util.Log.i("MusicPlayer", "End of queue reached: auto-resuming infinite playback at index $nextToPlay")
@@ -5058,7 +5058,14 @@ class MusicPlayer @Inject constructor(
                     "Dolby Atmos enabled in settings, but device lacks spatial/Dolby decoding capabilities; falling back to lossless stereo tier",
                 )
             }
-            misc.losslessQuality
+            // If the user's lossless quality is also set to Atmos but the
+            // device can't play it, demote to hi-res stereo so the addon
+            // waterfall skips the spatial tier entirely.
+            if (!atmosSupported && misc.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS) {
+                LosslessMusicApi.QUALITY_MAX_HI_RES
+            } else {
+                misc.losslessQuality
+            }
         }
         val stream = losslessMusicApi.resolveStream(
             title = track.title,
@@ -5116,19 +5123,57 @@ class MusicPlayer @Inject constructor(
         }
         // Device-capability veto: a spatial manifest that slips through on a
         // device that cannot render Atmos (no spatializer, no JOC decoder)
-        // is unplayable by construction. Refuse it HERE so the resolve
-        // cascade falls to stereo hi-res / CD lossless / YouTube Opus
-        // instead of handing poison to ExoPlayer (3003 → retry loop →
-        // "Playback interrupted" on a track that could have played).
+        // is unplayable by construction. Re-request from the addon with a
+        // stereo quality tier so the waterfall tries hi-res → CD → lossless
+        // before we give up and fall to YouTube.
         val spatialResult = manifestCodecBadge == "DOLBY ATMOS" ||
             manifestCodecBadge == "SPATIAL AUDIO" ||
             stream.audioCodecOverride == "DOLBY ATMOS"
         if (spatialResult && !atmosSupported) {
             android.util.Log.w(
                 "MusicPlayer",
-                "[LOSSLESS] veto: spatial manifest for '${track.title}' on incapable device; cascading down",
+                "[LOSSLESS] veto: spatial manifest for '${track.title}' on incapable device; re-requesting stereo tier",
             )
-            return null
+            // Re-request with hi-res stereo quality so the addon waterfall
+            // tries hi_res → lossless → high instead of skipping to YouTube.
+            val stereoQuality = if (effectiveQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS) {
+                LosslessMusicApi.QUALITY_MAX_HI_RES
+            } else {
+                effectiveQuality
+            }
+            val stereoStream = losslessMusicApi.resolveStream(
+                title = track.title,
+                artist = track.artist,
+                expectedDurationSeconds = expectedDurationSeconds,
+                expectedAlbum = track.album,
+                preferredQuality = stereoQuality,
+                excludedUrls = excludedLosslessUrls,
+            )
+            if (stereoStream == null) {
+                android.util.Log.w("MusicPlayer", "[LOSSLESS] stereo fallback also returned null for '${track.title}'")
+                return null
+            }
+            // Verify the stereo fallback isn't spatial too
+            val stereoManifestCodec = LosslessMusicApi.manifestCodecOf(stereoStream.url)?.lowercase()
+            val stereoIsSpatial = stereoManifestCodec?.let {
+                it.contains("ec-3") || it.contains("eac3") || it.contains("ac-3") ||
+                    it.contains("mha1") || it.contains("mhm1")
+            } == true || stereoStream.audioCodecOverride == "DOLBY ATMOS"
+            if (stereoIsSpatial) {
+                android.util.Log.w("MusicPlayer", "[LOSSLESS] stereo fallback still spatial for '${track.title}'; giving up")
+                return null
+            }
+            // Use the stereo stream instead — re-derive badge and metadata
+            // from the new stream by recursing with the stereo quality.
+            // (We can't just drop through because badge/playUrl were computed
+            // from the original spatial stream.)
+            android.util.Log.i("MusicPlayer", "[LOSSLESS] stereo fallback succeeded for '${track.title}'")
+            return resolveLosslessTrackAudioStream(
+                track = track,
+                misc = misc.copy(dolbyAtmosEnabled = false, losslessQuality = stereoQuality),
+                excludedLosslessUrls = excludedLosslessUrls,
+                expectedDurationSeconds = expectedDurationSeconds,
+            )
         }
 
         val playUrl: String
