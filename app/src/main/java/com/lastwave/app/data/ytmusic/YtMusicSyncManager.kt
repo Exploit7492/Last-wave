@@ -298,6 +298,13 @@ class YtMusicSyncManager @Inject constructor(
         for (videoId in resolvedVideoIds) {
             if (videoId != null) desiredVideoIds += videoId else unmatched++
         }
+        // Push guard: only tracks carrying an explicit YouTube identity
+        // (watch URL / bare videoId on the track itself) may be uploaded to
+        // the user's YouTube playlist. Fuzzy search guesses stay local-only:
+        // pushing a guess is how songs the user never added end up in their
+        // YouTube playlist. Unresolvable tracks already count as unmatched;
+        // fuzzy-but-unpushable ids are counted too so the report stays honest.
+        val exactVideoIds = playlist.tracks.mapNotNull { it.youtubeVideoIdOrNull() }.toSet()
 
         // Fresh read-back only when we mutated the remote this pass (create /
         // rename); otherwise the top verification fetch is already current.
@@ -339,7 +346,8 @@ class YtMusicSyncManager @Inject constructor(
             .map { item ->
                 checkNotNull(item.setVideoId) { "Missing YouTube Music removal token" } to item.videoId
             }
-        val toAdd = finalVideoIds.filter { it !in remoteSet }
+        val toAdd = finalVideoIds.filter { it !in remoteSet && it in exactVideoIds }
+        unmatched += finalVideoIds.count { it !in remoteSet && it !in exactVideoIds }
 
         if (toRemove.isNotEmpty()) {
             check(innerTube.removeVideosFromRemotePlaylist(remoteId, toRemove)) {
