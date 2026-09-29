@@ -772,8 +772,10 @@ private fun ExpandedPlayer(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val likedTrackKeys by viewModel.likedTrackKeys.collectAsStateWithLifecycle()
     val currentTrack = state.current
+    // Normalized key: raw "title|artist".lowercase() would miss liked entries
+    // whose spacing differs (e.g. trailing space from another source).
     val isLiked = currentTrack != null &&
-        "${currentTrack.title}|${currentTrack.artist}".lowercase() in likedTrackKeys
+        currentTrack.toGeneratedTrack().key in likedTrackKeys
     FullPlayer(
         state = state,
         progressState = viewModel.progressState,

@@ -3,6 +3,7 @@ package com.lastwave.app.data.ytmusic
 import android.content.Context
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.generate.StoredTrack
+import com.lastwave.app.data.generate.normalizeTrackText
 import com.lastwave.app.data.generate.toGenerated
 import com.lastwave.app.data.generate.toStored
 import com.lastwave.app.data.generate.youtubeVideoIdOrNull
@@ -522,7 +523,7 @@ class YtMusicLibraryManager @Inject constructor(
         return (videoId != null && videoId == originalVideoId) ||
             videoId == match?.videoId ||
             key == original.key ||
-            (match != null && key == "${match.title}|${match.artist}".lowercase()) ||
+            (match != null && key == "${match.title.normalizeTrackText()}|${match.artist.normalizeTrackText()}".lowercase()) ||
             (name.equals(original.name, ignoreCase = true) && artist.equals(original.artist, ignoreCase = true))
     }
 

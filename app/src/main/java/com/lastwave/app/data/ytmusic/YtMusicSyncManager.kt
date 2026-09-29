@@ -1,6 +1,7 @@
 package com.lastwave.app.data.ytmusic
 
 import android.util.Log
+import com.lastwave.app.data.generate.distinctSongs
 import com.lastwave.app.data.generate.youtubeVideoIdOrNull
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.music.YtOwnedPlaylist
@@ -278,7 +279,7 @@ class YtMusicSyncManager @Inject constructor(
                 async {
                     track.youtubeVideoIdOrNull()?.let { return@async it }
                     matchLimiter.withPermit {
-                        val cacheKey = "${track.name}|${track.artist}".lowercase().trim()
+                        val cacheKey = track.key
                         val negativeUntil = negativeMatchCache[cacheKey] ?: 0L
                         if (now < negativeUntil) {
                             null
@@ -326,10 +327,12 @@ class YtMusicSyncManager @Inject constructor(
             (baseline - removedLocally - removedRemotely) +
                 (localSet - baseline) + (remoteSet - baseline)
         }
+        // Distinct: a duplicated videoId locally must collapse to one entry —
+        // otherwise the duplicate is pushed to YouTube and amplified remote.
         val finalVideoIds = buildList {
             desiredVideoIds.filterTo(this) { it in finalSet }
             remoteVideoIds.filterTo(this) { it in finalSet && it !in this }
-        }
+        }.distinct()
 
         val toRemove = remoteItems
             .filter { it.videoId !in finalSet }
@@ -359,10 +362,24 @@ class YtMusicSyncManager @Inject constructor(
             val localByVideoId = resolvedVideoIds.mapIndexedNotNull { index, videoId ->
                 videoId?.let { it to playlist.tracks[index] }
             }.toMap()
+            // Keys of songs already represented with a KEPT resolved videoId. A
+            // videoId-less local copy with the same key is the classic
+            // heart-like (Qobuz/local, url="") vs YT-copy duplicate — drop it
+            // here so the merge heals instead of preserving both copies.
+            // (Only kept videoIds count: a removed copy must not swallow the
+            // surviving videoId-less original.)
+            val resolvedKeys = localByVideoId
+                .filterKeys { it in finalSet }
+                .values.mapTo(mutableSetOf()) { it.key }
             val mergedTracks = buildList {
+                val seenVideoIds = mutableSetOf<String>()
                 playlist.tracks.forEachIndexed { index, track ->
                     val videoId = resolvedVideoIds[index]
-                    if (videoId == null || videoId in finalSet) add(track)
+                    if (videoId == null) {
+                        if (track.key !in resolvedKeys) add(track)
+                    } else if (videoId in finalSet && seenVideoIds.add(videoId)) {
+                        add(track)
+                    }
                 }
                 val represented = resolvedVideoIds.filterNotNull().toSet()
                 finalVideoIds.filterNot { it in represented }.forEach { videoId ->
@@ -370,7 +387,7 @@ class YtMusicSyncManager @Inject constructor(
                         ?: remoteMetadata[videoId]?.toGeneratedTrack()
                     add(checkNotNull(track) { "Missing YouTube Music track metadata" })
                 }
-            }
+            }.distinctSongs()
             checkNotNull(playlistRepository.replaceTracksForSync(playlist.id, mergedTracks, playlist.tracks)) {
                 "Playlist changed during sync; retry on the next pass"
             }

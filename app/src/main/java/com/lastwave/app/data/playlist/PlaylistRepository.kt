@@ -6,6 +6,7 @@ import com.lastwave.app.data.local.db.SavedPlaylistDao
 import com.lastwave.app.data.local.db.SavedPlaylistEntity
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.generate.StoredTrack
+import com.lastwave.app.data.generate.sameSongAs
 import com.lastwave.app.data.generate.toGenerated
 import com.lastwave.app.data.generate.toStored
 import com.lastwave.app.data.generate.youtubeVideoIdOrNull
@@ -204,10 +205,7 @@ class PlaylistRepository @Inject constructor(
         existing: List<GeneratedTrack>,
         incoming: List<GeneratedTrack>,
     ): Boolean = existing.size == incoming.size && existing.zip(incoming).all { (left, right) ->
-        if (left.key != right.key) return@all false
-        val leftVideoId = left.youtubeVideoIdOrNull()
-        val rightVideoId = right.youtubeVideoIdOrNull()
-        leftVideoId == null || rightVideoId == null || leftVideoId == rightVideoId
+        left.sameSongAs(right)
     }
 
     /**
@@ -289,7 +287,7 @@ class PlaylistRepository @Inject constructor(
             val entity = dao.getById(id) ?: return@withLock null
             val playlist = entity.toDomain()
             if (playlist.mode != "custom" && playlist.mode != LIKED_SONGS_MODE) return@withLock playlist
-            if ((playlist.mode == LIKED_SONGS_MODE || !allowDuplicate) && playlist.tracks.any { it.key == track.key }) return@withLock playlist
+            if ((playlist.mode == LIKED_SONGS_MODE || !allowDuplicate) && playlist.tracks.any { it.sameSongAs(track) }) return@withLock playlist
             if (track.youtubeVideoIdOrNull() == null && !innerTube.isPlayable(track.name, track.artist)) return@withLock playlist
             val updatedTracksJson = json.encodeToString((playlist.tracks + track).map { it.toStored() })
             val updated = entity.copy(tracksJson = updatedTracksJson)

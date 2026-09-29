@@ -28,7 +28,44 @@ data class GeneratedTrack(
     val match: Double? = null,
     val album: String? = null,
 ) {
-    val key: String get() = "$name|$artist".lowercase()
+    /**
+     * Normalized identity: trimmed, inner whitespace collapsed, lowercased.
+     * Raw `" $name | $artist ".lowercase()` used to miss the same song across
+     * sources (heart-tap vs YT import vs sync pull-back differ in spacing),
+     * stacking duplicates on every re-import. Always compare via [key] or
+     * [sameSongAs], never via ad-hoc string concatenation.
+     */
+    val key: String get() = "${name.normalizeTrackText()}|${artist.normalizeTrackText()}".lowercase()
+}
+
+/** Trims and collapses inner whitespace so equivalent titles compare equal. */
+fun String.normalizeTrackText(): String = trim().replace(WHITESPACE_RUN, " ")
+
+private val WHITESPACE_RUN = Regex("\\s+")
+
+/**
+ * Strong song identity: same YouTube videoId wins outright (covers equal
+ * songs whose title/artist spelling drifted, e.g. "(Official Video)" or
+ * "- Topic" suffixes); otherwise falls back to normalized [GeneratedTrack.key]
+ * plus a trimmed case-insensitive name+artist comparison.
+ */
+fun GeneratedTrack.sameSongAs(other: GeneratedTrack): Boolean {
+    val mine = youtubeVideoIdOrNull()
+    val theirs = other.youtubeVideoIdOrNull()
+    if (mine != null && mine == theirs) return true
+    if (key == other.key) return true
+    return name.trim().equals(other.name.trim(), ignoreCase = true) &&
+        artist.trim().equals(other.artist.trim(), ignoreCase = true)
+}
+
+/** Keeps the first occurrence of each song, dropping later duplicates. */
+fun List<GeneratedTrack>.distinctSongs(): List<GeneratedTrack> {
+    if (size < 2) return this
+    val out = ArrayList<GeneratedTrack>(size)
+    for (track in this) {
+        if (out.none { it.sameSongAs(track) }) out.add(track)
+    }
+    return out
 }
 
 /** Serializable form of [GeneratedTrack], used for Room-persisted playlists

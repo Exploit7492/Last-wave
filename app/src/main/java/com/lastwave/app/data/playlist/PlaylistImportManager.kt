@@ -1,6 +1,7 @@
 package com.lastwave.app.data.playlist
 
 import com.lastwave.app.data.generate.GeneratedTrack
+import com.lastwave.app.data.generate.distinctSongs
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.music.YouTubeMusicTrack
 import com.lastwave.app.data.music.YouTubePlaylistResult
@@ -17,6 +18,7 @@ import javax.inject.Singleton
 @Singleton
 class PlaylistImportManager @Inject constructor(
     private val playlistRepository: PlaylistRepository,
+    private val likedSongsManager: LikedSongsManager,
     private val innerTube: InnerTubeMusicApi,
     private val csvPlaylistImporter: CsvPlaylistImporter,
     private val ytMusicPreferences: YtMusicPreferences,
@@ -58,10 +60,15 @@ class PlaylistImportManager @Inject constructor(
 
     /**
      * Merges the account's YouTube Liked Music (LM) into the built-in local
-     * Liked Songs playlist (deduped by track key). Unlike normal imports this
-     * never creates a separate `custom` playlist and never creates a remote
-     * mapping — LM is not editable via the playlist-edit API, so the local
-     * Liked Songs copy syncs as its own private "Liked Songs" mirror instead.
+     * Liked Songs playlist (deduped by strong song identity). Unlike normal
+     * imports this never creates a separate `custom` playlist and never
+     * creates a remote mapping — LM is not editable via the playlist-edit
+     * API, so the local Liked Songs copy syncs as its own private
+     * "Liked Songs" mirror instead.
+     *
+     * The merge itself runs inside [LikedSongsManager.mergeTracks] under the
+     * shared liked mutation mutex, so a heart-tap racing this import can no
+     * longer interleave a stale read-modify-write that duplicates entries.
      */
     suspend fun importYtLikedIntoLikedSongs(
         playlist: YouTubePlaylistResult,
@@ -75,13 +82,10 @@ class PlaylistImportManager @Inject constructor(
                 artworkUrl = yt.artworkUrl,
                 url = "https://music.youtube.com/watch?v=${yt.videoId}",
             )
-        }
-        val liked = playlistRepository.ensureLikedSongs()
-        if (tracks.isEmpty()) return@withContext liked
-        val seenKeys = liked.tracks.mapTo(mutableSetOf()) { it.key }
-        val fresh = tracks.filter { seenKeys.add(it.key) }
-        if (fresh.isEmpty()) return@withContext liked
-        playlistRepository.replaceTracksForSync(liked.id, liked.tracks + fresh) ?: liked
+        }.distinctSongs()
+        if (tracks.isEmpty()) return@withContext playlistRepository.ensureLikedSongs()
+        likedSongsManager.mergeTracks(tracks)
+        playlistRepository.ensureLikedSongs()
     }
 
     /** Makes an owned account playlist local while retaining its live two-way mapping. */

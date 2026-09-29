@@ -3,6 +3,8 @@ package com.lastwave.app.data.playlist
 import android.content.Context
 import android.os.Build
 import com.lastwave.app.data.generate.GeneratedTrack
+import com.lastwave.app.data.generate.distinctSongs
+import com.lastwave.app.data.generate.sameSongAs
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -35,6 +37,12 @@ class LikedSongsManager @Inject constructor(
             try {
                 bootstrapForInstalledVersion()
                 refresh()
+                // One-time heal for duplicates stacked by older builds (weak
+                // key dedup + unlocked YT-liked import). No-op when clean.
+                runCatching { dedupe() }
+                    .onSuccess { removed ->
+                        if (removed > 0) android.util.Log.i("LikedSongsManager", "Healed $removed duplicate liked tracks")
+                    }
                 playlistRepository.changes.collect { refresh() }
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -53,18 +61,18 @@ class LikedSongsManager @Inject constructor(
 
     suspend fun toggle(track: GeneratedTrack): Boolean = mutationMutex.withLock {
         val existing = playlistRepository.getLikedSongs()
-        val currentlyLiked = existing?.tracks?.any { it.key == track.key } == true
+        val currentlyLiked = existing?.tracks?.any { it.sameSongAs(track) } == true
         if (currentlyLiked) {
             playlistRepository.replaceTracksForSync(
                 existing!!.id,
-                existing.tracks.filterNot { it.key == track.key },
+                existing.tracks.filterNot { it.sameSongAs(track) },
             )
             refresh()
             false
         } else {
             // Deletion is respected until the next actual Like action.
             val playlist = existing ?: playlistRepository.ensureLikedSongs()
-            playlistRepository.replaceTracksForSync(playlist.id, playlist.tracks + track)
+            playlistRepository.replaceTracksForSync(playlist.id, (playlist.tracks + track).distinctSongs())
             refresh()
             true
         }
@@ -73,11 +81,61 @@ class LikedSongsManager @Inject constructor(
     /** Artwork double-tap is intentionally idempotent: it never unlikes. */
     suspend fun like(track: GeneratedTrack): Boolean = mutationMutex.withLock {
         val existing = playlistRepository.getLikedSongs()
-        if (existing?.tracks?.any { it.key == track.key } == true) return@withLock true
+        if (existing?.tracks?.any { it.sameSongAs(track) } == true) return@withLock true
         val playlist = existing ?: playlistRepository.ensureLikedSongs()
-        playlistRepository.replaceTracksForSync(playlist.id, playlist.tracks + track)
+        playlistRepository.replaceTracksForSync(playlist.id, (playlist.tracks + track).distinctSongs())
         refresh()
         true
+    }
+
+    /**
+     * Merges externally sourced tracks (YT liked import) into Liked Songs.
+     * Runs under the same [mutationMutex] as [toggle]/[like], so a heart-tap
+     * racing an import can no longer interleave a stale read-modify-write
+     * that resurrects duplicates.
+     */
+    suspend fun mergeTracks(tracks: List<GeneratedTrack>): Boolean = mutationMutex.withLock {
+        if (tracks.isEmpty()) return@withLock true
+        // CAS retry: a blind writer (sync reconcile, manual add) may commit
+        // between our read and write — re-read and re-merge instead of
+        // overwriting their change or duplicating ours.
+        repeat(3) {
+            val liked = playlistRepository.ensureLikedSongs()
+            val merged = (liked.tracks + tracks).distinctSongs()
+            if (merged.size == liked.tracks.size) return@withLock true
+            if (playlistRepository.replaceTracksForSync(liked.id, merged, liked.tracks) != null) {
+                refresh()
+                return@withLock true
+            }
+        }
+        // Final attempt without CAS rather than dropping the import.
+        val liked = playlistRepository.ensureLikedSongs()
+        playlistRepository.replaceTracksForSync(liked.id, (liked.tracks + tracks).distinctSongs())
+        refresh()
+        true
+    }
+
+    /**
+     * One-time heal: collapses pre-existing duplicates (same videoId or same
+     * normalized title+artist) keeping the first occurrence. Best-effort —
+     * never throws, so startup can safely invoke it.
+     *
+     * @return number of duplicate entries removed.
+     */
+    suspend fun dedupe(): Int = mutationMutex.withLock {
+        val liked = playlistRepository.getLikedSongs() ?: return@withLock 0
+        val healed = liked.tracks.distinctSongs()
+        val removed = liked.tracks.size - healed.size
+        if (removed <= 0) return@withLock 0
+        val written = runCatching {
+            playlistRepository.replaceTracksForSync(liked.id, healed, liked.tracks)
+        }.getOrNull()
+        if (written != null) {
+            refresh()
+            removed
+        } else {
+            0
+        }
     }
 
     private suspend fun refresh() {

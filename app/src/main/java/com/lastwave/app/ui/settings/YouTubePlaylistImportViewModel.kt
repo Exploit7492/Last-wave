@@ -258,6 +258,9 @@ class YouTubePlaylistImportViewModel @Inject constructor(
                     savedList.add(saved)
                 } else {
                     var count = 0
+                    // LM/VLLM/LL aliases all resolve to the same Liked Music
+                    // collection — importing more than one stacks duplicates.
+                    var likedImported = false
                     for (id in selectedIds) {
                         count++
                         _uiState.update { it.copy(importProgress = "Importing playlist $count of ${selectedIds.size}...") }
@@ -266,6 +269,8 @@ class YouTubePlaylistImportViewModel @Inject constructor(
                             val saved = if (PlaylistImportManager.isYtLikedId(playlistResult.id) ||
                                 PlaylistImportManager.isYtLikedId(id)
                             ) {
+                                if (likedImported) continue
+                                likedImported = true
                                 importManager.importYtLikedIntoLikedSongs(playlistResult)
                             } else if (playlistResult.id in ownedIds) {
                                 importManager.importOwnedYouTubePlaylist(playlistResult)
