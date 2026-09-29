@@ -1,8 +1,8 @@
-import androidx.compose.foundation.border
 @file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 
 package com.lastwave.app.ui.player
 
+import androidx.compose.foundation.border
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.BitmapDrawable

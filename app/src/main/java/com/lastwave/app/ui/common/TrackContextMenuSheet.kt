@@ -1,6 +1,6 @@
-import androidx.compose.foundation.border
 package com.lastwave.app.ui.common
 
+import androidx.compose.foundation.border
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 
