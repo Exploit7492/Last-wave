@@ -1850,16 +1850,18 @@ private fun FullPlayer(
                         )
                     }
                 )
-                // Contrast scrim gradient (ensures text & controls are clear while preserving vibrant colors)
+                // Contrast scrim gradient (ensures text & controls are clear while preserving vibrant colors).
+                // Bottom is intentionally softer now — the seamless melt below carries
+                // the dominant hue, so heavy black here would recreate the hard cut.
                 Box(
                     Modifier
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
                                 0.00f to Color.Black.copy(alpha = 0.35f),
-                                0.28f to Color.Black.copy(alpha = 0.15f),
-                                0.65f to Color.Black.copy(alpha = 0.40f),
-                                1.00f to Color.Black.copy(alpha = 0.72f),
+                                0.28f to Color.Black.copy(alpha = 0.12f),
+                                0.65f to Color.Black.copy(alpha = 0.28f),
+                                1.00f to Color.Black.copy(alpha = 0.52f),
                             )
                         )
                 )
@@ -1881,11 +1883,49 @@ private fun FullPlayer(
                         ),
                 )
                 if (showFullBleed) {
-                    val heroHeight = if (heroBottomPx > 0f) {
-                        with(LocalDensity.current) { (heroBottomPx + 8.dp.toPx()).toDp() }
+                    val density = LocalDensity.current
+                    // Dominant-derived solid the hero melts into. Darkened just enough
+                    // for white title/controls to stay legible while keeping hue,
+                    // so the eye can't find where art ends and background begins.
+                    val seamlessBase = androidx.compose.ui.graphics.lerp(
+                        ambientDeep,
+                        Color.Black,
+                        0.42f,
+                    )
+                    // Square-capped hero: a tall container forces Crop to zoom and eat
+                    // the sides (the "stretch"). Clamp measured height near square so
+                    // side-crop stays minimal. Tall portrait canvas keeps full-page.
+                    val isTallCanvas = activeCanvas != null && canvasRendered &&
+                        canvasAspect in 0.30f..0.82f
+                    val measuredPx = if (heroBottomPx > 0f) {
+                        heroBottomPx + with(density) { 8.dp.toPx() }
                     } else {
-                        with(LocalDensity.current) { (bgHeight * 0.58f).toDp() }
+                        bgHeight * 0.58f
                     }
+                    val maxPx = if (isTallCanvas) {
+                        bgHeight * 0.70f
+                    } else {
+                        minOf(bgWidth * 1.08f, bgHeight * 0.62f)
+                    }
+                    val minPx = minOf(bgWidth * 0.92f, bgHeight * 0.50f)
+                    val heroPx = measuredPx.coerceIn(minPx, maxPx).coerceAtLeast(1f)
+                    val heroHeight = with(density) { heroPx.toDp() }
+                    // Melt foundation UNDER the hero: transparent where hero is opaque,
+                    // fully solid where hero has faded out. Revealed through the DstIn
+                    // mask, so there is never a hero-edge line — just hue into hue.
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    0.00f to Color.Transparent,
+                                    0.30f to Color.Transparent,
+                                    0.50f to seamlessBase.copy(alpha = 0.55f),
+                                    0.62f to seamlessBase,
+                                    1.00f to seamlessBase,
+                                )
+                            )
+                    )
                     val lyricsCanvasBlurDp by animateDpAsState(
                         targetValue = if (currentTab == FullPlayerTab.LYRICS) 32.dp else 0.dp,
                         animationSpec = tween(350),
@@ -1906,13 +1946,17 @@ private fun FullPlayer(
                             }
                             .drawWithContent {
                                 drawContent()
+                                // Long buttery fade: fully sharp through the face/focus
+                                // zone, then eased melt. Extra stops kill banding so the
+                                // join is hard to notice even on flat skin tones.
                                 drawRect(
                                     brush = Brush.verticalGradient(
                                         0.00f to Color.Black,
-                                        0.58f to Color.Black,
-                                        0.72f to Color.Black.copy(alpha = 0.82f),
-                                        0.84f to Color.Black.copy(alpha = 0.48f),
-                                        0.94f to Color.Black.copy(alpha = 0.12f),
+                                        0.52f to Color.Black,
+                                        0.66f to Color.Black.copy(alpha = 0.92f),
+                                        0.78f to Color.Black.copy(alpha = 0.66f),
+                                        0.88f to Color.Black.copy(alpha = 0.30f),
+                                        0.95f to Color.Black.copy(alpha = 0.08f),
                                         1.00f to Color.Transparent,
                                     ),
                                     blendMode = BlendMode.DstIn,
@@ -1953,7 +1997,9 @@ private fun FullPlayer(
                                 isPlaying = state.isPlaying,
                                 contentMode = CanvasContentMode.CROP,
                                 alignPortraitTop = true,
-                                bottomFade = 0.38f,
+                                // Lower than before: outer hero mask + bottom tint now own
+                                // the melt. Higher values double-darken animated art.
+                                bottomFade = 0.30f,
                                 onAspectRatioChanged = { canvasAspect = it },
                                 onRenderedChanged = { canvasRendered = it },
                                 pausedForTransition = shownDismissY > 0f || currentTab != FullPlayerTab.NOW_PLAYING,
@@ -1964,6 +2010,23 @@ private fun FullPlayer(
                                     },
                             )
                         }
+                        // Bottom hue-tint INSIDE the mask: dyes the hero's own tail
+                        // pixels toward seamlessBase before they fade, so sharp art
+                        // and solid meet with zero visible edge. Also fades with DstIn.
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .height(heroHeight * 0.58f)
+                                .background(
+                                    Brush.verticalGradient(
+                                        0.00f to Color.Transparent,
+                                        0.45f to seamlessBase.copy(alpha = 0.18f),
+                                        0.75f to seamlessBase.copy(alpha = 0.42f),
+                                        1.00f to seamlessBase.copy(alpha = 0.62f),
+                                    )
+                                )
+                        )
                     }
                 }
 
