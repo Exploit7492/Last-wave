@@ -1,3 +1,4 @@
+import androidx.compose.foundation.border
 package com.lastwave.app.ui.common
 
 import androidx.compose.material.icons.filled.Add
@@ -399,11 +400,11 @@ fun TrackContextMenuSheet(
                 Column(Modifier.padding(20.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Sleep timer", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                        androidx.compose.material3.IconButton(onClick = { showCustomDialog = true }) {
+                        androidx.compose.material3.IconButton(
+                            onClick = { showCustomDialog = true },
+                            modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                        ) {
                             Icon(Icons.Filled.Add, "Custom Timer")
-                        }
-                        androidx.compose.material3.IconButton(onClick = { showTimerDialog = false }) {
-                            Icon(Icons.Filled.Close, "Close")
                         }
                     }
                     Spacer(Modifier.height(16.dp))

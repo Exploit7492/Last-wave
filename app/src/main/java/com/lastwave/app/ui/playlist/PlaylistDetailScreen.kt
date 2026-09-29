@@ -76,6 +76,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -482,20 +483,6 @@ fun PlaylistDetailScreen(
                                 fontWeight = FontWeight.Bold,
                             )
                         }
-                        // Download all songs not yet saved in Music/LastWave
-                        FilledTonalIconButton(
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.downloadPlaylist(playlistId)
-                            },
-                            shape = CircleShape,
-                            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            ),
-                            modifier = Modifier.size(50.dp),
-                        ) {
-                            Icon(Icons.Filled.Download, contentDescription = "Download all songs", modifier = Modifier.size(22.dp))
-                        }
                         // Locate current song
                         FilledTonalIconButton(
                             onClick = {
@@ -514,23 +501,7 @@ fun PlaylistDetailScreen(
                             ),
                             modifier = Modifier.size(50.dp),
                         ) {
-                            Icon(Icons.Filled.NearMe, contentDescription = "Locate playing song", modifier = Modifier.size(22.dp))
-                        }
-                        // Search inside playlist
-                        FilledTonalIconButton(
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                isSearchActive = !isSearchActive
-                                if (!isSearchActive) searchQuery = ""
-                            },
-                            shape = CircleShape,
-                            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                                containerColor = if (isSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = if (isSearchActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer,
-                            ),
-                            modifier = Modifier.size(50.dp),
-                        ) {
-                            Icon(Icons.Filled.Search, contentDescription = "Search in playlist", modifier = Modifier.size(22.dp))
+                            Icon(Icons.Rounded.MyLocation, contentDescription = "Locate playing song", modifier = Modifier.size(22.dp))
                         }
                     }
 
@@ -964,36 +935,6 @@ fun PlaylistDetailScreen(
                     }
                 }
 
-                // Scrolled Quick Play Mini Button
-                AnimatedVisibility(
-                    visible = showScrolledHeader && playlist.tracks.isNotEmpty(),
-                    enter = fadeIn() + scaleIn(),
-                    exit = fadeOut() + scaleOut(),
-                ) {
-                    FilledTonalIconButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            musicPlayer.playQueue(
-                                displayTracks.map(GeneratedTrack::toPlayableTrack),
-                                startIndex = 0,
-                                sourceLabel = playlist.title,
-                            )
-                        },
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        ),
-                        modifier = Modifier.size(38.dp),
-                    ) {
-                        Icon(
-                            if (isThisPlaylistPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            contentDescription = "Play",
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
-
-                Spacer(Modifier.width(8.dp))
-
                 AnimatedVisibility(
                     visible = showScrolledHeader && playlist.tracks.isNotEmpty(),
                     enter = fadeIn() + scaleIn(),
@@ -1016,14 +957,14 @@ fun PlaylistDetailScreen(
                         ),
                         modifier = Modifier.size(38.dp),
                     ) {
-                        Icon(Icons.Filled.NearMe, contentDescription = "Locate playing song", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.MyLocation, contentDescription = "Locate playing song", modifier = Modifier.size(16.dp))
                     }
                 }
 
                 Spacer(Modifier.width(6.dp))
 
                 AnimatedVisibility(
-                    visible = showScrolledHeader && playlist.tracks.isNotEmpty(),
+                    visible = true,
                     enter = fadeIn() + scaleIn(),
                     exit = fadeOut() + scaleOut(),
                 ) {
@@ -1442,13 +1383,15 @@ private fun NativeTrackRow(
         ) {
             // Track index or playing animation
             Box(
-                modifier = Modifier.width(24.dp),
+                modifier = Modifier.width(36.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 Text(
                     text = "$index",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.outline,
+                    maxLines = 1,
+                    overflow = TextOverflow.Visible,
                 )
             }
             Spacer(Modifier.width(6.dp))
