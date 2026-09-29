@@ -667,8 +667,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             try {
                 val result = scrobbleRepository.updateNowPlaying(cleanArtist, cleanTitle, track.album)
                 when {
-                    result is ScrobbleRepository.Result.Success ->
-
+                    result is ScrobbleRepository.Result.Success -> Unit
                     result is ScrobbleRepository.Result.Failed && result.retryable -> {
                         // Transient (rate limit / network): clear the announced key so
                         // the 1s detector loop re-attempts once the rate shield
