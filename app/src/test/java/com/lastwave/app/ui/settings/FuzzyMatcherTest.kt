@@ -29,10 +29,10 @@ class FuzzyMatcherTest {
 
     @Test
     fun prefixTitleMatch() {
-        val results = FuzzyMatcher.search("scrob", allEntries)
+        val results = FuzzyMatcher.search("theme", allEntries)
         assertThat(results).isNotEmpty()
         val top = results.first()
-        assertThat(top.entry.title.lowercase()).startsWith("scrob")
+        assertThat(top.entry.title.lowercase()).startsWith("theme")
         assertThat(top.titleMatchedRanges).isNotEmpty()
         assertThat(top.titleMatchedRanges.first().first).isEqualTo(0)
     }
