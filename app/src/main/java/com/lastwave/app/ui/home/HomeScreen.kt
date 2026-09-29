@@ -531,11 +531,11 @@ private fun formatTimer(totalSeconds: Long): String {
 }
 
 @Composable
-private fun ProfileAvatar(avatarUrl: String?, modifier: Modifier = Modifier) {
+fun ProfileAvatar(avatarUrl: String?, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
-            .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
-            .padding(4.dp),
+            .border(1.dp, MaterialTheme.colorScheme.primary, CircleShape)
+            .padding(2.dp),
         contentAlignment = Alignment.Center
     ) {
         Surface(

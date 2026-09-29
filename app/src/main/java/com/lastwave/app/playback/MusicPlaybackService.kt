@@ -41,7 +41,7 @@ import com.lastwave.app.data.local.ScrobblerPreferences
 import com.lastwave.app.data.local.ScrobblerSettings
 import com.lastwave.app.data.repository.ScrobbleRepository
 import com.lastwave.app.data.repository.ThemeRepository
-import com.lastwave.app.service.ScrobbleDebugLog
+
 import com.lastwave.app.widget.ActiveMediaSessionHolder
 import com.lastwave.app.widget.WidgetUpdater
 import dagger.hilt.android.AndroidEntryPoint
@@ -90,7 +90,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
     @Inject lateinit var musicPlayer: MusicPlayer
     @Inject lateinit var scrobbleRepository: ScrobbleRepository
     @Inject lateinit var scrobblerPreferences: ScrobblerPreferences
-    @Inject lateinit var debugLog: ScrobbleDebugLog
+
     @Inject lateinit var themeRepository: ThemeRepository
     @Inject lateinit var artworkRepository: com.lastwave.app.data.artwork.ArtworkRepository
     @Inject lateinit var androidAutoLibrary: AndroidAutoMediaLibrary
@@ -645,7 +645,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         retryCount = 0
         startedAtEpochSec = System.currentTimeMillis() / 1000
         submissionAttempted = false
-        debugLog.log("Own player detected: \"$cleanTitle\" — $cleanArtist")
+
         if (state.isPlaying) {
             announceNowPlaying(state)
         }
@@ -667,8 +667,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             try {
                 val result = scrobbleRepository.updateNowPlaying(cleanArtist, cleanTitle, track.album)
                 when {
-                    result is ScrobbleRepository.Result.Success ->
-                        debugLog.log("Now playing updated: \"$cleanTitle\" — $cleanArtist")
+                    result is ScrobbleRepository.Result.Success -> Unit
                     result is ScrobbleRepository.Result.Failed && result.retryable -> {
                         // Transient (rate limit / network): clear the announced key so
                         // the 1s detector loop re-attempts once the rate shield
@@ -683,7 +682,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             } catch (e: Exception) {
                 // A throw here used to escape via try/finally with no catch
                 // and (before the scope handler existed) kill the process.
-                debugLog.log("Now playing update crashed: ${e.message}")
+
                 android.util.Log.e("MusicPlaybackService", "updateNowPlaying failed", e)
             } finally {
                 nowPlayingInFlight = false
@@ -747,17 +746,17 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                             timestampSec = startedAtEpochSec,
                         )) {
                             ScrobbleRepository.Result.Success -> {
-                                debugLog.log("Own player scrobbled \"$cleanTitle\" — $cleanArtist")
+
                                 // Re-announce now playing so Last.fm keeps active status during ongoing playback
                                 if (musicPlayer.state.value.isPlaying) {
                                     scrobbleRepository.updateNowPlaying(cleanArtist, cleanTitle, track.album)
                                 }
                             }
                             ScrobbleRepository.Result.NoSessionKey -> {
-                                debugLog.log("Own play detected for \"$cleanTitle\"; connect Last.fm to submit it")
+
                             }
                             is ScrobbleRepository.Result.Failed -> {
-                                debugLog.log("Own player scrobble failed for \"$cleanTitle\": ${result.message}")
+
                                 // Allow up to 3 retries on network failure
                                 if (retryCount < 3) {
                                     retryCount++

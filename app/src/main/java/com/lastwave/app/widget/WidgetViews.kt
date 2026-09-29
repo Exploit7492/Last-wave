@@ -178,7 +178,7 @@ internal object WidgetViews {
         val playing = snapshot.isPlaying
         views.setTextViewText(
             R.id.widget_state,
-            if (playing) "Playing" else "Paused",
+            if (playing) "Pause" else "Play",
         )
         views.setImageViewResource(
             R.id.widget_play_pause,
@@ -218,11 +218,19 @@ internal object WidgetViews {
             WidgetActions.togglePending(context, NowPlayingWidgetReceiver::class.java),
         )
         views.setOnClickPendingIntent(
+            R.id.widget_play_pause_container,
+            WidgetActions.togglePending(context, NowPlayingWidgetReceiver::class.java),
+        )
+        views.setOnClickPendingIntent(
             R.id.widget_prev,
             WidgetActions.prevPending(context, NowPlayingWidgetReceiver::class.java),
         )
         views.setOnClickPendingIntent(
             R.id.widget_next,
+            WidgetActions.nextPending(context, NowPlayingWidgetReceiver::class.java),
+        )
+        views.setOnClickPendingIntent(
+            R.id.widget_next_container,
             WidgetActions.nextPending(context, NowPlayingWidgetReceiver::class.java),
         )
     }

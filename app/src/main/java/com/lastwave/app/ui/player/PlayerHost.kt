@@ -2,6 +2,7 @@
 
 package com.lastwave.app.ui.player
 
+import androidx.compose.foundation.border
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.BitmapDrawable
@@ -1448,11 +1449,11 @@ private fun AddToPlaylistDialog(
                         color = MaterialTheme.colorScheme.primary,
                     )
                 }
-                androidx.compose.material3.IconButton(onClick = { showCreateDialog = true }) {
+                androidx.compose.material3.IconButton(
+                    onClick = { showCreateDialog = true },
+                    modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                ) {
                     Icon(Icons.Filled.Add, contentDescription = "Create Playlist")
-                }
-                androidx.compose.material3.IconButton(onClick = { onDismiss() }) {
-                    Icon(Icons.Filled.Close, contentDescription = "Close")
                 }
             }
 
