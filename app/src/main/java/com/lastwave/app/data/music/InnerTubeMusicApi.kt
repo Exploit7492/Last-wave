@@ -2861,6 +2861,61 @@ class InnerTubeMusicApi @Inject constructor(
         null
     }
 
+    /**
+     * SimpMusic / Metrolist / ArchiveTune style broad search for downloads.
+     * Same scoring as playback but across multiple query variants
+     * (title+artist, title-only, base/cleaned title) so a track that plays
+     * still resolves for download even when the first strict query misses.
+     * Never throws (except cancellation) — returns ranked candidates,
+     * best first, possibly empty.
+     */
+    suspend fun findDownloadCandidates(
+        title: String,
+        artist: String,
+        excludedVideoIds: Set<String> = emptySet(),
+        limit: Int = 6,
+    ): List<YouTubeMusicTrack> = withContext(Dispatchers.IO) {
+        if (title.isBlank()) return@withContext emptyList()
+        val cleanArtist = artist.takeUnless {
+            it.isBlank() || it.equals("Unknown artist", ignoreCase = true)
+        }.orEmpty()
+        val cleanTitle = baseTitle(title).trim().ifBlank { title.trim() }
+        val queries = linkedSetOf(
+            listOf(title.trim(), cleanArtist).filter { it.isNotBlank() }.joinToString(" "),
+            title.trim(),
+            listOf(cleanTitle, cleanArtist).filter { it.isNotBlank() }.joinToString(" "),
+            cleanTitle,
+        ).filter { it.isNotBlank() }.take(4)
+        val merged = linkedMapOf<String, YouTubeMusicTrack>()
+        for (query in queries) {
+            try {
+                val results = searchSongs(query = query, limit = 15, prefetchStreams = false)
+                for (track in results) {
+                    if (track.videoId.isBlank() || track.videoId in excludedVideoIds) continue
+                    merged.putIfAbsent(track.videoId, track)
+                }
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+            }
+            if (merged.size >= 20) break
+        }
+        if (merged.isEmpty()) return@withContext emptyList()
+        val ranked = merged.values.sortedByDescending { matchScore(it, title, cleanArtist) }
+        // Prefer candidates with at least a plausible title link, but keep
+        // the top fallback so download can try the same best-effort stream
+        // playback would have used instead of hard-failing.
+        val plausible = ranked.filter { candidate ->
+            maxOf(
+                similarity(candidate.title, title),
+                similarity(baseTitle(candidate.title), baseTitle(title)),
+            ) >= 45 ||
+                normalize(candidate.title).contains(normalize(title)) ||
+                normalize(title).contains(normalize(candidate.title))
+        }
+        (plausible.ifEmpty { ranked }).take(limit.coerceIn(1, 10))
+    }
+
     suspend fun isPlayable(title: String, artist: String): Boolean =
         findBestMatchOrNull(title, artist) != null
 

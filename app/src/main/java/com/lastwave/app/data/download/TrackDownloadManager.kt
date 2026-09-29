@@ -997,17 +997,69 @@ class TrackDownloadManager @Inject constructor(
                             )
                         )
                         val lookupArtist = safeArtist?.trim()?.takeIf { it.isNotBlank() } ?: ""
-                        val targetVideoId = videoId?.takeIf { it.isNotBlank() }
-                            ?: preloadedBestMatch?.videoId
-                            ?: innerTube.findBestMatch(finalTitle, lookupArtist, prefetchStreams = false).videoId
-                        val actualVideoId = targetVideoId ?: throw IOException("No audio source found for $finalTitle")
-                        if (resolvedArtworkUrl == null) {
-                            resolvedArtworkUrl = preloadedBestMatch?.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
+                        // Same path as playback (SimpMusic/Metrolist/ArchiveTune style):
+                        // explicit videoId first, then cached/broad search candidates.
+                        // Never single-shot strict match — search more, try each.
+                        val candidateTracks = linkedMapOf<String, YouTubeMusicTrack>()
+                        videoId?.takeIf { it.isNotBlank() }?.let { candidateTracks[it] =
+                            preloadedBestMatch?.takeIf { match -> match.videoId == it }
+                                ?: YouTubeMusicTrack(videoId = it, title = finalTitle, artist = finalArtist)
                         }
-                        if (resolvedAlbum == null) resolvedAlbum = preloadedBestMatch?.album?.trim()
+                        preloadedBestMatch?.videoId?.takeIf { it.isNotBlank() }?.let { id ->
+                            candidateTracks.putIfAbsent(id, preloadedBestMatch!!)
+                        }
+                        runCatching {
+                            innerTube.findDownloadCandidates(finalTitle, lookupArtist)
+                        }.getOrDefault(emptyList()).forEach { track ->
+                            candidateTracks.putIfAbsent(track.videoId, track)
+                        }
+                        // Last resort: legacy single strict match (kept for metadata only).
+                        if (candidateTracks.isEmpty()) {
+                            runCatching {
+                                innerTube.findBestMatch(finalTitle, lookupArtist, prefetchStreams = false)
+                            }.getOrNull()?.let { track ->
+                                candidateTracks.putIfAbsent(track.videoId, track)
+                            }
+                        }
+                        if (candidateTracks.isEmpty()) throw IOException("No YouTube match found for $finalTitle by $finalArtist")
+                        var pickedStream: com.lastwave.app.data.music.YouTubeAudioStream? = null
+                        var actualVideoId: String? = null
+                        var chosenTrack: YouTubeMusicTrack? = null
+                        var lastResolveError: Throwable? = null
+                        for ((candidateId, candidateTrack) in candidateTracks) {
+                            // 1. Same waterfall playback uses (cache + multi-client direct URLs).
+                            pickedStream = runCatching {
+                                innerTube.peekCachedStream(candidateId)
+                                    ?: innerTube.resolveAudioStream(candidateId)
+                            }.getOrNull()
+                            if (pickedStream == null) {
+                                lastResolveError = null
+                            }
+                            // 2. NewPipe M4A fallback (download-container preference only).
+                            if (pickedStream == null) {
+                                pickedStream = runCatching {
+                                    innerTube.resolveDownloadStream(candidateId)
+                                }.getOrElse { error ->
+                                    if (error !is CancellationException) lastResolveError = error
+                                    null
+                                }
+                            }
+                            if (pickedStream != null) {
+                                actualVideoId = candidateId
+                                chosenTrack = candidateTrack
+                                break
+                            }
+                        }
+                        val resolvedStream = pickedStream
+                            ?: throw (lastResolveError ?: IOException("No playable YouTube stream for $finalTitle by $finalArtist"))
+                        if (resolvedArtworkUrl == null) {
+                            resolvedArtworkUrl = (chosenTrack?.artworkUrl ?: preloadedBestMatch?.artworkUrl)
+                                ?.takeIf { ArtworkNormalizer.isRealImage(it) }
+                        }
+                        if (resolvedAlbum == null) resolvedAlbum = (chosenTrack?.album ?: preloadedBestMatch?.album)?.trim()
                             ?.takeUnless { ArtistHelper.isPlayCountOrStat(it) }
                             ?.takeIf { it.isNotBlank() }
-                        val ytStream = innerTube.resolveDownloadStream(actualVideoId)
+                        val ytStream = resolvedStream
                         resolvedUrl = ytStream.url
                         downloadHeaders = ytStream.requestHeaders
                         expectedContentLength = ytStream.contentLength
@@ -1136,6 +1188,9 @@ class TrackDownloadManager @Inject constructor(
 
                         val detected = detectValidContainer(rawFile)
                         if (detected != null) {
+                            // SimpMusic/Metrolist style: accept whatever valid
+                            // audio YouTube served (opus/webm/m4a/mp3) — remux
+                            // below normalizes it. Never fail on mime mismatch.
                             extension = detected
                             mimeType = when (detected) {
                                 "m4a" -> "audio/mp4"
@@ -1145,15 +1200,24 @@ class TrackDownloadManager @Inject constructor(
                                 "flac" -> "audio/flac"
                                 else -> mimeType
                             }
-                        } else if (useParallelDownload && !hasExpectedContainer(rawFile, extension)) {
-                            throw IOException("Downloaded payload is not a valid ${extension.uppercase()} audio file")
+                        } else if (rawFile.length() < MIN_VALID_AUDIO_BYTES || !hasExpectedContainer(rawFile, extension)) {
+                            // Only reject when the payload is not audio at all
+                            // (HTML error page / truncated). A valid container
+                            // with an unexpected extension is kept.
+                            if (detectValidContainer(rawFile) == null && rawFile.length() < MIN_VALID_AUDIO_BYTES) {
+                                throw IOException("Downloaded payload is not valid audio (${rawFile.length()} bytes)")
+                            }
                         }
                         downloadSucceeded = true
                     } catch (cancellation: CancellationException) {
                         throw cancellation
                     } catch (ytError: Throwable) {
-                        // When last YouTube download failed, skip it cleanly and move to next song
-                        android.util.Log.w("TrackDownloadManager", "YouTube download failed for $title by $artist; skipping song", ytError)
+                        // Surface the real reason (no match vs no stream vs
+                        // network) so a playable song never shows a generic skip.
+                        val reason = ytError.localizedMessage?.takeIf { it.isNotBlank() }
+                            ?: "Stream unavailable"
+                        val shortReason = if (reason.length > 90) reason.take(90) + "…" else reason
+                        android.util.Log.w("TrackDownloadManager", "YouTube download failed for $title by $artist: $reason", ytError)
                         tempDownloadFile?.let { runCatching { if (it.exists()) it.delete() } }
                         tempDownloadFile = null
                         updateProgress(
@@ -1162,11 +1226,11 @@ class TrackDownloadManager @Inject constructor(
                                 title = title,
                                 artist = artist,
                                 progressPercent = 0,
-                                error = "Skipped: ${ytError.localizedMessage ?: "Stream unavailable"}",
+                                error = "Skipped: $shortReason",
                             ),
                         )
                         runCatching {
-                            showErrorNotification(notifId, key, title, artist, "Skipped: stream unavailable")
+                            showErrorNotification(notifId, key, title, artist, "Skipped: $shortReason")
                         }
                         return@launch
                     }
