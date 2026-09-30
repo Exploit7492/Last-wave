@@ -2898,7 +2898,10 @@ class InnerTubeMusicApi @Inject constructor(
                 throw cancellation
             } catch (_: Exception) {
             }
-            if (merged.size >= 20) break
+            // Enough to try: downloads resolve candidates serially, so a
+            // huge list only burns the per-track budget. Ten ranked
+            // candidates across the query variants is plenty.
+            if (merged.size >= 10) break
         }
         if (merged.isEmpty()) return@withContext emptyList()
         val ranked = merged.values.sortedByDescending { matchScore(it, title, cleanArtist) }

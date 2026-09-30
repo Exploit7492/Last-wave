@@ -22,7 +22,10 @@ import com.lastwave.app.data.lyrics.LyricsRepository
 import com.lastwave.app.data.lyrics.LyricsResult
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.music.YouTubeMusicTrack
+import com.lastwave.app.data.lossless.LosslessAudioStream
 import com.lastwave.app.data.lossless.LosslessMusicApi
+import android.media.AudioManager
+import android.media.MediaCodecList
 import com.lastwave.app.data.plugin.ModuleManager
 import com.lastwave.app.data.plugin.ModuleOfflineLicense
 import com.lastwave.app.data.plugin.ModulePlaybackResolver
@@ -484,6 +487,22 @@ class TrackDownloadManager @Inject constructor(
             runCatching {
                 showDownloadNotification(notifId, key, title, artist, 0, false, "Preparing high-res stream...")
             }
+            // Live stage text: tier failures used to be invisible until the
+            // terminal skip. Stage updates are progress-only except on major
+            // transitions, so notifications don't spam per tier.
+            fun updateStage(stage: String, notify: Boolean = false) {
+                updateProgress(
+                    DownloadProgress(
+                        key = key, title = title, artist = artist,
+                        progressPercent = 0, formatBadge = stage,
+                    ),
+                )
+                if (notify) {
+                    runCatching {
+                        showDownloadNotification(notifId, key, title, artist, 0, false, stage)
+                    }
+                }
+            }
 
             var destinationUri: Uri? = null
             var destinationFile: File? = null
@@ -606,6 +625,10 @@ class TrackDownloadManager @Inject constructor(
                     return@launch
                 }
                 var resolvedUrl: String? = null
+                // Exact YouTube videoId that produced this download (when the
+                // YouTube path was used) — feeds the thumbnail fallback and
+                // honest logging at tagging time.
+                var resolvedYtVideoId: String? = videoId?.takeIf { it.isNotBlank() }
                 var mimeType = "audio/flac"
                 var extension = "flac"
                 var formatBadge = "24-BIT FLAC"
@@ -635,8 +658,20 @@ class TrackDownloadManager @Inject constructor(
                 var bytesReadTotal = 0L
                 var totalBytesRecorded = -1L
                 var downloadSucceeded = false
+                // Playback demotes Atmos to stereo on incapable devices; do
+                // the same here so an Atmos request still yields playable
+                // stereo FLAC instead of an unplayable spatial file.
+                val atmosCapable by lazy { isAtmosCapableDevice() }
+                if (!isYouTubeRequested && losslessMusicApi.isCoolingDown) {
+                    android.util.Log.i(
+                        "TrackDownloadManager",
+                        "Lossless backend cooling down; '$finalTitle' goes straight to YouTube",
+                    )
+                    updateStage("YouTube • lossless cooling down", notify = true)
+                }
 
-                if (!isYouTubeRequested) {
+                if (!isYouTubeRequested && !losslessMusicApi.isCoolingDown) {
+                    updateStage("Finding lossless stream…")
                     // Tier cascade: an Atmos request walks down through every
                     // stereo tier (hi-res -> CD -> 320) before the YouTube
                     // fallback below; a stereo request walks down from its own
@@ -669,25 +704,75 @@ class TrackDownloadManager @Inject constructor(
                         else -> listOf(requestedDownloadQuality)
                     }
                     for (downloadQuality in qualitiesToAttempt) {
+                    // Spatial-tier veto (mirrors playback): never download an
+                    // Atmos manifest on a device that cannot render it. The
+                    // stereo tiers later in this same list are the fallback.
+                    if (downloadQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS && !atmosCapable) {
+                        android.util.Log.i(
+                            "TrackDownloadManager",
+                            "Atmos veto for $finalTitle by $finalArtist: device cannot render spatial; trying stereo tiers",
+                        )
+                        continue
+                    }
                     try {
                         val expectedDurationSec = durationMs?.takeIf { it > 0 }?.let { (it / 1000L).toInt() }
                             ?: preloadedBestMatch?.durationSeconds?.takeIf { it > 0 }
-                        val losslessStream = runCatching {
-                            losslessMusicApi.resolveStream(
-                                title = finalTitle,
-                                artist = finalArtist,
-                                expectedDurationSeconds = expectedDurationSec,
-                                expectedAlbum = resolvedAlbum,
-                                preferredQuality = downloadQuality,
-                                isDownload = true,
+                        // One retry: a transient blip must not kill the tier.
+                        var losslessStream: LosslessAudioStream? = null
+                        for (resolveAttempt in 0..1) {
+                            losslessStream = runCatching {
+                                losslessMusicApi.resolveStream(
+                                    title = finalTitle,
+                                    artist = finalArtist,
+                                    expectedDurationSeconds = expectedDurationSec,
+                                    expectedAlbum = resolvedAlbum,
+                                    preferredQuality = downloadQuality,
+                                    isDownload = true,
+                                )
+                            }.getOrNull()
+                            if (losslessStream != null) break
+                            if (resolveAttempt == 0) delay(400)
+                        }
+                        if (losslessStream != null && losslessStream.url.isBlank()) losslessStream = null
+                        // Duration guard: never store a different
+                        // recording/edition under this song's name.
+                        if (losslessStream != null && expectedDurationSec != null && expectedDurationSec > 0) {
+                            val streamSec = losslessStream.durationSeconds
+                            if (streamSec > 0 && kotlin.math.abs(streamSec - expectedDurationSec) > 45) {
+                                android.util.Log.w(
+                                    "TrackDownloadManager",
+                                    "Lossless duration mismatch for $finalTitle by $finalArtist: want ${expectedDurationSec}s got ${streamSec}s; trying next tier",
+                                )
+                                losslessStream = null
+                            }
+                        }
+                        if (losslessStream == null) {
+                            android.util.Log.i(
+                                "TrackDownloadManager",
+                                "Lossless tier $downloadQuality missed for $finalTitle by $finalArtist; trying next tier",
                             )
-                        }.getOrNull()
+                        }
 
                         if (losslessStream != null && losslessStream.url.isNotBlank()) {
                             if (isDashUrl(losslessStream.url, losslessStream.mimeType)) {
                                 val parsedDash = parseTidalDashManifest(losslessStream.url)
                                 if (parsedDash != null) {
                                     val manifestCodec = parsedDash.codec.ifBlank { "flac" }
+                                    // A stereo rendition served for an Atmos
+                                    // request is fine (flac codec); a genuine
+                                    // spatial manifest on an incapable device
+                                    // is unplayable — cascade to stereo tiers.
+                                    if (!atmosCapable &&
+                                        (manifestCodec.startsWith("ec-3") ||
+                                            manifestCodec.startsWith("eac3") ||
+                                            manifestCodec.startsWith("ac-3"))
+                                    ) {
+                                        android.util.Log.w(
+                                            "TrackDownloadManager",
+                                            "Spatial manifest veto for $finalTitle by $finalArtist on incapable device; cascading to stereo tiers",
+                                        )
+                                        continue
+                                    }
                                     val isAtmosStream = losslessStream.formatId == LosslessMusicApi.QUALITY_DOLBY_ATMOS ||
                                         manifestCodec.startsWith("ec-3") ||
                                         manifestCodec.startsWith("eac3") ||
@@ -764,6 +849,17 @@ class TrackDownloadManager @Inject constructor(
                                     // FLAC and named it .m4a either way — so a lossless
                                     // request could be stored as AAC while claiming FLAC.
                                     val manifestCodec = parsedDash.codec.ifBlank { s.codec.lowercase() }
+                                    if (!atmosCapable &&
+                                        (manifestCodec.startsWith("ec-3") ||
+                                            manifestCodec.startsWith("eac3") ||
+                                            manifestCodec.startsWith("ac-3"))
+                                    ) {
+                                        android.util.Log.w(
+                                            "TrackDownloadManager",
+                                            "Spatial module manifest veto for $finalTitle by $finalArtist on incapable device; cascading to stereo tiers",
+                                        )
+                                        continue
+                                    }
                                     val isAtmosStream = isAtmos ||
                                         manifestCodec.startsWith("ec-3") ||
                                         manifestCodec.startsWith("eac3") ||
@@ -821,7 +917,7 @@ class TrackDownloadManager @Inject constructor(
                                 tempDownloadFile = rawFile
 
                                 if (isDashModuleDownload && dashInitUrl != null && dashMediaTemplate != null && dashSegmentCount > 0) {
-                                    bytesReadTotal = downloadDashSegmentsToTempFile(
+                                    val dashResult = downloadDashSegmentsToTempFile(
                                         downloadKey = key,
                                         notificationId = notifId,
                                         title = title,
@@ -834,7 +930,31 @@ class TrackDownloadManager @Inject constructor(
                                         headers = downloadHeaders,
                                         target = rawFile,
                                     )
+                                    bytesReadTotal = dashResult.bytesWritten
                                     totalBytesRecorded = bytesReadTotal
+                                    // A truncated segment list used to be kept
+                                    // as a successful (short) file. Fail loudly
+                                    // instead so the next tier or YouTube gets
+                                    // a chance — unless enough audio arrived
+                                    // that the manifest simply over-declared.
+                                    if (dashResult.stoppedEarly) {
+                                        val minBytes = if (durationMs > 0) {
+                                            (durationMs / 1000L) * 16_000L
+                                        } else {
+                                            256_000L
+                                        }
+                                        if (bytesReadTotal < minBytes) {
+                                            throw IOException(
+                                                "Incomplete DASH download for $title by $artist: " +
+                                                    "${dashResult.completedSegments}/${dashResult.expectedSegments} segments",
+                                            )
+                                        }
+                                        android.util.Log.w(
+                                            "TrackDownloadManager",
+                                            "DASH over-declared segments for $title by $artist " +
+                                                "(${dashResult.completedSegments}/${dashResult.expectedSegments}); keeping ${bytesReadTotal} bytes",
+                                        )
+                                    }
                                 } else {
                                     var lastProgress = 0
                                     var lastNotifTime = 0L
@@ -987,19 +1107,15 @@ class TrackDownloadManager @Inject constructor(
                 // 2. Fallback to YouTube Music if module was not requested or module download failed
                 if (!downloadSucceeded) {
                     try {
-                        updateProgress(
-                            DownloadProgress(
-                                key = key,
-                                title = title,
-                                artist = artist,
-                                progressPercent = 0,
-                                formatBadge = "YOUTUBE",
-                            )
-                        )
+                        updateStage("Finding YouTube stream…", notify = true)
                         val lookupArtist = safeArtist?.trim()?.takeIf { it.isNotBlank() } ?: ""
                         // Same path as playback (SimpMusic/Metrolist/ArchiveTune style):
                         // explicit videoId first, then cached/broad search candidates.
                         // Never single-shot strict match — search more, try each.
+                        // Budgeted: downloads run strictly serially, so one
+                        // wedged track must not stall the whole batch queue.
+                        val ytFallbackStartMs = android.os.SystemClock.elapsedRealtime()
+                        val ytResolveBudgetMs = 60_000L
                         val candidateTracks = linkedMapOf<String, YouTubeMusicTrack>()
                         videoId?.takeIf { it.isNotBlank() }?.let { candidateTracks[it] =
                             preloadedBestMatch?.takeIf { match -> match.videoId == it }
@@ -1008,6 +1124,8 @@ class TrackDownloadManager @Inject constructor(
                         preloadedBestMatch?.videoId?.takeIf { it.isNotBlank() }?.let { id ->
                             candidateTracks.putIfAbsent(id, preloadedBestMatch!!)
                         }
+                        // Broad search is capped inside (10 merged candidates);
+                        // the 60s resolve budget below bounds the slow path.
                         runCatching {
                             innerTube.findDownloadCandidates(finalTitle, lookupArtist)
                         }.getOrDefault(emptyList()).forEach { track ->
@@ -1027,6 +1145,13 @@ class TrackDownloadManager @Inject constructor(
                         var chosenTrack: YouTubeMusicTrack? = null
                         var lastResolveError: Throwable? = null
                         for ((candidateId, candidateTrack) in candidateTracks) {
+                            if (android.os.SystemClock.elapsedRealtime() - ytFallbackStartMs > ytResolveBudgetMs) {
+                                android.util.Log.w(
+                                    "TrackDownloadManager",
+                                    "YouTube resolve budget exhausted for $finalTitle by $finalArtist; skipping remaining candidates",
+                                )
+                                break
+                            }
                             // 1. Same waterfall playback uses (cache + multi-client direct URLs).
                             pickedStream = runCatching {
                                 innerTube.peekCachedStream(candidateId)
@@ -1046,6 +1171,7 @@ class TrackDownloadManager @Inject constructor(
                             }
                             if (pickedStream != null) {
                                 actualVideoId = candidateId
+                                resolvedYtVideoId = candidateId
                                 chosenTrack = candidateTrack
                                 break
                             }
@@ -1406,9 +1532,18 @@ class TrackDownloadManager @Inject constructor(
                     }
 
                     if (resolvedArtworkUrl == null) {
-                        resolvedArtworkUrl = artworkFallback?.await()
+                        // await() outside runCatching used to fail the whole
+                        // download when the artwork fetch itself threw.
+                        resolvedArtworkUrl = runCatching { artworkFallback?.await() }.getOrNull()
                     } else {
                         artworkFallback?.cancel()
+                    }
+                    if (resolvedArtworkUrl == null) {
+                        // Last resort (SimpMusic/Metrolist style): the YouTube
+                        // thumbnail for the exact downloaded video always exists.
+                        resolvedArtworkUrl = resolvedYtVideoId?.takeIf { it.isNotBlank() }
+                            ?.let { "https://i.ytimg.com/vi/$it/hqdefault.jpg" }
+                            ?: preloadedBestMatch?.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
                     }
 
                     // 4. Embed metadata, cover art AND lyrics directly into the
@@ -1559,7 +1694,23 @@ class TrackDownloadManager @Inject constructor(
                     ),
                 )
 
-                runCatching { showCompletedNotification(notifId, finalTitle, finalArtist, formatBadge) }
+                // Surface missing extras honestly instead of silently:
+                // the file is fine, but the user sees what didn't attach.
+                val missingExtras = buildList {
+                    if (shouldDownloadLyrics && !hasLyrics) add("no lyrics")
+                    if (resolvedArtworkUrl == null) add("no art")
+                    if (!metadataEmbedded) add("untagged")
+                }
+                if (missingExtras.isNotEmpty()) {
+                    android.util.Log.w(
+                        "TrackDownloadManager",
+                        "Download complete with missing extras for $finalTitle by $finalArtist: ${missingExtras.joinToString()}",
+                    )
+                }
+                val completedBadge = if (missingExtras.isEmpty()) formatBadge {
+                    "$formatBadge • ${missingExtras.joinToString(" + ")}"
+                }
+                runCatching { showCompletedNotification(notifId, finalTitle, finalArtist, completedBadge) }
             } catch (cancelled: CancellationException) {
                 // Cancelled by user — clean up partial file
                 destinationUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
@@ -2027,6 +2178,13 @@ class TrackDownloadManager @Inject constructor(
         )
     }.getOrNull()
 
+    private data class DashFetchResult(
+        val bytesWritten: Long,
+        val stoppedEarly: Boolean,
+        val completedSegments: Int,
+        val expectedSegments: Int,
+    )
+
     private suspend fun downloadDashSegmentsToTempFile(
         downloadKey: String,
         notificationId: Int,
@@ -2039,10 +2197,11 @@ class TrackDownloadManager @Inject constructor(
         startNumber: Int = 1,
         headers: Map<String, String>,
         target: File,
-    ): Long = withContext(Dispatchers.IO) {
+    ): DashFetchResult = withContext(Dispatchers.IO) {
         val totalParts = segmentCount + 1
         var completedParts = 0
         var totalBytesWritten = 0L
+        var stoppedEarly = false
         val targetStream = FileOutputStream(target, false)
 
         try {
@@ -2092,10 +2251,11 @@ class TrackDownloadManager @Inject constructor(
                     }
                     .build()
 
-                var stopEarly = false
+                var stopThis = false
                 downloadClient.newCall(segReq).execute().use { resp ->
                     if (resp.code == 404 && segIndex > startNumber) {
-                        stopEarly = true
+                        stopThis = true
+                        stoppedEarly = true
                         return@use
                     }
                     if (!resp.isSuccessful) throw IOException("Failed to download DASH segment $segIndex: HTTP ${resp.code}")
@@ -2103,7 +2263,7 @@ class TrackDownloadManager @Inject constructor(
                     val copied = body.byteStream().copyTo(targetStream, DOWNLOAD_BUFFER_SIZE)
                     totalBytesWritten += copied
                 }
-                if (stopEarly) break
+                if (stopThis) break
 
                 completedParts++
                 val percent = ((completedParts * 100) / totalParts).coerceIn(0, 100)
@@ -2124,7 +2284,12 @@ class TrackDownloadManager @Inject constructor(
             }
             targetStream.flush()
             targetStream.fd.sync()
-            totalBytesWritten
+            DashFetchResult(
+                bytesWritten = totalBytesWritten,
+                stoppedEarly = stoppedEarly,
+                completedSegments = completedParts - 1,
+                expectedSegments = segmentCount,
+            )
         } finally {
             runCatching { targetStream.close() }
         }
@@ -2287,6 +2452,26 @@ class TrackDownloadManager @Inject constructor(
             "mp3" -> detected == "mp3"
             else -> false
         }
+    }.getOrDefault(false)
+
+    /**
+     * Mirrors playback's spatial check (`MusicPlayer.isSpatialAudioSupportedOnDevice`
+     * + genuine E-AC-3 JOC decoder requirement): a plain `audio/eac3` decoder
+     * (video-passthrough silicon) cannot render an Atmos music stream.
+     */
+    private fun isAtmosCapableDevice(): Boolean = runCatching {
+        val jocDecoder = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.any { info ->
+            !info.isEncoder && info.supportedTypes.any { type ->
+                type.equals("audio/eac3-joc", ignoreCase = true)
+            }
+        }
+        if (!jocDecoder) return@runCatching false
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S_V2) {
+            val am = context.getSystemService(AudioManager::class.java) ?: return@runCatching true
+            val spatializer = am.spatializer
+            if (spatializer.isAvailable || spatializer.isEnabled) return@runCatching true
+        }
+        jocDecoder
     }.getOrDefault(false)
 
     private fun updateProgress(progress: DownloadProgress) {
