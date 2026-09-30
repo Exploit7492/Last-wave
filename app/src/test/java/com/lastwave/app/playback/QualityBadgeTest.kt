@@ -163,19 +163,35 @@ class QualityBadgeTest {
     }
 
     @Test
-    fun infersHiRes24BitWhenOmittedInTags() {
+    fun unknownDepthShowsRateWithoutDepthClaim() {
+        // Unknown depth + known rate must never fabricate "24-BIT" (or
+        // "16-BIT"): a 16-bit/96kHz FLAC is valid, so the rate alone proves
+        // nothing about depth.
         assertThat(
             qualityBadgeLabel(MusicPlayerState(isLossless = true, samplingRateKHz = 96.0)),
-        ).isEqualTo("24/96kHz")
+        ).isEqualTo("96kHz FLAC")
         assertThat(
             qualityBadgeLabel(MusicPlayerState(isLossless = true, samplingRateKHz = 88.2)),
-        ).isEqualTo("24/88.2kHz")
+        ).isEqualTo("88.2kHz FLAC")
         assertThat(
             qualityBadgeLabel(MusicPlayerState(isLossless = true, samplingRateKHz = 176.4)),
-        ).isEqualTo("24/176.4kHz")
+        ).isEqualTo("176.4kHz FLAC")
         assertThat(
             qualityBadgeLabel(MusicPlayerState(isLossless = true, samplingRateKHz = 192.0)),
-        ).isEqualTo("24/192kHz")
+        ).isEqualTo("192kHz FLAC")
+    }
+
+    @Test
+    fun contradictedBackendDefaultDepthIsDropped() {
+        // Backend "16-bit" beside a 96kHz rate contradicts itself (a 16-bit
+        // default for unknown depth): the false 16 must not be asserted.
+        assertThat(
+            qualityBadgeLabel(MusicPlayerState(isLossless = true, bitDepth = 16, samplingRateKHz = 96.0)),
+        ).isEqualTo("96kHz FLAC")
+        // Genuine 16/44.1 keeps its depth.
+        assertThat(
+            qualityBadgeLabel(MusicPlayerState(isLossless = true, bitDepth = 16, samplingRateKHz = 44.1)),
+        ).isEqualTo("16/44.1kHz")
     }
 
     @Test
@@ -204,8 +220,10 @@ class QualityBadgeTest {
         assertThat(formatDetailedQualityBadge(24, 44.1)).isEqualTo("24-BIT / 44.1k")
         assertThat(formatDetailedQualityBadge(16, 48.0)).isEqualTo("16-BIT / 48k")
         assertThat(formatDetailedQualityBadge(16, 44.1)).isEqualTo("16-BIT / 44.1k")
-        assertThat(formatDetailedQualityBadge(null, 96.0)).isEqualTo("24-BIT / 96k")
-        assertThat(formatDetailedQualityBadge(null, 44.1)).isEqualTo("16-BIT / 44.1k")
+        assertThat(formatDetailedQualityBadge(null, 96.0)).isEqualTo("96k FLAC")
+        assertThat(formatDetailedQualityBadge(null, 44.1)).isEqualTo("44.1k FLAC")
+        assertThat(formatDetailedQualityBadge(16, 96.0)).isEqualTo("96k FLAC")
+        assertThat(formatDetailedQualityBadge(null, null)).isEqualTo("FLAC")
         assertThat(formatDetailedQualityBadge(null, null, isAtmos = true)).isEqualTo("DOLBY ATMOS")
     }
 }

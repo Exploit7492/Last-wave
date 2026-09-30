@@ -127,15 +127,11 @@ fun evaluateSignalPath(i: SignalPathInput): SignalPathReport {
         ?: i.appOutputRateHz.takeIf { it > 0 && i.usbExclusiveActive }
     val labelBitDepth = Regex("""(?:^|[^\d])(16|24|32)\s*(?:[-_]bit)?\s*[/]""", RegexOption.IGNORE_CASE)
         .find(i.sourceLabel)?.groupValues?.getOrNull(1)?.toIntOrNull()
-    val rawBitDepth = labelBitDepth ?: i.sourceBitDepth?.takeIf { it > 0 }
-    val bitDepth = when {
-        src != null && src > 192_000 -> 32
-        src != null && src > 48_000 -> 24
-        rawBitDepth != null && rawBitDepth > 16 -> rawBitDepth
-        i.sourceLabel.contains("HI-RES", ignoreCase = true) || i.sourceLabel.contains("HI_RES", ignoreCase = true) -> 24
-        rawBitDepth != null -> rawBitDepth
-        else -> null
-    }
+    // Only a known depth is ever shown (measured decoder encoding,
+    // backend metadata, or an explicit label). Unknown depth shows the
+    // rate with no depth claim: the sample rate alone must never fabricate
+    // "24-bit" (or "16-bit") — a tag that shouldn't exist.
+    val bitDepth = labelBitDepth ?: i.sourceBitDepth?.takeIf { it > 0 }
     val sourceLabel = if (bitDepth != null && src != null && src > 48_000 && i.sourceLabel.startsWith("16/")) {
         i.sourceLabel.replaceFirst("16/", "$bitDepth/")
     } else {
