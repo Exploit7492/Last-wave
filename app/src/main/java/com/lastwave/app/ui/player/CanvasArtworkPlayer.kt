@@ -2,23 +2,19 @@ package com.lastwave.app.ui.player
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BlendMode
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
-import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.graphics.SurfaceTexture
-import android.os.Build
 import android.util.Log
 import android.view.TextureView
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.annotation.OptIn
-import androidx.annotation.RequiresApi
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
@@ -34,7 +30,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
@@ -99,6 +94,7 @@ fun CanvasArtworkPlayer(
     onCoverChanged: (Float) -> Unit = {},
     bottomFade: Float = 0f,
     bottomFadeEndPx: Float? = null,
+    bottomFadeFallbackColor: Int? = null,
     pausedForTransition: Boolean = false,
 ) {
     val context = LocalContext.current
@@ -106,7 +102,6 @@ fun CanvasArtworkPlayer(
     var url by remember(canvas) { mutableStateOf(canvas.url) }
     var rendered by remember(canvas) { mutableStateOf(false) }
     var clipAspect by remember(canvas) { mutableFloatStateOf(0f) }
-    var bounds by remember { mutableStateOf(IntSize.Zero) }
     var textureView by remember(canvas) { mutableStateOf<TextureView?>(null) }
     var frameTick by remember(canvas) { mutableIntStateOf(0) }
     var surfaceGeneration by remember(canvas) { mutableIntStateOf(0) }
@@ -312,14 +307,17 @@ fun CanvasArtworkPlayer(
                 alpha * presentationAlpha()
             }
             view.applyContentTransform(clipAspect, contentMode, alignPortraitTop)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                view.setBottomFade(bottomFade, bounds, bottomFadeEndPx)
-            } else {
-                frame.fadeFraction = bottomFade
-                frame.fadeEndPx = bottomFadeEndPx
-            }
+            // Fade the clip with a plain saveLayer + DST_IN gradient on the parent
+            // FrameLayout, on every API level. The Android 12+ branch used to attach a
+            // blend-mode RenderEffect straight to this TextureView; a video surface
+            // forced through a blend RenderNode is what underflowed the canvas save
+            // stack ("Underflow in restore - more restores than saves") and killed the
+            // process. Same gradient, same 0.30 strength, same pixels - no RenderEffect.
+            frame.fadeFraction = bottomFade
+            frame.fadeEndPx = bottomFadeEndPx
+            frame.fadeFallbackColor = bottomFadeFallbackColor
         },
-        modifier = modifier.onSizeChanged { bounds = it },
+        modifier = modifier,
     )
 }
 
@@ -390,34 +388,6 @@ private fun TextureView.applyContentTransform(
     return true
 }
 
-@RequiresApi(Build.VERSION_CODES.S)
-private fun TextureView.setBottomFade(fraction: Float, bounds: IntSize, endPx: Float?) {
-    val endY = endPx?.coerceIn(0f, bounds.height.toFloat()) ?: bounds.height.toFloat()
-    if (fraction <= 0.001f || endY <= 0f) {
-        setRenderEffect(null)
-        return
-    }
-    val gradient = LinearGradient(
-        0f,
-        endY * (1f - fraction.coerceAtMost(1f)),
-        0f,
-        endY,
-        android.graphics.Color.BLACK,
-        android.graphics.Color.TRANSPARENT,
-        Shader.TileMode.CLAMP,
-    )
-    // A haunted GPU driver must cost us the fade, never the process.
-    runCatching {
-        setRenderEffect(
-            RenderEffect.createBlendModeEffect(
-                RenderEffect.createOffsetEffect(0f, 0f),
-                RenderEffect.createShaderEffect(gradient),
-                BlendMode.DST_IN,
-            ),
-        )
-    }
-}
-
 private class FadingBottomFrame(context: Context) : FrameLayout(context) {
     var fadeFraction: Float = 0f
         set(value) {
@@ -438,8 +408,28 @@ private class FadingBottomFrame(context: Context) : FrameLayout(context) {
     private val maskPaint = Paint().apply {
         xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
     }
+
+    /**
+     * Colour to fade toward when the GPU refuses the saveLayer + DST_IN mask. Without it
+     * a broken layer would leave the clip with a hard bottom edge that reads as flat
+     * cover art; with it the melt survives as an ordinary source-over gradient.
+     */
+    var fadeFallbackColor: Int? = null
+        set(value) {
+            if (value == field) return
+            field = value
+            invalidate()
+        }
+
     private var gradient: LinearGradient? = null
     private var gradientHeight = 0
+
+    /**
+     * Set once the GPU refuses this saveLayer+DST_IN pass. [bottomFade] is the only thing
+     * that depends on it, so degrading to the fallback gradient is the right failure mode
+     * - a missing blend mode must never take the process with it.
+     */
+    private var fadeBroken = false
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -451,6 +441,10 @@ private class FadingBottomFrame(context: Context) : FrameLayout(context) {
         val endY = fadeEndPx?.coerceIn(0f, height.toFloat()) ?: height.toFloat()
         if (fade <= 0.001f || endY <= 0f) {
             super.dispatchDraw(canvas)
+            return
+        }
+        if (fadeBroken) {
+            drawWithFallbackFade(canvas, fade, endY)
             return
         }
         val shader = gradient?.takeIf { gradientHeight == height } ?: LinearGradient(
@@ -467,9 +461,60 @@ private class FadingBottomFrame(context: Context) : FrameLayout(context) {
         }
         maskPaint.shader = shader
         val layer = canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null)
+        // saveLayer returns -1 when the driver refuses to allocate the layer.
+        if (layer < 0) {
+            giveUpOnBlendMask()
+            drawWithFallbackFade(canvas, fade, endY)
+            return
+        }
+        var restored = false
+        try {
+            super.dispatchDraw(canvas)
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), maskPaint)
+        } catch (graphics: RuntimeException) {
+            giveUpOnBlendMask()
+        } finally {
+            // Always hand the save stack back exactly what this pass took, even if the
+            // child draw blew up - otherwise every later restore underflows.
+            restored = runCatching { canvas.restoreToCount(layer) }.isSuccess
+        }
+        if (!restored) giveUpOnBlendMask()
+    }
+
+    /**
+     * Same ramp as the DST_IN mask, but plain source-over toward [fadeFallbackColor], so a
+     * refused layer costs the blend mode and nothing else. Falls back to an unpainted
+     * child draw when the caller supplied no colour.
+     */
+    private fun drawWithFallbackFade(canvas: Canvas, fade: Float, endY: Float) {
         super.dispatchDraw(canvas)
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), maskPaint)
-        canvas.restoreToCount(layer)
+        val color = fadeFallbackColor ?: return
+        val top = endY * (1f - fade)
+        canvas.drawRect(
+            0f,
+            top,
+            width.toFloat(),
+            height.toFloat(),
+            Paint().apply {
+                shader = LinearGradient(
+                    0f,
+                    top,
+                    0f,
+                    endY,
+                    color and 0x00FFFFFF,
+                    color,
+                    Shader.TileMode.CLAMP,
+                )
+            },
+        )
+    }
+
+    private fun giveUpOnBlendMask() {
+        if (fadeBroken) return
+        fadeBroken = true
+        maskPaint.shader = null
+        gradient = null
+        Log.w(TAG, "Blend-mode bottom fade unavailable, using source-over gradient")
     }
 }
 
