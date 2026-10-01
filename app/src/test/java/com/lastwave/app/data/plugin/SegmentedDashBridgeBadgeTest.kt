@@ -55,4 +55,24 @@ class SegmentedDashBridgeBadgeTest {
         assertEquals("320k MP3", badge("mp3", "SD"))
         assertEquals("OPUS", badge("opus", "LOW"))
     }
+
+    @Test
+    fun omittedBitDepthDoesNotClaimSixteenBit() {
+        // The descriptor defaulted bitDepth to 16, so a module that simply never
+        // reported a depth was asserting one — and at 44.1/48kHz nothing
+        // contradicted it, so the fabricated 16 reached the badge. An absent
+        // field must now mean unknown, and only a real >16-bit report or a
+        // >48kHz rate may earn "UHD".
+        val unknownDepth = SegmentedDashBridge.audioBadgeLabel(
+            SegmentedStreamDescriptor(stream = SegmentedStreamRef(codec = "flac", quality = "CUSTOM")),
+        )
+        assertEquals("HD FLAC", unknownDepth)
+
+        val reported24 = SegmentedDashBridge.audioBadgeLabel(
+            SegmentedStreamDescriptor(
+                stream = SegmentedStreamRef(codec = "flac", quality = "CUSTOM", bitDepth = 24),
+            ),
+        )
+        assertEquals("UHD FLAC", reported24)
+    }
 }

@@ -631,7 +631,10 @@ class TrackDownloadManager @Inject constructor(
                 var resolvedYtVideoId: String? = videoId?.takeIf { it.isNotBlank() }
                 var mimeType = "audio/flac"
                 var extension = "flac"
-                var formatBadge = "24-BIT FLAC"
+                // No depth claim until a stream actually resolves one: this
+                // seed is what a progress notification shows, and "24-BIT" here
+                // advertised a bit depth nothing had measured yet.
+                var formatBadge = "FLAC"
                 var isLossless = false
                 var durationMs = 0L
                 var downloadHeaders = emptyMap<String, String>()
@@ -789,7 +792,7 @@ class TrackDownloadManager @Inject constructor(
                                     extension = "m4a"
                                     mimeType = "audio/mp4"
                                     val rateKHz = if (losslessStream.samplingRate > 1000.0) losslessStream.samplingRate / 1000.0 else losslessStream.samplingRate
-                                    val depth = if (losslessStream.bitDepth > 0) losslessStream.bitDepth else if (rateKHz > 48.0) 24 else 16
+                                    val depth = losslessStream.bitDepth.takeIf { it > 0 }
                                     formatBadge = when {
                                         isAtmosStream -> "DOLBY ATMOS"
                                         isFlacStream -> formatDetailedQualityBadge(depth, rateKHz)
@@ -806,7 +809,7 @@ class TrackDownloadManager @Inject constructor(
                                 extension = if (mimeType.contains("mp3")) "mp3" else "flac"
                                 isLossless = !extension.equals("mp3", ignoreCase = true)
                                 val rateKHz = if (losslessStream.samplingRate > 1000.0) losslessStream.samplingRate / 1000.0 else losslessStream.samplingRate
-                                val depth = if (losslessStream.bitDepth > 0) losslessStream.bitDepth else if (rateKHz > 48.0) 24 else 16
+                                val depth = losslessStream.bitDepth.takeIf { it > 0 }
                                 formatBadge = if (isLossless) {
                                     formatDetailedQualityBadge(depth, rateKHz)
                                 } else "MP3"
@@ -834,7 +837,7 @@ class TrackDownloadManager @Inject constructor(
                                     !s.codec.equals("aac", ignoreCase = true) &&
                                     !s.codec.contains("mp4a", ignoreCase = true)
                                 val rateKHz = if (s.sampleRate > 1000) s.sampleRate / 1000.0 else s.sampleRate.toDouble()
-                                val depth = if (s.bitDepth > 0) s.bitDepth else if (rateKHz > 48.0) 24 else 16
+                                val depth = s.bitDepth?.takeIf { it > 0 }
                                 formatBadge = if (isLossless) {
                                     formatDetailedQualityBadge(depth, rateKHz)
                                 } else s.codec.uppercase()
@@ -881,7 +884,7 @@ class TrackDownloadManager @Inject constructor(
                                     extension = "m4a"
                                     mimeType = "audio/mp4"
                                     val rateKHz = if (s.sampleRate > 1000) s.sampleRate / 1000.0 else s.sampleRate.toDouble()
-                                    val depth = if (s.bitDepth > 0) s.bitDepth else if (rateKHz > 48.0) 24 else 16
+                                    val depth = s.bitDepth?.takeIf { it > 0 }
                                     formatBadge = when {
                                         isAtmosStream -> "DOLBY ATMOS"
                                         isFlacStream -> formatDetailedQualityBadge(depth, rateKHz)
@@ -1084,7 +1087,8 @@ class TrackDownloadManager @Inject constructor(
                         // Reset state for potential retry at lower quality
                         mimeType = "audio/flac"
                         extension = "flac"
-                        formatBadge = "24-BIT FLAC"
+                        // Depth is unknown again until the retry resolves one.
+                        formatBadge = "FLAC"
                         isLossless = false
                         durationMs = 0L
                         downloadHeaders = emptyMap()

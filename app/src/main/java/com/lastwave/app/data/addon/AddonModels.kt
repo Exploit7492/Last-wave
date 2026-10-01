@@ -57,7 +57,13 @@ data class AddonStream(
     @SerialName("codec") val codec: String = "flac",
     @SerialName("quality") val quality: String = "",
     @SerialName("sampleRate") val sampleRate: Double = 44100.0,
-    @SerialName("bitDepth") val bitDepth: Int = 16,
+    /**
+     * Source bit depth reported by the addon, or null when it reported none.
+     * Deliberately not defaulted to 16: an omitted field means the addon never
+     * measured a depth, and a fabricated 16 was believed at 44.1/48kHz (where
+     * nothing contradicts it) and surfaced as a false "16/44.1kHz" pill.
+     */
+    @SerialName("bitDepth") val bitDepth: Int? = null,
     @SerialName("bitrate") val bitrate: Int? = null,
     @SerialName("manifest") val manifest: String = "dash",
     @SerialName("manifestXml") val manifestXml: String? = null,

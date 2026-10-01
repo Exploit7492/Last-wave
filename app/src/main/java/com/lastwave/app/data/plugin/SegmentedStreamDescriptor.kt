@@ -31,7 +31,14 @@ data class SegmentedStreamRef(
     val type: String = "dash_segmented",
     val mimeType: String = "audio/mp4",
     val codec: String = "flac",
-    val bitDepth: Int = 16,
+    /**
+     * Source bit depth of the stream, or null when the module did not report
+     * one. Deliberately NOT defaulted to 16: a module that simply omits the
+     * field was asserting a depth it never measured, and at 44.1/48kHz that
+     * fabricated 16 was believed by every badge downstream. Null means unknown,
+     * and unknown renders rate-only.
+     */
+    val bitDepth: Int? = null,
     val sampleRate: Int = 44100,
     val bandwidth: Int = 0,
     val quality: String = "HD",

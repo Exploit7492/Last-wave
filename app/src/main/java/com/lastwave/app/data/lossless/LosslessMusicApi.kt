@@ -29,7 +29,8 @@ import javax.inject.Singleton
 data class LosslessAudioStream(
     val url: String,
     val mimeType: String = "application/dash+xml",
-    val bitDepth: Int = 16,
+    /** 0 means unknown; never assume 16 for an unmeasured depth. */
+    val bitDepth: Int = 0,
     val samplingRate: Double = 44.1,
     val formatId: Int = 6,
     val bitrateKbps: Int? = null,
@@ -545,15 +546,19 @@ class LosslessMusicApi @Inject constructor(
                     stream.quality.contains("HI-RES", ignoreCase = true) ||
                     (wantsHiRes && q == "hi_res") ||
                     effectiveSampleRate > 48000.0
+                // Depth the addon actually reported, or null when it reported
+                // none. Only that plus the explicit hi-res tier flag may assert a
+                // depth; an absent value stays null all the way to the badge.
+                val reportedDepth = stream.bitDepth?.takeIf { it > 0 }
                 val effectiveBitDepth = when {
-                    stream.bitDepth > 16 -> stream.bitDepth
+                    (reportedDepth ?: 0) > 16 -> reportedDepth
                     effectiveSampleRate > 192000.0 -> 32
                     isHiResFlagged -> 24
-                    else -> stream.bitDepth
+                    else -> reportedDepth
                 }
                 val formatId = when {
                     isStreamAtmos -> QUALITY_DOLBY_ATMOS
-                    effectiveBitDepth > 16 || effectiveSampleRate > 48000.0 || isHiResFlagged -> {
+                    (effectiveBitDepth ?: 0) > 16 || effectiveSampleRate > 48000.0 || isHiResFlagged -> {
                         if (effectiveSampleRate > 96000.0) QUALITY_MAX_HI_RES else QUALITY_HI_RES_96
                     }
                     stream.codec.equals("flac", ignoreCase = true) || effectiveBitDepth == 16 -> QUALITY_CD_LOSSLESS
@@ -569,18 +574,18 @@ class LosslessMusicApi @Inject constructor(
                 val isHiResTierHit = formatId == QUALITY_MAX_HI_RES || formatId == QUALITY_HI_RES_96
                 val isHiResAttempt = q == "hi_res"
                 if (isHiResAttempt && !isStreamAtmos && !isHiResTierHit) {
-                    Log.i(TAG, "resolveFromAddon: candidate $trackId answered hi_res with ${effectiveBitDepth}-bit/${effectiveSampleRate}Hz; trying next candidate")
+                    Log.i(TAG, "resolveFromAddon: candidate $trackId answered hi_res with ${effectiveBitDepth ?: 0}-bit/${effectiveSampleRate}Hz; trying next candidate")
                     continue
                 }
 
-                Log.i(TAG, "resolveFromAddon: Acquired stream for track $trackId: formatId=$formatId, bitDepth=$effectiveBitDepth, sampleRate=${effectiveSampleRate}Hz, codec=${stream.codec}")
+                Log.i(TAG, "resolveFromAddon: Acquired stream for track $trackId: formatId=$formatId, bitDepth=${effectiveBitDepth ?: "unknown"}, sampleRate=${effectiveSampleRate}Hz, codec=${stream.codec}")
                 consecutiveFailures = 0
                 failureCooldownUntilMs = 0L
 
                 return LosslessAudioStream(
                     url = rawUrl,
                     mimeType = "application/dash+xml",
-                    bitDepth = effectiveBitDepth,
+                    bitDepth = effectiveBitDepth ?: 0,
                     samplingRate = effectiveSampleRate / 1000.0,
                     formatId = formatId,
                     bitrateKbps = stream.bitrate?.let { if (it > 10_000) it / 1000 else it },
