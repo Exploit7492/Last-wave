@@ -115,6 +115,7 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.SurroundSound
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -721,7 +722,7 @@ fun PlayerHost(
                             modifier = Modifier.padding(horizontal = 12.dp)
                         ) {
                             androidx.compose.material3.Icon(
-                                imageVector = androidx.compose.material.icons.Icons.Filled.AccessTime,
+                                imageVector = androidx.compose.material.icons.Icons.Filled.Timer,
                                 contentDescription = "Sleep Timer",
                                 tint = androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer,
                                 modifier = Modifier.size(20.dp)
