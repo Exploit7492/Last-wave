@@ -208,7 +208,7 @@ fun FeedScreen(
                     HeaderActionIcon(Icons.Filled.Download, "Downloads", onOpenDownloads)
                     HeaderActionIcon(Icons.Filled.Search, "Search", onOpenSearch)
                     IconButton(onClick = onOpenSettings) {
-                        com.lastwave.app.ui.home.ProfileAvatar(avatarUrl = null, modifier = Modifier.size(38.dp))
+                        com.lastwave.app.ui.home.ProfileAvatar(avatarUrl = state.avatarUrl, modifier = Modifier.size(32.dp))
                     }
                 },
             )
@@ -319,6 +319,7 @@ fun FeedScreen(
                                 onTileClick = { tile ->
                                     when {
                                         tile.collection == "radio" -> onOpenDiscover()
+                                        tile.collection == "mix" -> onOpenGenerator()
                                         tile.collection == "yt_liked" || tile.playlistId == "yt_liked" -> onOpenFeedPlaylist("yt_liked")
                                         tile.collection == "yt_recent" || tile.playlistId == "yt_recent" -> onOpenFeedPlaylist("yt_recent")
                                         tile.collection == "new_releases" -> onOpenNewReleases()
@@ -1180,12 +1181,14 @@ private fun QuickTilesGrid(
     tiles: List<FeedQuickTile>,
     onTileClick: (FeedQuickTile) -> Unit,
 ) {
-    LazyRow(
-        modifier = Modifier.fillMaxWidth(),
+    androidx.compose.foundation.lazy.grid.LazyHorizontalGrid(
+        rows = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
+        modifier = Modifier.fillMaxWidth().height(160.dp),
         contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        items(tiles, key = { "${it.title}_${it.collection ?: ""}_${it.playlistId ?: ""}_${it.localPlaylistId ?: ""}" }) { tile ->
+        androidx.compose.foundation.lazy.grid.items(tiles, key = { "${it.title}_${it.collection ?: ""}_${it.playlistId ?: ""}_${it.localPlaylistId ?: ""}" }) { tile ->
             QuickTileCard(
                 tile = tile,
                 onClick = { onTileClick(tile) },

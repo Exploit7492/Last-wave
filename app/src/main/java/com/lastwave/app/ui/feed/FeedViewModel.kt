@@ -42,6 +42,7 @@ data class FeedUiState(
     val isRefreshing: Boolean = false,
     val launchingRadio: String? = null,
     val error: String? = null,
+    val avatarUrl: String? = null,
     val feedData: FeedData = FeedData(),
 )
 
@@ -53,6 +54,7 @@ class FeedViewModel @Inject constructor(
     private val musicPlayer: MusicPlayer,
     private val innerTube: InnerTubeMusicApi,
     private val ytAuth: YtMusicAuthManager,
+    private val homeRepository: com.lastwave.app.data.repository.HomeRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FeedUiState())
@@ -79,6 +81,12 @@ class FeedViewModel @Inject constructor(
                     ),
                 )
                 loadFeed()
+            }
+        }
+        viewModelScope.launch {
+            val stats = homeRepository.fetchStats().getOrNull()
+            if (stats != null) {
+                _uiState.update { it.copy(avatarUrl = stats.avatarUrl) }
             }
         }
     }
@@ -128,12 +136,14 @@ class FeedViewModel @Inject constructor(
                 if (ytAuth.connection.value != connection ||
                     sessionPreferences.session.value.username.takeIf(String::isNotBlank) != username
                 ) return@launch
+                val stats = homeRepository.fetchStats().getOrNull()
                 _uiState.update {
                     it.copy(
                         isLoading = false,
                         isRefreshing = false,
                         feedData = data,
                         error = null,
+                        avatarUrl = stats?.avatarUrl ?: it.avatarUrl,
                     )
                 }
                 lastLoadedMillis = System.currentTimeMillis()

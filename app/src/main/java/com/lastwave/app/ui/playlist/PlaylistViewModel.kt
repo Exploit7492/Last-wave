@@ -76,6 +76,7 @@ class PlaylistViewModel @Inject constructor(
     private val ytMusicSyncManager: com.lastwave.app.data.ytmusic.YtMusicSyncManager,
     private val ytMusicLibraryManager: com.lastwave.app.data.ytmusic.YtMusicLibraryManager,
     private val trackDownloadManager: com.lastwave.app.data.download.TrackDownloadManager,
+    private val innerTubeApi: com.lastwave.app.data.music.InnerTubeMusicApi,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlaylistUiState())
@@ -457,8 +458,39 @@ class PlaylistViewModel @Inject constructor(
     fun confirmDelete() {
         val id = _uiState.value.deleteConfirmForPlaylistId ?: return
         viewModelScope.launch {
+            val playlist = playlistRepository.get(id)
+            if (playlist != null && (playlist.isYouTubeOnly || playlist.ytPlaylistId != null)) {
+                val ytId = if (playlist.isYouTubeOnly) playlist.id.toString() else playlist.ytPlaylistId
+                if (ytId != null) {
+                    try {
+                        innerTubeApi.deleteRemotePlaylist(ytId)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
             playlistRepository.delete(id)
             _uiState.update { it.copy(deleteConfirmForPlaylistId = null) }
+            load()
+        }
+    }
+
+    fun deleteMultiple(ids: Set<Long>) {
+        viewModelScope.launch {
+            for (id in ids) {
+                val playlist = playlistRepository.get(id)
+                if (playlist != null && (playlist.isYouTubeOnly || playlist.ytPlaylistId != null)) {
+                    val ytId = if (playlist.isYouTubeOnly) playlist.id.toString() else playlist.ytPlaylistId
+                    if (ytId != null) {
+                        try {
+                            innerTubeApi.deleteRemotePlaylist(ytId)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }
+                playlistRepository.delete(id)
+            }
             load()
         }
     }

@@ -131,6 +131,7 @@
             android:layout_marginTop="8dp"
             android:layout_marginEnd="8dp"
             android:gravity="center_vertical"
+            android:visibility="gone"
             android:orientation="horizontal">
 
             <ProgressBar
@@ -159,6 +160,7 @@
                 android:layout_width="36dp"
                 android:layout_height="36dp"
                 android:background="@drawable/widget_ref_circle"
+                android:visibility="gone"
                 android:gravity="center"
                 android:orientation="horizontal">
                 
@@ -175,7 +177,6 @@
                 android:id="@+id/widget_play_pause_container"
                 android:layout_width="wrap_content"
                 android:layout_height="34dp"
-                android:layout_marginStart="10dp"
                 android:background="@drawable/widget_ref_pill"
                 android:gravity="center"
                 android:orientation="horizontal"

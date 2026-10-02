@@ -286,6 +286,7 @@ fun TrackContextMenuSheet(
     onDeleteScrobble: ((trackName: String, artistName: String) -> Unit)? = null,
     onRefreshArtwork: (() -> Unit)? = null,
     onRemoveFromPlaylist: (() -> Unit)? = null,
+    onRemoveFromQueue: (() -> Unit)? = null,
     genreResolverViewModel: GenreRowViewModel = hiltViewModel(),
     startMixViewModel: StartMixMenuViewModel = hiltViewModel(),
     exploreGenreViewModel: ExploreGenreMenuViewModel = hiltViewModel(),
@@ -578,6 +579,14 @@ fun TrackContextMenuSheet(
                         add { pos ->
                             MenuActionRow(Icons.Filled.Delete, "Remove from Playlist", danger = true, position = pos) {
                                 onRemoveFromPlaylist()
+                                onDismiss()
+                            }
+                        }
+                    }
+                    if (onRemoveFromQueue != null) {
+                        add { pos ->
+                            MenuActionRow(Icons.Filled.DeleteOutline, "Remove from Queue", danger = true, position = pos) {
+                                onRemoveFromQueue()
                                 onDismiss()
                             }
                         }

@@ -90,11 +90,11 @@
                 android:gravity="center_vertical"
                 android:orientation="vertical">
 
-                <!-- Header / Brand & Equalizer Visualizer -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
+                    android:visibility="gone"
                     android:orientation="horizontal">
 
                     <TextView
@@ -165,6 +165,7 @@
                         android:layout_width="36dp"
                         android:layout_height="36dp"
                         android:background="@drawable/widget_ref_circle"
+                        android:visibility="gone"
                         android:gravity="center"
                         android:orientation="horizontal">
                         
@@ -182,7 +183,6 @@
                         android:id="@+id/widget_play_pause_container"
                         android:layout_width="wrap_content"
                         android:layout_height="34dp"
-                        android:layout_marginStart="10dp"
                         android:background="@drawable/widget_ref_pill"
                         android:gravity="center"
                         android:orientation="horizontal"
@@ -228,13 +228,13 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Progress: Sleek accent line along bottom -->
         <LinearLayout
             android:id="@+id/widget_progress_row"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
             android:gravity="center_vertical"
+            android:visibility="gone"
             android:orientation="horizontal">
 
             <ProgressBar

@@ -379,7 +379,7 @@ enum class SettingsTab(
     ),
     APPEARANCE(
         title = "Appearance & Visuals",
-        subtitle = "Themes, Accent colors, Fluid artwork, Canvas, Lyrics",
+        subtitle = "Themes, Colors, Artwork, Lyrics",
         icon = Icons.Filled.Palette,
     ),
     YOUTUBE(
@@ -655,18 +655,9 @@ fun SettingsScreen(
                         item {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 SectionLabel("Services & Addons")
-                                SettingsGroup(rowCount = 3) { index, position ->
+                                SettingsGroup(rowCount = 2) { index, position ->
                                     when (index) {
                                         0 -> SettingsActionCard(
-                                            icon = Icons.Filled.Extension,
-                                            iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                                            iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                            title = "Modules & Addons",
-                                            subtitle = "Manage lossless streaming providers and remote addons",
-                                            onClick = onOpenModules,
-                                            position = position,
-                                        )
-                                        1 -> SettingsActionCard(
                                             icon = Icons.Filled.Album,
                                             iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                             iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -692,7 +683,7 @@ fun SettingsScreen(
                         item {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 SectionLabel("Playback & UI")
-                                SettingsGroup(rowCount = 3) { index, position ->
+                                SettingsGroup(rowCount = 2) { index, position ->
                                     when (index) {
                                         0 -> SettingsActionCard(
                                             icon = Icons.Filled.GraphicEq,
@@ -703,25 +694,13 @@ fun SettingsScreen(
                                             onClick = { activeTab = SettingsTab.AUDIO },
                                             position = position,
                                         )
-                                        1 -> SettingsActionCard(
+                                        else -> SettingsActionCard(
                                             icon = Icons.Filled.Palette,
                                             iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                             iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                                             title = "Appearance & Visuals",
-                                            subtitle = "Themes, Accent colors, Fluid artwork, Canvas, Lyrics",
+                                            subtitle = "Themes, Colors, Artwork, Lyrics",
                                             onClick = { activeTab = SettingsTab.APPEARANCE },
-                                            position = position,
-                                        )
-                                        else -> SettingsActionCard(
-                                            icon = Icons.Filled.QueueMusic,
-                                            iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                                            iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                            title = "Library & Content",
-                                            subtitle = run {
-                                                val count = downloadCount
-                                                if (count > 0) "$count songs downloaded • Imports, Home layout" else "Home layout, Playlist imports, Downloads, Exclusions"
-                                            },
-                                            onClick = { activeTab = SettingsTab.LIBRARY },
                                             position = position,
                                         )
                                     }
@@ -2501,6 +2480,8 @@ private fun SectionLabel(text: String) {
         fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
     )
 }
 

@@ -692,7 +692,7 @@ class FeedRepository @Inject constructor(
             add(savedMyMix?.let {
                 FeedQuickTile(title = it.title, subtitle = it.author, artworkUrl = it.artworkUrl, playlistId = it.id)
             } ?: FeedQuickTile(title = "My Mix", subtitle = "Endless radio",
-                artworkUrl = ytRecentSongs.firstOrNull()?.artworkUrl ?: quickPicks.firstOrNull()?.artworkUrl, collection = "radio"))
+                artworkUrl = ytRecentSongs.firstOrNull()?.artworkUrl ?: quickPicks.firstOrNull()?.artworkUrl, collection = "mix"))
 
             add(
                 FeedQuickTile(

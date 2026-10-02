@@ -608,6 +608,10 @@ class PlayerViewModel @Inject constructor(
     }
 }
 
+val LocalBottomNavSlot = androidx.compose.runtime.staticCompositionLocalOf<androidx.compose.runtime.MutableState<@androidx.compose.runtime.Composable () -> Unit>> {
+    error("LocalBottomNavSlot not provided")
+}
+
 /** App-wide collapsed + maximized player layered over every navigation route. */
 @Composable
 fun PlayerHost(
@@ -669,10 +673,12 @@ fun PlayerHost(
     }
     val miniGlass = LocalLiquidGlass.current && isLiquidGlassBackdropSupported()
 
+    val bottomNavSlot = remember { mutableStateOf<@Composable () -> Unit>({}) }
     CompositionLocalProvider(
         LocalMusicPlayer provides viewModel.player,
         LocalAddToPlaylist provides requestAddToPlaylist,
         LocalMiniPlayerScrollClearance provides if (state.current != null) 88.dp else 0.dp,
+        LocalBottomNavSlot provides bottomNavSlot,
     ) {
         Box(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().liquidGlassSource(if (miniGlass) miniBackdrop else null)) {
@@ -692,6 +698,47 @@ fun PlayerHost(
                     backdrop = if (miniGlass) miniBackdrop else null,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
+                
+                // Sleep Timer Button
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = if (hasBottomNavigation) 160.dp else 80.dp)
+                ) {
+                    androidx.compose.material3.Surface(
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer,
+                        shadowElevation = 6.dp,
+                        modifier = Modifier
+                            .height(48.dp)
+                            .defaultMinSize(minWidth = 48.dp)
+                            .clickable(onClick = { viewModel.player.cycleSleepTimer() })
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        ) {
+                            androidx.compose.material3.Icon(
+                                imageVector = androidx.compose.material.icons.Icons.Filled.Schedule,
+                                contentDescription = "Sleep Timer",
+                                tint = androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            if (state.sleepTimerRemainingMs != null) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                val minutes = (state.sleepTimerRemainingMs!! / 60000).toInt()
+                                val seconds = ((state.sleepTimerRemainingMs!! % 60000) / 1000).toInt()
+                                androidx.compose.material3.Text(
+                                    text = String.format("%02d:%02d", minutes, seconds),
+                                    style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
             }
             if (activeDownloads.isNotEmpty() && !expanded) {
                 val latestProgress = activeDownloads.firstOrNull()?.progressPercent ?: 0
@@ -701,7 +748,9 @@ fun PlayerHost(
                     onOpenDownloads = { viewModel.navigateToDownloads() },
                 )
             }
+            var isPlayerDragging by remember { mutableStateOf(false) }
             AnimatedVisibility(
+                modifier = Modifier.zIndex(1f),
                 visible = expanded && state.current != null,
                 enter = slideInVertically(
                     animationSpec = ExpressiveMotion.smoothSpring(),
@@ -734,9 +783,13 @@ fun PlayerHost(
                             expanded = false
                             viewModel.openArtist(artist)
                         },
+                        onDragStatusChange = { isPlayerDragging = it },
                     )
                 }
             }
+            
+            bottomNavSlot.value()
+            
             playlistTrack?.let { track ->
                 AddToPlaylistDialogHost(
                     viewModel = viewModel,
@@ -770,6 +823,7 @@ private fun ExpandedPlayer(
     onRetryLyrics: () -> Unit,
     onCollapse: () -> Unit,
     onOpenArtist: (String) -> Unit,
+    onDragStatusChange: (Boolean) -> Unit = {},
 ) {
     val state by viewModel.fullPlayerState.collectAsStateWithLifecycle()
     val lyricsState by viewModel.lyricsState.collectAsStateWithLifecycle()
@@ -805,6 +859,7 @@ private fun ExpandedPlayer(
         isLiked = isLiked,
         onToggleLiked = { currentTrack?.let(viewModel::toggleLiked) },
         onDoubleTapLike = { currentTrack?.let(viewModel::like) },
+        onDragStatusChange = onDragStatusChange,
     )
 }
 
@@ -1640,6 +1695,7 @@ private fun FullPlayer(
     isLiked: Boolean = false,
     onToggleLiked: () -> Unit = {},
     onDoubleTapLike: () -> Unit = {},
+    onDragStatusChange: (Boolean) -> Unit = {},
 ) {
     val track = state.current ?: return
     var showLyricsOffsetDialog by remember { mutableStateOf(false) }
@@ -1679,6 +1735,7 @@ private fun FullPlayer(
     var artworkDragX by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     var dismissDragY by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     var isDismissDragging by remember { mutableStateOf(false) }
+    LaunchedEffect(isDismissDragging) { onDragStatusChange(isDismissDragging) }
     var seekOverlayDirection by remember(track.videoId, track.title) { mutableStateOf<SeekDirection?>(null) }
     var seekOverlaySeconds by remember(track.videoId, track.title) { mutableIntStateOf(0) }
     var lastTapTimestamp by remember(track.videoId, track.title) { mutableLongStateOf(0L) }
@@ -3388,6 +3445,7 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
     val scope = rememberCoroutineScope()
     var draggingIndex by remember { mutableIntStateOf(-1) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var menuIndex by remember { mutableStateOf<Int?>(null) }
 
     // Stable keys so animateItem() can animate moves instead of treating
     // every shifted row as a new item. Duplicates get occurrence suffixes.
@@ -3633,12 +3691,14 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        if (isCurrent) {
+                        IconButton(
+                            onClick = { menuIndex = index },
+                            modifier = Modifier.size(36.dp)
+                        ) {
                             Icon(
-                                Icons.Filled.GraphicEq,
-                                "Currently playing",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(22.dp),
+                                Icons.Filled.MoreVert,
+                                contentDescription = "Menu",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         Icon(
@@ -3716,6 +3776,21 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                 )
             }
             item { Spacer(Modifier.height(12.dp)) }
+        }
+    }
+
+    menuIndex?.let { index ->
+        val itemTrack = state.queue.getOrNull(index)
+        if (itemTrack != null) {
+            com.lastwave.app.ui.common.TrackContextMenuSheet(
+                target = com.lastwave.app.ui.common.TrackMenuTarget.Track(itemTrack.title, itemTrack.artist, itemTrack.album),
+                capabilities = com.lastwave.app.ui.common.TrackMenuCapabilities(showCopyActions = true),
+                playableTrack = itemTrack,
+                onDismiss = { menuIndex = null },
+                onRemoveFromQueue = { player.removeQueueItem(index) }
+            )
+        } else {
+            menuIndex = null
         }
     }
 }

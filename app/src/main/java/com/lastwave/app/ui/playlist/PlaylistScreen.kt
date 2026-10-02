@@ -148,6 +148,8 @@ fun PlaylistScreen(
     }
 
     var menuTarget by remember { mutableStateOf<Pair<Long, GeneratedTrack>?>(null) }
+    var selectedPlaylists by remember { mutableStateOf(setOf<Long>()) }
+    var showMultipleDeleteConfirm by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -158,59 +160,74 @@ fun PlaylistScreen(
         ) {
             var sortMenuExpanded by remember { mutableStateOf(false) }
             ExpressiveHeader(
-                title = "Playlist",
-                subtitle = if (state.playlists.any { it.isYouTubeOnly && it.remoteTrackCount == null }) {
+                title = if (selectedPlaylists.isNotEmpty()) "${selectedPlaylists.size} selected" else "Playlist",
+                subtitle = if (selectedPlaylists.isNotEmpty()) "Long press to select more" else if (state.playlists.any { it.isYouTubeOnly && it.remoteTrackCount == null }) {
                     "${state.playlists.size} Playlists"
                 } else {
                     "${state.playlists.size} Playlists \u00b7 ${state.playlists.sumOf { it.remoteTrackCount ?: it.tracks.size }} Tracks"
                 },
                 actions = {
-                    IconButton(
-                        onClick = viewModel::openCreateDialog,
-                        modifier = Modifier.size(40.dp),
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = "Create custom playlist")
-                    }
-                    Box {
-                        Surface(
-                            onClick = { sortMenuExpanded = true },
-                            shape = RoundedCornerShape(50),
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            tonalElevation = 1.dp,
-                            modifier = Modifier.heightIn(min = 34.dp),
+                    if (selectedPlaylists.isNotEmpty()) {
+                        IconButton(
+                            onClick = { showMultipleDeleteConfirm = true },
+                            modifier = Modifier.size(40.dp),
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.Sort,
-                                    contentDescription = "Sort playlists",
-                                    modifier = Modifier.size(15.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    "Sort",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                            }
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete selected", tint = MaterialTheme.colorScheme.error)
                         }
-                        DropdownMenu(
-                            expanded = sortMenuExpanded,
-                            onDismissRequest = { sortMenuExpanded = false },
-                            shape = RoundedCornerShape(22.dp),
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            tonalElevation = 4.dp,
-                            shadowElevation = 10.dp,
-                            modifier = Modifier.padding(vertical = 4.dp),
+                        IconButton(
+                            onClick = { selectedPlaylists = setOf() },
+                            modifier = Modifier.size(40.dp),
                         ) {
-                            DropdownMenuItem(text = { Text("Newest first") }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_DESC); sortMenuExpanded = false })
-                            DropdownMenuItem(text = { Text("Oldest first") }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_ASC); sortMenuExpanded = false })
-                            DropdownMenuItem(text = { Text("Name") }, onClick = { viewModel.setSortMode(PlaylistSortMode.NAME); sortMenuExpanded = false })
-                            DropdownMenuItem(text = { Text("Track count") }, onClick = { viewModel.setSortMode(PlaylistSortMode.TRACK_COUNT); sortMenuExpanded = false })
+                            Icon(androidx.compose.material.icons.filled.Close, contentDescription = "Clear selection")
+                        }
+                    } else {
+                        IconButton(
+                            onClick = viewModel::openCreateDialog,
+                            modifier = Modifier.size(40.dp),
+                        ) {
+                            Icon(Icons.Filled.Add, contentDescription = "Create custom playlist")
+                        }
+                        Box {
+                            Surface(
+                                onClick = { sortMenuExpanded = true },
+                                shape = RoundedCornerShape(50),
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                tonalElevation = 1.dp,
+                                modifier = Modifier.heightIn(min = 34.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.Sort,
+                                        contentDescription = "Sort playlists",
+                                        modifier = Modifier.size(15.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        "Sort",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
+                            DropdownMenu(
+                                expanded = sortMenuExpanded,
+                                onDismissRequest = { sortMenuExpanded = false },
+                                shape = RoundedCornerShape(22.dp),
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                tonalElevation = 4.dp,
+                                shadowElevation = 10.dp,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                            ) {
+                                DropdownMenuItem(text = { Text("Newest first") }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_DESC); sortMenuExpanded = false })
+                                DropdownMenuItem(text = { Text("Oldest first") }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_ASC); sortMenuExpanded = false })
+                                DropdownMenuItem(text = { Text("Name") }, onClick = { viewModel.setSortMode(PlaylistSortMode.NAME); sortMenuExpanded = false })
+                                DropdownMenuItem(text = { Text("Track count") }, onClick = { viewModel.setSortMode(PlaylistSortMode.TRACK_COUNT); sortMenuExpanded = false })
+                            }
                         }
                     }
                 },
@@ -272,7 +289,13 @@ fun PlaylistScreen(
                                     currentTrack = playbackState.current,
                                     isPlaying = playbackState.isPlaying,
                                     playbackSource = playbackState.sourceLabel,
-                                    onClick = { onOpenPlaylist(playlist.id) },
+                                    onClick = {
+                                        if (selectedPlaylists.isNotEmpty()) {
+                                            selectedPlaylists = if (selectedPlaylists.contains(playlist.id)) selectedPlaylists - playlist.id else selectedPlaylists + playlist.id
+                                        } else {
+                                            onOpenPlaylist(playlist.id)
+                                        }
+                                    },
                                     onExport = { viewModel.openExportSheet(playlist.id) },
                                     onRename = { viewModel.requestRename(playlist.id) },
                                     onEditCover = { coverEditorPlaylistId = playlist.id },
@@ -292,12 +315,38 @@ fun PlaylistScreen(
                                             sourceLabel = playlist.title,
                                         )
                                     },
+                                    isSelected = selectedPlaylists.contains(playlist.id),
+                                    onLongClick = {
+                                        selectedPlaylists = if (selectedPlaylists.contains(playlist.id)) selectedPlaylists - playlist.id else selectedPlaylists + playlist.id
+                                    },
                                 )
                             }
                         }
                     }
                 }
             }
+        }
+
+        if (showMultipleDeleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { showMultipleDeleteConfirm = false },
+                title = { Text("Delete playlists?") },
+                text = { Text("Are you sure you want to permanently delete ${selectedPlaylists.size} selected playlists?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.deleteMultiple(selectedPlaylists)
+                            selectedPlaylists = setOf()
+                            showMultipleDeleteConfirm = false
+                        }
+                    ) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showMultipleDeleteConfirm = false }) { Text("Cancel") }
+                },
+            )
         }
 
         state.toastMessage?.let { msg ->
@@ -522,6 +571,8 @@ private fun PlaylistCard(
     onDelete: () -> Unit,
     onMakeLocal: () -> Unit,
     onPlay: () -> Unit,
+    isSelected: Boolean = false,
+    onLongClick: () -> Unit = {},
 ) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
@@ -546,7 +597,11 @@ private fun PlaylistCard(
         label = "cardPress",
     )
     val cardBackground by animateColorAsState(
-        targetValue = if (isThisPlaylistPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+        targetValue = when {
+            isSelected -> MaterialTheme.colorScheme.primaryContainer
+            isThisPlaylistPlaying -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+            else -> MaterialTheme.colorScheme.surfaceContainerHigh
+        },
         animationSpec = tween(350),
         label = "cardBg",
     )
@@ -574,7 +629,7 @@ private fun PlaylistCard(
                     },
                     onLongClick = {
                         haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(playlist.title))
+                        onLongClick()
                     },
                 )
                 .padding(14.dp),
@@ -726,13 +781,11 @@ private fun PlaylistCard(
                             onClick = { onExport(); menuExpanded = false },
                         )
                     }
-                    if (!playlist.isYouTubeOnly) {
-                        DropdownMenuItem(
-                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                            leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                            onClick = { onDelete(); menuExpanded = false },
-                        )
-                    }
+                    DropdownMenuItem(
+                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                        onClick = { onDelete(); menuExpanded = false },
+                    )
                 }
             }
         }

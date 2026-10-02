@@ -113,6 +113,11 @@ fun DraggableDownloadOverlay(
                 modifier = Modifier
                     .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
                     .size(iconSizeDp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onOpenDownloads
+                    )
                     .pointerInput(Unit) {
                         detectDragGestures(
                             onDragStart = {

@@ -963,49 +963,40 @@ fun PlaylistDetailScreen(
 
                 Spacer(Modifier.width(6.dp))
 
-                AnimatedVisibility(
-                    visible = true,
-                    enter = fadeIn() + scaleIn(),
-                    exit = fadeOut() + scaleOut(),
-                ) {
-                    FilledTonalIconButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            isSearchActive = !isSearchActive
-                            if (!isSearchActive) searchQuery = ""
-                        },
-                        shape = CircleShape,
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = if (isSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = if (isSearchActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer,
-                        ),
-                        modifier = Modifier.size(38.dp),
-                    ) {
-                        Icon(Icons.Filled.Search, contentDescription = "Search in playlist", modifier = Modifier.size(16.dp))
-                    }
-                }
-
-                Spacer(Modifier.width(6.dp))
-
                 // Translucent Actions Pill (Search / More Menu)
                 Surface(
                     shape = RoundedCornerShape(50),
                     color = if (showScrolledHeader) Color.Transparent else Color.Black.copy(alpha = 0.38f),
                 ) {
-                    Box {
+                    Row {
                         IconButton(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                overflowMenuOpen = true
+                                isSearchActive = !isSearchActive
+                                if (!isSearchActive) searchQuery = ""
                             },
                             modifier = Modifier.size(42.dp),
                         ) {
                             Icon(
-                                Icons.Filled.MoreVert,
-                                contentDescription = "Playlist options",
-                                tint = if (showScrolledHeader) MaterialTheme.colorScheme.onSurface else Color.White,
+                                Icons.Filled.Search,
+                                contentDescription = "Search in playlist",
+                                tint = if (isSearchActive) MaterialTheme.colorScheme.primary else if (showScrolledHeader) MaterialTheme.colorScheme.onSurface else Color.White,
                             )
                         }
+                        Box {
+                            IconButton(
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    overflowMenuOpen = true
+                                },
+                                modifier = Modifier.size(42.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.MoreVert,
+                                    contentDescription = "Playlist options",
+                                    tint = if (showScrolledHeader) MaterialTheme.colorScheme.onSurface else Color.White,
+                                )
+                            }
 
                         DropdownMenu(
                             expanded = overflowMenuOpen,
@@ -1121,7 +1112,6 @@ fun PlaylistDetailScreen(
                                     },
                                 )
                             }
-                            if (!playlist.isYouTubeOnly) {
                                 DropdownMenuItem(
                                     text = { Text("Delete playlist", color = MaterialTheme.colorScheme.error) },
                                     leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
@@ -1130,8 +1120,8 @@ fun PlaylistDetailScreen(
                                         overflowMenuOpen = false
                                     },
                                 )
-                            }
                         }
+                    }
                     }
                 }
             }
