@@ -80,6 +80,10 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
@@ -288,6 +292,7 @@ fun MainShell(
         val currentOnSelect by androidx.compose.runtime.rememberUpdatedState { index: Int ->
             if (index != selectedTabIndex) selectedTabIndex = index
             scope.launch { pagerState.animateScrollToPage(index) }
+            Unit
         }
         val currentOnOpenGenerator by androidx.compose.runtime.rememberUpdatedState(onOpenGenerator)
 
@@ -399,7 +404,7 @@ private fun FloatingNavBar(
         ) {
             tabs.forEachIndexed { index, tab ->
                 val onClick = remember(index) { { onSelect(index) } }
-                androidx.compose.material3.NavigationBarItem(
+                NavigationBarItem(
                     selected = selectedIndex == index,
                     onClick = onClick,
                     icon = { Icon(tab.icon(), contentDescription = null) },

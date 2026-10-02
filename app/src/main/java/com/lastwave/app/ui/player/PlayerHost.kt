@@ -620,6 +620,7 @@ fun PlayerHost(
     content: @Composable () -> Unit,
 ) {
     val state by viewModel.chromeState.collectAsStateWithLifecycle()
+    val playbackState by viewModel.player.state.collectAsStateWithLifecycle()
     val activeDownloads by viewModel.activeDownloads.collectAsStateWithLifecycle()
     var expanded by rememberSaveable { mutableStateOf(false) }
     var currentTab by rememberSaveable { mutableStateOf(FullPlayerTab.NOW_PLAYING) }
@@ -720,15 +721,15 @@ fun PlayerHost(
                             modifier = Modifier.padding(horizontal = 12.dp)
                         ) {
                             androidx.compose.material3.Icon(
-                                imageVector = androidx.compose.material.icons.Icons.Filled.Schedule,
+                                imageVector = androidx.compose.material.icons.Icons.Filled.Timer,
                                 contentDescription = "Sleep Timer",
                                 tint = androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer,
                                 modifier = Modifier.size(20.dp)
                             )
-                            if (state.sleepTimerRemainingMs != null) {
+                            if (playbackState.sleepTimerRemainingMs != null) {
                                 Spacer(modifier = Modifier.width(6.dp))
-                                val minutes = (state.sleepTimerRemainingMs!! / 60000).toInt()
-                                val seconds = ((state.sleepTimerRemainingMs!! % 60000) / 1000).toInt()
+                                val minutes = (playbackState.sleepTimerRemainingMs!! / 60000).toInt()
+                                val seconds = ((playbackState.sleepTimerRemainingMs!! % 60000) / 1000).toInt()
                                 androidx.compose.material3.Text(
                                     text = String.format("%02d:%02d", minutes, seconds),
                                     style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
@@ -3783,7 +3784,7 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
         val itemTrack = state.queue.getOrNull(index)
         if (itemTrack != null) {
             com.lastwave.app.ui.common.TrackContextMenuSheet(
-                target = com.lastwave.app.ui.common.TrackMenuTarget.Track(itemTrack.title, itemTrack.artist, itemTrack.album),
+                target = com.lastwave.app.ui.common.TrackMenuTarget.Track(itemTrack.title, itemTrack.artist, itemTrack.album ?: ""),
                 capabilities = com.lastwave.app.ui.common.TrackMenuCapabilities(showCopyActions = true),
                 playableTrack = itemTrack,
                 onDismiss = { menuIndex = null },

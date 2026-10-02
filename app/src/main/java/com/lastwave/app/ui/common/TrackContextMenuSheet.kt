@@ -585,7 +585,7 @@ fun TrackContextMenuSheet(
                     }
                     if (onRemoveFromQueue != null) {
                         add { pos ->
-                            MenuActionRow(Icons.Filled.DeleteOutline, "Remove from Queue", danger = true, position = pos) {
+                            MenuActionRow(Icons.Filled.Delete, "Remove from Queue", danger = true, position = pos) {
                                 onRemoveFromQueue()
                                 onDismiss()
                             }

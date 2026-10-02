@@ -458,9 +458,9 @@ class PlaylistViewModel @Inject constructor(
     fun confirmDelete() {
         val id = _uiState.value.deleteConfirmForPlaylistId ?: return
         viewModelScope.launch {
-            val playlist = playlistRepository.get(id)
-            if (playlist != null && (playlist.isYouTubeOnly || playlist.ytPlaylistId != null)) {
-                val ytId = if (playlist.isYouTubeOnly) playlist.id.toString() else playlist.ytPlaylistId
+            val playlist = playlistRepository.getById(id)
+            if (playlist != null && (playlist.isYouTubeOnly || playlist.remotePlaylistId != null)) {
+                val ytId = if (playlist.isYouTubeOnly) playlist.id.toString() else playlist.remotePlaylistId
                 if (ytId != null) {
                     try {
                         innerTubeApi.deleteRemotePlaylist(ytId)
@@ -478,9 +478,9 @@ class PlaylistViewModel @Inject constructor(
     fun deleteMultiple(ids: Set<Long>) {
         viewModelScope.launch {
             for (id in ids) {
-                val playlist = playlistRepository.get(id)
-                if (playlist != null && (playlist.isYouTubeOnly || playlist.ytPlaylistId != null)) {
-                    val ytId = if (playlist.isYouTubeOnly) playlist.id.toString() else playlist.ytPlaylistId
+                val playlist = playlistRepository.getById(id)
+                if (playlist != null && (playlist.isYouTubeOnly || playlist.remotePlaylistId != null)) {
+                    val ytId = if (playlist.isYouTubeOnly) playlist.id.toString() else playlist.remotePlaylistId
                     if (ytId != null) {
                         try {
                             innerTubeApi.deleteRemotePlaylist(ytId)
