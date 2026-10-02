@@ -721,7 +721,7 @@ fun PlayerHost(
                             modifier = Modifier.padding(horizontal = 12.dp)
                         ) {
                             androidx.compose.material3.Icon(
-                                imageVector = androidx.compose.material.icons.Icons.Filled.Timer,
+                                imageVector = androidx.compose.material.icons.Icons.Filled.AccessTime,
                                 contentDescription = "Sleep Timer",
                                 tint = androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer,
                                 modifier = Modifier.size(20.dp)
@@ -751,7 +751,7 @@ fun PlayerHost(
             }
             var isPlayerDragging by remember { mutableStateOf(false) }
             AnimatedVisibility(
-                modifier = Modifier.zIndex(1f),
+                modifier = Modifier,
                 visible = expanded && state.current != null,
                 enter = slideInVertically(
                     animationSpec = ExpressiveMotion.smoothSpring(),

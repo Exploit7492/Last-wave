@@ -87,7 +87,6 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.zIndex
 import android.view.HapticFeedbackConstants
 import androidx.compose.ui.input.pointer.PointerEventPass

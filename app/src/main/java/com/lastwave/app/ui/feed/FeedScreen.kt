@@ -209,7 +209,7 @@ fun FeedScreen(
                     HeaderActionIcon(Icons.Filled.Download, "Downloads", onOpenDownloads)
                     HeaderActionIcon(Icons.Filled.Search, "Search", onOpenSearch)
                     IconButton(onClick = onOpenSettings) {
-                        com.lastwave.app.ui.home.ProfileAvatar(avatarUrl = state.avatarUrl, modifier = Modifier.size(32.dp))
+                        com.lastwave.app.ui.home.ProfileAvatar(avatarUrl = state.avatarUrl, modifier = Modifier.size(26.dp))
                     }
                 },
             )
@@ -1182,18 +1182,21 @@ private fun QuickTilesGrid(
     tiles: List<FeedQuickTile>,
     onTileClick: (FeedQuickTile) -> Unit,
 ) {
-    androidx.compose.foundation.lazy.grid.LazyHorizontalGrid(
-        rows = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
-        modifier = Modifier.fillMaxWidth().height(160.dp),
+    androidx.compose.foundation.lazy.LazyRow(
+        modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        items(tiles, key = { "${it.title}_${it.collection ?: ""}_${it.playlistId ?: ""}_${it.localPlaylistId ?: ""}" }) { tile ->
-            QuickTileCard(
-                tile = tile,
-                onClick = { onTileClick(tile) },
-            )
+        val chunkedTiles = tiles.chunked(2)
+        items(chunkedTiles) { chunk ->
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                chunk.forEach { tile ->
+                    QuickTileCard(
+                        tile = tile,
+                        onClick = { onTileClick(tile) },
+                    )
+                }
+            }
         }
     }
 }

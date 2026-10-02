@@ -178,7 +178,7 @@ fun PlaylistScreen(
                             onClick = { selectedPlaylists = setOf() },
                             modifier = Modifier.size(40.dp),
                         ) {
-                            Icon(androidx.compose.material.icons.Icons.Default.Close, contentDescription = "Clear selection")
+                            Icon(Icons.Filled.Close, contentDescription = "Clear selection")
                         }
                     } else {
                         IconButton(
