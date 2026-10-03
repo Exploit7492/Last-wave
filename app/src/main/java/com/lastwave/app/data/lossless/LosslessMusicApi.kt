@@ -553,6 +553,7 @@ class LosslessMusicApi @Inject constructor(
                     stream.quality.contains("24-BIT", ignoreCase = true) ||
                     stream.quality.contains("24BIT", ignoreCase = true) ||
                     stream.quality.contains("24/") ||
+                    stream.bitDepth == 24 ||
                     (wantsHiRes && q == "hi_res") ||
                     effectiveSampleRate > 48000.0
                 // Depth the addon actually reported in metadata/stream/candidate

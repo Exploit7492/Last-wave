@@ -26,6 +26,7 @@ fun qualityBadgeLabel(state: MusicPlayerState): String {
     // resolveDepthForDisplay). The decoder's PCM encoding is never consulted.
     val depth = resolveDepthForDisplay(state.bitDepth, rate)
         ?: inferBitDepth(state.copy(bitDepth = null), allowRateGuess = false)
+        ?: parseQualityFromCodec(codec)?.substringBefore('/')?.toIntOrNull()
 
     if (flacLike && depth != null && rate != null && rate > 0.0) {
         return "$depth/${formatSampleRateKHz(rate)}kHz"
@@ -65,7 +66,7 @@ fun isFlacLikeCodec(codec: String?): Boolean {
     if (c.isBlank()) return false
     if (isSpatialAudioCodec(codec)) return false
     return c.contains("FLAC") || c == "LOSSLESS" || c.contains("HI-RES") || c.contains("HI_RES") ||
-        Regex("""(?:^|[^\d])(16|24|32)\s*(?:[-_]bit)?\s*[/]\s*(\d{2,3}(?:\.\d+)?)\s*k?""", RegexOption.IGNORE_CASE).containsMatchIn(c)
+        Regex("""(?:^|[^\d])(16|24|32)\s*(?:[-_]bit)?\s*[/]\s*(\d{2,6}(?:\.\d+)?)\s*k?""", RegexOption.IGNORE_CASE).containsMatchIn(c)
 }
 
 /** Format sample rate in kHz with minimal decimal places (e.g. 44.1, 48, 88.2, 96, 176.4, 192). */
@@ -182,7 +183,7 @@ internal fun inferSamplingRate(state: MusicPlayerState): Double? {
 internal fun parseQualityFromCodec(codec: String?): String? {
     val c = codec.orEmpty()
     if (c.isBlank()) return null
-    val match = Regex("""(?:^|[^\d])(16|24|32)\s*(?:[-_]bit)?\s*[/]\s*(\d{2,3}(?:\.\d+)?)\s*k?""", RegexOption.IGNORE_CASE).find(c)
+    val match = Regex("""(?:^|[^\d])(16|24|32)\s*(?:[-_]bit)?\s*[/]\s*(\d{2,6}(?:\.\d+)?)\s*k?""", RegexOption.IGNORE_CASE).find(c)
     if (match != null) {
         // Trust an explicit "depth/rate" label verbatim: a parsed 16/96 is
         // a real (if unusual) combination, never to be "corrected" to 24.
