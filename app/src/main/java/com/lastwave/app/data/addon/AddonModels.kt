@@ -2,6 +2,14 @@ package com.lastwave.app.data.addon
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.intOrNull
 
 /**
  * Wire models for the Addon HTTP protocol.
@@ -36,6 +44,48 @@ data class AddonSearchResponse(
 )
 
 @Serializable
+data class AddonMetadata(
+    @SerialName("bitDepth") val bitDepth: JsonElement? = null,
+    @SerialName("bit_depth") val bitDepthSnake: JsonElement? = null,
+    @SerialName("bit_type") val bitTypeSnake: JsonElement? = null,
+    @SerialName("bitType") val bitType: JsonElement? = null,
+    @SerialName("bit_depth_rate") val bitDepthRateSnake: JsonElement? = null,
+    @SerialName("bitDepthRate") val bitDepthRate: JsonElement? = null,
+    @SerialName("bitsPerSample") val bitsPerSample: JsonElement? = null,
+    @SerialName("bits_per_sample") val bitsPerSampleSnake: JsonElement? = null,
+    @SerialName("depth") val depth: JsonElement? = null,
+    @SerialName("bits") val bits: JsonElement? = null,
+    @SerialName("clockRate") val clockRate: JsonElement? = null,
+    @SerialName("clock_rate") val clockRateSnake: JsonElement? = null,
+    @SerialName("sampleRate") val sampleRate: JsonElement? = null,
+    @SerialName("sample_rate") val sampleRateSnake: JsonElement? = null,
+    @SerialName("samplingRate") val samplingRate: JsonElement? = null,
+    @SerialName("sampling_rate") val samplingRateSnake: JsonElement? = null,
+) {
+    fun extractBitDepth(): Int? =
+        extractBitDepthFromElement(bitDepth)
+            ?: extractBitDepthFromElement(bitDepthSnake)
+            ?: extractBitDepthFromElement(bitTypeSnake)
+            ?: extractBitDepthFromElement(bitType)
+            ?: extractBitDepthFromElement(bitDepthRateSnake)
+            ?: extractBitDepthFromElement(bitDepthRate)
+            ?: extractBitDepthFromElement(bitsPerSample)
+            ?: extractBitDepthFromElement(bitsPerSampleSnake)
+            ?: extractBitDepthFromElement(depth)
+            ?: extractBitDepthFromElement(bits)
+
+    fun extractSampleRate(): Double? =
+        extractSampleRateFromElement(clockRate)
+            ?: extractSampleRateFromElement(clockRateSnake)
+            ?: extractSampleRateFromElement(sampleRate)
+            ?: extractSampleRateFromElement(sampleRateSnake)
+            ?: extractSampleRateFromElement(samplingRate)
+            ?: extractSampleRateFromElement(samplingRateSnake)
+            ?: extractSampleRateFromElement(bitDepthRateSnake)
+            ?: extractSampleRateFromElement(bitDepthRate)
+}
+
+@Serializable
 data class AddonTrack(
     @SerialName("id") val id: String = "",
     @SerialName("title") val title: String = "",
@@ -47,7 +97,61 @@ data class AddonTrack(
     @SerialName("atmos") val atmos: Boolean = false,
     @SerialName("audioModes") val audioModes: List<String> = emptyList(),
     @SerialName("artworkURL") val artworkURL: String? = null,
-)
+    @SerialName("bitDepth") val rawBitDepth: JsonElement? = null,
+    @SerialName("bit_depth") val rawBitDepthSnake: JsonElement? = null,
+    @SerialName("bit_type") val rawBitTypeSnake: JsonElement? = null,
+    @SerialName("bitType") val rawBitType: JsonElement? = null,
+    @SerialName("bit_depth_rate") val rawBitDepthRateSnake: JsonElement? = null,
+    @SerialName("bitDepthRate") val rawBitDepthRate: JsonElement? = null,
+    @SerialName("bitsPerSample") val rawBitsPerSample: JsonElement? = null,
+    @SerialName("bits_per_sample") val rawBitsPerSampleSnake: JsonElement? = null,
+    @SerialName("depth") val rawDepth: JsonElement? = null,
+    @SerialName("bits") val rawBits: JsonElement? = null,
+    @SerialName("clockRate") val rawClockRate: JsonElement? = null,
+    @SerialName("clock_rate") val rawClockRateSnake: JsonElement? = null,
+    @SerialName("sampleRate") val rawSampleRate: JsonElement? = null,
+    @SerialName("sample_rate") val rawSampleRateSnake: JsonElement? = null,
+    @SerialName("samplingRate") val rawSamplingRate: JsonElement? = null,
+    @SerialName("sampling_rate") val rawSamplingRateSnake: JsonElement? = null,
+    @SerialName("metadata") val rawMetadata: JsonElement? = null,
+    @SerialName("meta") val rawMeta: JsonElement? = null,
+    @SerialName("audio") val rawAudio: JsonElement? = null,
+    @SerialName("info") val rawInfo: JsonElement? = null,
+) {
+    val bitDepth: Int?
+        get() = extractBitDepthFromElement(rawMetadata)
+            ?: extractBitDepthFromElement(rawMeta)
+            ?: extractBitDepthFromElement(rawAudio)
+            ?: extractBitDepthFromElement(rawBitDepth)
+            ?: extractBitDepthFromElement(rawBitDepthSnake)
+            ?: extractBitDepthFromElement(rawBitType)
+            ?: extractBitDepthFromElement(rawBitTypeSnake)
+            ?: extractBitDepthFromElement(rawBitDepthRate)
+            ?: extractBitDepthFromElement(rawBitDepthRateSnake)
+            ?: extractBitDepthFromElement(rawBitsPerSample)
+            ?: extractBitDepthFromElement(rawBitsPerSampleSnake)
+            ?: extractBitDepthFromElement(rawDepth)
+            ?: extractBitDepthFromElement(rawBits)
+            ?: extractBitDepthFromElement(rawInfo)
+            ?: parseDepthFromQualityString(audioQuality)
+            ?: parseDepthFromQualityString(format)
+
+    val sampleRate: Double?
+        get() = extractSampleRateFromElement(rawMetadata)
+            ?: extractSampleRateFromElement(rawMeta)
+            ?: extractSampleRateFromElement(rawAudio)
+            ?: extractSampleRateFromElement(rawClockRate)
+            ?: extractSampleRateFromElement(rawClockRateSnake)
+            ?: extractSampleRateFromElement(rawSampleRate)
+            ?: extractSampleRateFromElement(rawSampleRateSnake)
+            ?: extractSampleRateFromElement(rawSamplingRate)
+            ?: extractSampleRateFromElement(rawSamplingRateSnake)
+            ?: extractSampleRateFromElement(rawBitDepthRate)
+            ?: extractSampleRateFromElement(rawBitDepthRateSnake)
+            ?: extractSampleRateFromElement(rawInfo)
+            ?: parseRateFromQualityString(audioQuality)
+            ?: parseRateFromQualityString(format)
+}
 
 @Serializable
 data class AddonStream(
@@ -56,20 +160,230 @@ data class AddonStream(
     @SerialName("format") val format: String = "dash",
     @SerialName("codec") val codec: String = "flac",
     @SerialName("quality") val quality: String = "",
-    @SerialName("sampleRate") val sampleRate: Double = 44100.0,
-    /**
-     * Source bit depth reported by the addon, or null when it reported none.
-     * Deliberately not defaulted to 16: an omitted field means the addon never
-     * measured a depth, and a fabricated 16 was believed at 44.1/48kHz (where
-     * nothing contradicts it) and surfaced as a false "16/44.1kHz" pill.
-     */
-    @SerialName("bitDepth") val bitDepth: Int? = null,
+    @SerialName("sampleRate") val rawSampleRate: JsonElement? = null,
+    @SerialName("sample_rate") val rawSampleRateSnake: JsonElement? = null,
+    @SerialName("clockRate") val rawClockRate: JsonElement? = null,
+    @SerialName("clock_rate") val rawClockRateSnake: JsonElement? = null,
+    @SerialName("samplingRate") val rawSamplingRate: JsonElement? = null,
+    @SerialName("sampling_rate") val rawSamplingRateSnake: JsonElement? = null,
+    @SerialName("bitDepth") val rawBitDepth: JsonElement? = null,
+    @SerialName("bit_depth") val rawBitDepthSnake: JsonElement? = null,
+    @SerialName("bit_type") val rawBitTypeSnake: JsonElement? = null,
+    @SerialName("bitType") val rawBitType: JsonElement? = null,
+    @SerialName("bit_depth_rate") val rawBitDepthRateSnake: JsonElement? = null,
+    @SerialName("bitDepthRate") val rawBitDepthRate: JsonElement? = null,
+    @SerialName("bitsPerSample") val rawBitsPerSample: JsonElement? = null,
+    @SerialName("bits_per_sample") val rawBitsPerSampleSnake: JsonElement? = null,
+    @SerialName("depth") val rawDepth: JsonElement? = null,
+    @SerialName("bits") val rawBits: JsonElement? = null,
     @SerialName("bitrate") val bitrate: Int? = null,
     @SerialName("manifest") val manifest: String = "dash",
     @SerialName("manifestXml") val manifestXml: String? = null,
     @SerialName("audioMode") val audioMode: String? = null,
     @SerialName("encrypted") val encrypted: Boolean = false,
-)
+    @SerialName("metadata") val rawMetadata: JsonElement? = null,
+    @SerialName("meta") val rawMeta: JsonElement? = null,
+    @SerialName("audio") val rawAudio: JsonElement? = null,
+    @SerialName("streamInfo") val rawStreamInfo: JsonElement? = null,
+    @SerialName("stream_info") val rawStreamInfoSnake: JsonElement? = null,
+    @SerialName("info") val rawInfo: JsonElement? = null,
+) {
+    val bitDepth: Int?
+        get() = extractBitDepthFromElement(rawMetadata)
+            ?: extractBitDepthFromElement(rawMeta)
+            ?: extractBitDepthFromElement(rawAudio)
+            ?: extractBitDepthFromElement(rawBitDepth)
+            ?: extractBitDepthFromElement(rawBitDepthSnake)
+            ?: extractBitDepthFromElement(rawBitType)
+            ?: extractBitDepthFromElement(rawBitTypeSnake)
+            ?: extractBitDepthFromElement(rawBitDepthRate)
+            ?: extractBitDepthFromElement(rawBitDepthRateSnake)
+            ?: extractBitDepthFromElement(rawBitsPerSample)
+            ?: extractBitDepthFromElement(rawBitsPerSampleSnake)
+            ?: extractBitDepthFromElement(rawDepth)
+            ?: extractBitDepthFromElement(rawBits)
+            ?: extractBitDepthFromElement(rawStreamInfo)
+            ?: extractBitDepthFromElement(rawStreamInfoSnake)
+            ?: extractBitDepthFromElement(rawInfo)
+            ?: parseDepthFromQualityString(quality)
+            ?: parseDepthFromQualityString(format)
+
+    val sampleRate: Double
+        get() = extractSampleRateFromElement(rawMetadata)
+            ?: extractSampleRateFromElement(rawMeta)
+            ?: extractSampleRateFromElement(rawAudio)
+            ?: extractSampleRateFromElement(rawClockRate)
+            ?: extractSampleRateFromElement(rawClockRateSnake)
+            ?: extractSampleRateFromElement(rawSampleRate)
+            ?: extractSampleRateFromElement(rawSampleRateSnake)
+            ?: extractSampleRateFromElement(rawSamplingRate)
+            ?: extractSampleRateFromElement(rawSamplingRateSnake)
+            ?: extractSampleRateFromElement(rawBitDepthRate)
+            ?: extractSampleRateFromElement(rawBitDepthRateSnake)
+            ?: extractSampleRateFromElement(rawStreamInfo)
+            ?: extractSampleRateFromElement(rawStreamInfoSnake)
+            ?: extractSampleRateFromElement(rawInfo)
+            ?: parseRateFromQualityString(quality)
+            ?: parseRateFromQualityString(format)
+            ?: 44100.0
+}
+
+fun extractBitDepthFromElement(element: JsonElement?): Int? {
+    if (element == null || element is JsonNull) return null
+    if (element is JsonPrimitive) {
+        element.intOrNull?.let { if (it in 8..32) return it }
+        val str = element.content
+        parseDepthFromQualityString(str)?.let { return it }
+        Regex("""\b(16|24|32)\b""").find(str)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+        return null
+    }
+    if (element is JsonObject) {
+        val depthKeys = listOf(
+            "bitDepth", "bit_depth", "bitdepth",
+            "bitType", "bit_type", "bittype",
+            "bitsPerSample", "bits_per_sample", "bitspersample",
+            "depth", "bits", "bit_depth_rate", "bitDepthRate", "bitdepthrate",
+        )
+        for (key in depthKeys) {
+            val v = element[key]
+            val parsed = extractBitDepthFromElement(v)
+            if (parsed != null && parsed in 8..32) return parsed
+        }
+        val textKeys = listOf(
+            "format", "audioQuality", "audio_quality", "quality", "codec",
+            "audioMode", "audio_mode", "streamInfo", "stream_info", "info", "description",
+        )
+        for (key in textKeys) {
+            val v = element[key]
+            if (v is JsonPrimitive) {
+                val parsed = parseDepthFromQualityString(v.content)
+                if (parsed != null) return parsed
+            }
+        }
+        val nestedKeys = listOf("metadata", "meta", "audio", "stream", "track", "data", "info", "streamInfo", "stream_info")
+        for (key in nestedKeys) {
+            val child = element[key]
+            if (child != null && child !is JsonPrimitive) {
+                val parsed = extractBitDepthFromElement(child)
+                if (parsed != null) return parsed
+            }
+        }
+        for ((k, v) in element) {
+            val lk = k.lowercase()
+            if (lk.contains("depth") || lk.contains("bit") || lk == "type") {
+                val parsed = extractBitDepthFromElement(v)
+                if (parsed != null) return parsed
+            }
+        }
+    }
+    if (element is JsonArray) {
+        for (item in element) {
+            val parsed = extractBitDepthFromElement(item)
+            if (parsed != null) return parsed
+        }
+    }
+    return null
+}
+
+fun extractSampleRateFromElement(element: JsonElement?): Double? {
+    if (element == null || element is JsonNull) return null
+    if (element is JsonPrimitive) {
+        element.doubleOrNull?.let { raw ->
+            if (raw > 0.0) {
+                return if (raw < 1000.0) raw * 1000.0 else raw
+            }
+        }
+        val str = element.content
+        parseRateFromQualityString(str)?.let { return it }
+        val hzMatch = Regex("""\b(\d+(?:\.\d+)?)\s*(?:k|khz)?\b""", RegexOption.IGNORE_CASE).find(str)
+        if (hzMatch != null) {
+            val num = hzMatch.groupValues[1].toDoubleOrNull() ?: return null
+            return if ((str.contains("k", ignoreCase = true) || num < 1000.0) && num < 1000.0) num * 1000.0 else num
+        }
+        return null
+    }
+    if (element is JsonObject) {
+        val rateKeys = listOf(
+            "clockRate", "clock_rate", "clockrate",
+            "sampleRate", "sample_rate", "samplerate",
+            "samplingRate", "sampling_rate", "samplingrate",
+            "rate", "clock", "bit_depth_rate", "bitDepthRate", "bitdepthrate",
+        )
+        for (key in rateKeys) {
+            val v = element[key]
+            val parsed = extractSampleRateFromElement(v)
+            if (parsed != null && parsed > 0.0) return parsed
+        }
+        val textKeys = listOf(
+            "format", "audioQuality", "audio_quality", "quality", "codec",
+            "streamInfo", "stream_info", "info", "description",
+        )
+        for (key in textKeys) {
+            val v = element[key]
+            if (v is JsonPrimitive) {
+                val parsed = parseRateFromQualityString(v.content)
+                if (parsed != null && parsed > 0.0) return parsed
+            }
+        }
+        val nestedKeys = listOf("metadata", "meta", "audio", "stream", "track", "data", "info", "streamInfo", "stream_info")
+        for (key in nestedKeys) {
+            val child = element[key]
+            if (child != null && child !is JsonPrimitive) {
+                val parsed = extractSampleRateFromElement(child)
+                if (parsed != null && parsed > 0.0) return parsed
+            }
+        }
+        for ((k, v) in element) {
+            val lk = k.lowercase()
+            if (lk.contains("rate") || lk.contains("clock") || lk.contains("sample")) {
+                val parsed = extractSampleRateFromElement(v)
+                if (parsed != null && parsed > 0.0) return parsed
+            }
+        }
+    }
+    if (element is JsonArray) {
+        for (item in element) {
+            val parsed = extractSampleRateFromElement(item)
+            if (parsed != null && parsed > 0.0) return parsed
+        }
+    }
+    return null
+}
+
+internal fun parseDepthElement(element: JsonElement?): Int? = extractBitDepthFromElement(element)
+
+internal fun parseRateElement(element: JsonElement?): Double? = extractSampleRateFromElement(element)
+
+internal fun parseDepthFromQualityString(q: String?): Int? {
+    if (q.isNullOrBlank()) return null
+    val match = Regex("""(?:^|[^\d])(16|24|32)\s*(?:[-_]bit)?\s*[/]\s*(\d{2,6}(?:\.\d+)?)""", RegexOption.IGNORE_CASE).find(q)
+    if (match != null) return match.groupValues[1].toIntOrNull()
+    if (q.contains("24-BIT", ignoreCase = true) || q.contains("24BIT", ignoreCase = true) || q.contains("24 BIT", ignoreCase = true) || q.contains("24_BIT", ignoreCase = true)) return 24
+    if (q.contains("32-BIT", ignoreCase = true) || q.contains("32BIT", ignoreCase = true) || q.contains("32 BIT", ignoreCase = true) || q.contains("32_BIT", ignoreCase = true)) return 32
+    if (q.contains("16-BIT", ignoreCase = true) || q.contains("16BIT", ignoreCase = true) || q.contains("16 BIT", ignoreCase = true) || q.contains("16_BIT", ignoreCase = true)) return 16
+    val exactNum = q.trim().toIntOrNull()
+    if (exactNum in 8..32) return exactNum
+    return null
+}
+
+internal fun parseRateFromQualityString(q: String?): Double? {
+    if (q.isNullOrBlank()) return null
+    val match = Regex("""(?:^|[^\d])(?:16|24|32)\s*(?:[-_]bit)?\s*[/]\s*(\d{2,6}(?:\.\d+)?)""", RegexOption.IGNORE_CASE).find(q)
+    if (match != null) {
+        val num = match.groupValues[1].toDoubleOrNull() ?: return null
+        return if (num < 1000.0) num * 1000.0 else num
+    }
+    val rateMatch = Regex("""\b(44\.1|48|88\.2|96|176\.4|192|384)\s*k(?:hz)?\b""", RegexOption.IGNORE_CASE).find(q)
+    if (rateMatch != null) {
+        val kHz = rateMatch.groupValues[1].toDoubleOrNull() ?: return null
+        return kHz * 1000.0
+    }
+    val hzMatch = Regex("""\b(44100|48000|88200|96000|176400|192000|352800|384000)\b""").find(q)
+    if (hzMatch != null) {
+        return hzMatch.groupValues[1].toDoubleOrNull()
+    }
+    return null
+}
 
 sealed interface AddonHealth {
     data class Ok(val info: String?) : AddonHealth

@@ -283,6 +283,23 @@ object SettingsSearchIndex {
             )
             add(
                 SettingsEntry(
+                    id = "audio.system_audio_effects",
+                    title = "System Audio Effects",
+                    subtitle = "Allow external equalizers (Dolby Atmos, Wavelet) to process playback",
+                    keywords = listOf(
+                        "system audio effects", "wavelet", "dolby system", "external eq", "audio fx",
+                        "dsp apps", "system equalizer", "sound enhancer"
+                    ),
+                    icon = Icons.Filled.VolumeUp,
+                    iconContainer = { MaterialTheme.colorScheme.tertiaryContainer },
+                    iconTint = { MaterialTheme.colorScheme.onTertiaryContainer },
+                    parentTab = SettingsTab.AUDIO,
+                    section = "Output & Loudness",
+                    type = EntryType.TOGGLE,
+                )
+            )
+            add(
+                SettingsEntry(
                     id = "audio.studio_clarity",
                     title = "Studio Master Clarity",
                     subtitle = "Crystal-clear open sound, airy detail, and deep clean stereo separation",
@@ -573,23 +590,6 @@ object SettingsSearchIndex {
                     parentTab = SettingsTab.APPEARANCE,
                     section = "Experimental & Features",
                     type = EntryType.ACTION,
-                )
-            )
-            add(
-                SettingsEntry(
-                    id = "appearance.system_audio_effects",
-                    title = "System Audio Effects",
-                    subtitle = "Allow external equalizers (Dolby Atmos, Wavelet) to process playback",
-                    keywords = listOf(
-                        "system audio effects", "wavelet", "dolby system", "external eq", "audio fx",
-                        "dsp apps", "system equalizer", "sound enhancer"
-                    ),
-                    icon = Icons.Filled.VolumeUp,
-                    iconContainer = { MaterialTheme.colorScheme.tertiaryContainer },
-                    iconTint = { MaterialTheme.colorScheme.onTertiaryContainer },
-                    parentTab = SettingsTab.APPEARANCE,
-                    section = "Experimental & Features",
-                    type = EntryType.TOGGLE,
                 )
             )
             add(

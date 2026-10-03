@@ -5488,6 +5488,7 @@ class MusicPlayer @Inject constructor(
         // from the rate alone. The decoder's PCM encoding is not consulted at
         // all; it describes the decoder's output, not the song.
         val resolvedBitDepth: Int? = resolveDepthForDisplay(stream.bitDepth.takeIf { it > 0 }, effectiveRate)
+            ?: parseQualityFromCodec(stream.audioCodecOverride)?.substringBefore('/')?.toIntOrNull()
         val badge = when {
             stream.audioCodecOverride != null -> stream.audioCodecOverride
             // Spatial badges only from manifest evidence: the request's
@@ -5604,7 +5605,7 @@ class MusicPlayer @Inject constructor(
             audioCodec = badge,
             cacheKey = "lossless:${track.mediaIdKey()}:${stream.formatId}",
             isLossless = isLossless,
-            bitDepth = resolvedBitDepth?.takeIf { it > 0 },
+            bitDepth = resolvedBitDepth?.takeIf { it > 0 } ?: stream.bitDepth.takeIf { it > 0 },
             samplingRateKHz = effectiveRate.takeIf { it > 0.0 },
             durationMs = stream.durationSeconds.takeIf { it > 0 }?.times(1_000L)
                 ?: track.durationMs

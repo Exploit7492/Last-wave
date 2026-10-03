@@ -5,6 +5,10 @@ import com.lastwave.app.data.lossless.NativeSecrets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URLEncoder
@@ -106,8 +110,18 @@ class AddonClient(
                     return@withContext Result.failure(Exception("Search failed (HTTP ${res.code})"))
                 }
                 val body = res.body?.string().orEmpty()
-                val parsed = json.decodeFromString<AddonSearchResponse>(body)
-                Result.success(parsed.tracks)
+                val rootElement = runCatching { json.parseToJsonElement(body) }.getOrNull()
+                val tracks = when (rootElement) {
+                    is JsonArray -> runCatching { json.decodeFromJsonElement<List<AddonTrack>>(rootElement) }.getOrNull()
+                    is JsonObject -> {
+                        val tracksElement = rootElement["tracks"] ?: rootElement["data"] ?: rootElement["results"] ?: rootElement["items"]
+                        if (tracksElement is JsonArray) {
+                            runCatching { json.decodeFromJsonElement<List<AddonTrack>>(tracksElement) }.getOrNull()
+                        } else null
+                    }
+                    else -> null
+                } ?: json.decodeFromString<AddonSearchResponse>(body).tracks
+                Result.success(tracks)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Search request failed for '$query': ${e.message}")
@@ -144,8 +158,29 @@ class AddonClient(
                     return@withContext Result.failure(Exception("Stream failed (HTTP ${res.code})"))
                 }
                 val body = res.body?.string().orEmpty()
-                val parsed = json.decodeFromString<AddonStream>(body)
-                Result.success(parsed)
+                val rootJson = runCatching { json.parseToJsonElement(body) }.getOrNull()
+                val streamElement = (rootJson as? JsonObject)?.let { obj ->
+                    obj["stream"] ?: obj["data"] ?: obj
+                } ?: rootJson
+                val parsed = if (streamElement != null && streamElement != rootJson) {
+                    runCatching { json.decodeFromJsonElement<AddonStream>(streamElement) }
+                        .getOrElse { json.decodeFromString<AddonStream>(body) }
+                } else {
+                    json.decodeFromString<AddonStream>(body)
+                }
+                val finalStream = if (parsed.bitDepth == null && rootJson != null) {
+                    val fallbackDepth = extractBitDepthFromElement(rootJson)
+                    val fallbackRate = if (parsed.sampleRate <= 0.0 || parsed.sampleRate == 44100.0) {
+                        extractSampleRateFromElement(rootJson) ?: parsed.sampleRate
+                    } else parsed.sampleRate
+                    if (fallbackDepth != null || fallbackRate != parsed.sampleRate) {
+                        parsed.copy(
+                            rawBitDepth = fallbackDepth?.let { JsonPrimitive(it) } ?: parsed.rawBitDepth,
+                            rawSampleRate = (fallbackRate.takeIf { it > 0.0 } ?: parsed.sampleRate).let { JsonPrimitive(it) },
+                        )
+                    } else parsed
+                } else parsed
+                Result.success(finalStream)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Stream request failed for '$trackId': ${e.message}")
