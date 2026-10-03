@@ -2047,33 +2047,49 @@ private fun FullPlayer(
                 )
                 if (showFullBleed) {
                     val density = LocalDensity.current
-                    // Square-capped hero: a tall container forces Crop to zoom and eat
-                    // the sides (the "stretch"). Clamp measured height near square so
-                    // side-crop stays minimal. Tall portrait canvas keeps full-page.
-                    //
-                    // Sized off reported geometry alone. Keying off the render flag
-                    // resized this box in the middle of every crossfade, because the
-                    // flag is false for the whole fade-in and flips true partway
-                    // through it - which is what made the swap advance a step at a
-                    // time instead of running as one motion.
                     val isTallCanvas = canvasMount.value.value != null && canvasAspect in 0.30f..0.82f
-                    val measuredPx = if (heroBottomPx > 0f) {
-                        heroBottomPx + with(density) { 8.dp.toPx() }
+                    val isStaticArtwork = activeCanvas == null
+
+                    // Natural aspect ratio for crisp artwork at screen width,
+                    // responsively scaled down on shorter screens to prevent crowding controls.
+                    val crispCoverHeightPx = if (bgHeight < bgWidth * 1.55f) {
+                        minOf(bgWidth, bgHeight * 0.44f)
                     } else {
-                        bgHeight * 0.58f
+                        minOf(bgWidth, bgHeight * 0.50f)
                     }
-                    val maxPx = if (isTallCanvas) {
+
+                    // Stretchy melt extends downwards through the title and controls area,
+                    // eliminating empty whitespace and embedding title/artist in the lower fade.
+                    val measuredPx = if (isStaticArtwork) {
+                        if (heroBottomPx > 0f) {
+                            (heroBottomPx + with(density) { 72.dp.toPx() })
+                                .coerceIn(crispCoverHeightPx + with(density) { 100.dp.toPx() }, bgHeight * 0.86f)
+                        } else {
+                            bgHeight * 0.74f
+                        }
+                    } else {
+                        if (heroBottomPx > 0f) {
+                            heroBottomPx + with(density) { 8.dp.toPx() }
+                        } else {
+                            bgHeight * 0.58f
+                        }
+                    }
+
+                    val maxPx = if (isStaticArtwork) {
+                        bgHeight * 0.88f
+                    } else if (isTallCanvas) {
                         bgHeight * 0.70f
                     } else {
                         minOf(bgWidth * 1.08f, bgHeight * 0.62f)
                     }
-                    val minPx = minOf(bgWidth * 0.92f, bgHeight * 0.50f)
-                    // Whole pixels: heroBottomPx arrives from onGloballyPositioned, so
-                    // leaving sub-pixel noise in the target would keep this animation
-                    // chasing it forever and make the box shimmer.
+
+                    val minPx = if (isStaticArtwork) {
+                        crispCoverHeightPx
+                    } else {
+                        minOf(bgWidth * 0.92f, bgHeight * 0.50f)
+                    }
+
                     val heroTargetPx = measuredPx.coerceIn(minPx, maxPx).coerceAtLeast(1f).roundToInt().toFloat()
-                    // Animated so any remaining geometry change settles rather than
-                    // snapping under a clip that is already mid-fade.
                     val heroPx by animateFloatAsState(
                         targetValue = heroTargetPx,
                         animationSpec = tween(CANVAS_FADE_MS),
@@ -2102,64 +2118,152 @@ private fun FullPlayer(
                             .fillMaxWidth()
                             .height(heroHeight),
                     ) {
-                        // The cover art banner dissolves over its bottom HERO_FADE_FRACTION (42%)
-                        // into the underlying fluid/ambient backdrop via an offscreen DstIn blend mask.
-                        if (heroCoverAlpha > 0.001f) {
-                            ArtworkImage(
-                                name = track.title,
-                                artist = track.artist,
-                                embeddedUrl = track.artworkUrl,
-                                fallbackIcon = Icons.Filled.MusicNote,
-                                alignment = Alignment.TopCenter,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .graphicsLayer {
-                                        alpha = heroCoverAlpha
-                                        compositingStrategy = CompositingStrategy.Offscreen
-                                    }
-                                    .drawWithContent {
-                                        drawContent()
-                                        drawRect(
-                                            brush = Brush.verticalGradient(
-                                                colors = listOf(Color.Black, Color.Transparent),
-                                                startY = size.height * (1f - HERO_FADE_FRACTION),
-                                                endY = size.height,
-                                            ),
-                                            blendMode = BlendMode.DstIn,
-                                        )
-                                    }
-                                    // Lyrics blur belongs to the still cover only. On the
-                                    // parent Box it animated a RenderEffect over the clip's
-                                    // video surface, the same hazard that underflowed the
-                                    // canvas save stack before, and it hitched on every
-                                    // tab switch.
-                                    .then(
-                                        if (lyricsCanvasBlurDp > 0.dp) {
-                                            Modifier.blur(lyricsCanvasBlurDp)
-                                        } else {
-                                            Modifier
+                        if (isStaticArtwork) {
+                            // ── Stretchy Artwork Fade for Static Full-Bleed ──────────────────
+                            if (heroCoverAlpha > 0.001f) {
+                                // Layer 1: Background vertically stretched continuation + progressive blur + melting opacity gradient
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            scaleY = 1.72f
+                                            scaleX = 1.08f
+                                            transformOrigin = TransformOrigin(0.5f, 0.18f)
+                                            alpha = heroCoverAlpha
+                                            compositingStrategy = CompositingStrategy.Offscreen
                                         }
-                                    ),
-                            )
+                                        .drawWithContent {
+                                            drawContent()
+                                            drawRect(
+                                                brush = Brush.verticalGradient(
+                                                    0.00f to Color.Black,
+                                                    0.32f to Color.Black,
+                                                    0.55f to Color.Black.copy(alpha = 0.92f),
+                                                    0.76f to Color.Black.copy(alpha = 0.55f),
+                                                    0.90f to Color.Black.copy(alpha = 0.22f),
+                                                    1.00f to Color.Transparent,
+                                                ),
+                                                blendMode = BlendMode.DstIn,
+                                            )
+                                        }
+                                        .blur(34.dp),
+                                ) {
+                                    ArtworkImage(
+                                        name = track.title,
+                                        artist = track.artist,
+                                        embeddedUrl = track.artworkUrl,
+                                        fallbackIcon = Icons.Filled.MusicNote,
+                                        alignment = Alignment.TopCenter,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                }
+
+                                // Layer 2: Original album artwork kept at natural aspect ratio at top
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(with(density) { crispCoverHeightPx.toDp() })
+                                        .graphicsLayer {
+                                            alpha = heroCoverAlpha
+                                            compositingStrategy = CompositingStrategy.Offscreen
+                                        }
+                                        .drawWithContent {
+                                            drawContent()
+                                            // Bottom 26% dissolves seamlessly into the stretched melting blur underneath
+                                            drawRect(
+                                                brush = Brush.verticalGradient(
+                                                    colors = listOf(Color.Black, Color.Transparent),
+                                                    startY = size.height * 0.74f,
+                                                    endY = size.height,
+                                                ),
+                                                blendMode = BlendMode.DstIn,
+                                            )
+                                        }
+                                        .then(
+                                            if (lyricsCanvasBlurDp > 0.dp) {
+                                                Modifier.blur(lyricsCanvasBlurDp)
+                                            } else {
+                                                Modifier
+                                            }
+                                        ),
+                                ) {
+                                    ArtworkImage(
+                                        name = track.title,
+                                        artist = track.artist,
+                                        embeddedUrl = track.artworkUrl,
+                                        fallbackIcon = Icons.Filled.MusicNote,
+                                        alignment = Alignment.TopCenter,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                }
+
+                                // Layer 3: Strong bottom-to-top dark gradient scrim for high readability of song title and controls
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(
+                                            Brush.verticalGradient(
+                                                0.00f to Color.Transparent,
+                                                0.36f to Color.Transparent,
+                                                0.55f to Color.Black.copy(alpha = 0.28f),
+                                                0.72f to Color.Black.copy(alpha = 0.64f),
+                                                0.85f to Color.Black.copy(alpha = 0.86f),
+                                                1.00f to Color.Black.copy(alpha = 0.96f),
+                                            )
+                                        )
+                                )
+                            }
+                        } else {
+                            // ── Canvas Video Playback Mode ──────────────────────────────────
+                            if (heroCoverAlpha > 0.001f) {
+                                ArtworkImage(
+                                    name = track.title,
+                                    artist = track.artist,
+                                    embeddedUrl = track.artworkUrl,
+                                    fallbackIcon = Icons.Filled.MusicNote,
+                                    alignment = Alignment.TopCenter,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            alpha = heroCoverAlpha
+                                            compositingStrategy = CompositingStrategy.Offscreen
+                                        }
+                                        .drawWithContent {
+                                            drawContent()
+                                            drawRect(
+                                                brush = Brush.verticalGradient(
+                                                    colors = listOf(Color.Black, Color.Transparent),
+                                                    startY = size.height * (1f - HERO_FADE_FRACTION),
+                                                    endY = size.height,
+                                                ),
+                                                blendMode = BlendMode.DstIn,
+                                            )
+                                        }
+                                        .then(
+                                            if (lyricsCanvasBlurDp > 0.dp) {
+                                                Modifier.blur(lyricsCanvasBlurDp)
+                                            } else {
+                                                Modifier
+                                            }
+                                        ),
+                                )
+                            }
+                            canvasMount.value.value?.let { mountedCanvas ->
+                                CanvasArtworkPlayer(
+                                    canvas = mountedCanvas,
+                                    isPlaying = state.isPlaying,
+                                    contentMode = CanvasContentMode.CROP,
+                                    alignPortraitTop = true,
+                                    bottomFade = HERO_FADE_FRACTION,
+                                    onAspectRatioChanged = { canvasAspect = it },
+                                    onCoverChanged = { canvasFade = it },
+                                    fadeOut = canvasMount.retiring.value,
+                                    pausedForTransition = shownDismissY > 0f,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
                         }
-                        canvasMount.value.value?.let { mountedCanvas ->
-                            CanvasArtworkPlayer(
-                                canvas = mountedCanvas,
-                                isPlaying = state.isPlaying,
-                                contentMode = CanvasContentMode.CROP,
-                                alignPortraitTop = true,
-                                bottomFade = HERO_FADE_FRACTION,
-                                onAspectRatioChanged = { canvasAspect = it },
-                                onCoverChanged = { canvasFade = it },
-                                fadeOut = canvasMount.retiring.value,
-                                // Only an actual dismissal pauses the clip. Tying this to
-                                // the tab meant AnimatedContent's 280ms overlap flipped
-                                // playWhenReady mid-flight and left the clip frozen on a
-                                // stale frame right as it faded in.
-                                pausedForTransition = shownDismissY > 0f,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        }
+
                         // Top status bar vignette only (ensures system indicators remain legible over bright artwork)
                         Box(
                             modifier = Modifier

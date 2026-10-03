@@ -69,10 +69,15 @@ private data class TidalCandidateItem(
      *  downgraded success and a 24-bit master later in the list is never
      *  tried. */
     val audioQuality: String = "",
+    val bitDepth: Int? = null,
 ) {
     fun isHiResFlagged(): Boolean =
-        audioQuality.contains("HI_RES", ignoreCase = true) ||
-            audioQuality.contains("HI-RES", ignoreCase = true)
+        (bitDepth ?: 0) > 16 ||
+            audioQuality.contains("HI_RES", ignoreCase = true) ||
+            audioQuality.contains("HI-RES", ignoreCase = true) ||
+            audioQuality.contains("24-BIT", ignoreCase = true) ||
+            audioQuality.contains("24BIT", ignoreCase = true) ||
+            audioQuality.contains("24/")
 }
 
 @Singleton
@@ -445,6 +450,7 @@ class LosslessMusicApi @Inject constructor(
                         isSpatial = track.audioModes.any { it.contains("360", ignoreCase = true) || it.contains("SPATIAL", ignoreCase = true) },
                         rawAddonId = track.id,
                         audioQuality = track.audioQuality,
+                        bitDepth = track.bitDepth,
                     )
                 }
                 .mapNotNull { item ->
@@ -544,14 +550,15 @@ class LosslessMusicApi @Inject constructor(
                 val isHiResFlagged = candidate.isHiResFlagged() ||
                     stream.quality.contains("HI_RES", ignoreCase = true) ||
                     stream.quality.contains("HI-RES", ignoreCase = true) ||
+                    stream.quality.contains("24-BIT", ignoreCase = true) ||
+                    stream.quality.contains("24BIT", ignoreCase = true) ||
+                    stream.quality.contains("24/") ||
                     (wantsHiRes && q == "hi_res") ||
                     effectiveSampleRate > 48000.0
-                // Depth the addon actually reported, or null when it reported
-                // none. Only that plus the explicit hi-res tier flag may assert a
-                // depth; an absent value stays null all the way to the badge.
-                val reportedDepth = stream.bitDepth?.takeIf { it > 0 }
+                // Depth the addon actually reported in metadata/stream/candidate
+                val reportedDepth = stream.bitDepth?.takeIf { it > 0 } ?: candidate.bitDepth?.takeIf { it > 0 }
                 val effectiveBitDepth = when {
-                    (reportedDepth ?: 0) > 16 -> reportedDepth
+                    (reportedDepth ?: 0) > 0 -> reportedDepth
                     effectiveSampleRate > 192000.0 -> 32
                     isHiResFlagged -> 24
                     else -> reportedDepth

@@ -940,7 +940,7 @@ fun SettingsScreen(
                         LoudnessMode.ALBUM -> "Album \u2022 Keep intentional album dynamics"
                         else -> "Off \u2022 Play tagged tracks at original level"
                     }
-                    SettingsGroup(rowCount = 6) { index, position ->
+                    SettingsGroup(rowCount = 7) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.Usb,
@@ -986,6 +986,21 @@ fun SettingsScreen(
                                 isHighlighted = (highlightedSettingId == "audio.equalizer"),
                             )
                             3 -> SettingsToggleCard(
+                                icon = Icons.Filled.VolumeUp,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = "System Audio Effects",
+                                subtitle = if (misc.systemEffectsMode) {
+                                    "External effects active • in-app EQ bypassed"
+                                } else {
+                                    "Let Dolby / equalizer apps process playback"
+                                },
+                                checked = misc.systemEffectsMode,
+                                onCheckedChange = viewModel::setSystemEffectsMode,
+                                position = position,
+                                isHighlighted = (highlightedSettingId == "audio.system_audio_effects"),
+                            )
+                            4 -> SettingsToggleCard(
                                 icon = Icons.Filled.Waves,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -1000,7 +1015,7 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "audio.studio_clarity"),
                             )
-                            4 -> SettingsActionCard(
+                            5 -> SettingsActionCard(
                                 icon = Icons.Filled.Tune,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -1010,7 +1025,7 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "audio.clarity_preset"),
                             )
-                            5 -> SettingsToggleCard(
+                            6 -> SettingsToggleCard(
                                 icon = Icons.Filled.GraphicEq,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -1153,7 +1168,7 @@ fun SettingsScreen(
                         item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel(stringResource(R.string.settings_section_experimental))
-                    SettingsGroup(rowCount = 7) { index, position ->
+                    SettingsGroup(rowCount = 6) { index, position ->
                         when (index) {
                             0 -> SettingsActionCard(
                                 icon = Icons.Filled.Lyrics,
@@ -1239,21 +1254,6 @@ fun SettingsScreen(
                                 onClick = { showLyricsSizeDialog = true },
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "appearance.lyrics_size"),
-                            )
-                            6 -> SettingsToggleCard(
-                                icon = Icons.Filled.VolumeUp,
-                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                title = "System Audio Effects",
-                                subtitle = if (misc.systemEffectsMode) {
-                                    "External effects active • in-app EQ bypassed"
-                                } else {
-                                    "Let Dolby / equalizer apps process playback"
-                                },
-                                checked = misc.systemEffectsMode,
-                                onCheckedChange = viewModel::setSystemEffectsMode,
-                                position = position,
-                                isHighlighted = (highlightedSettingId == "appearance.system_audio_effects"),
                             )
                         }
                     }
