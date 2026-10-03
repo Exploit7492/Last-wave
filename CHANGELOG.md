@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.2.3] - 2026-10-03
+
+### Added
+- **Stretchy Artwork Fade:** Implemented responsive stretchy artwork fade on Now Playing full bleed view, vertically stretching and smoothly dissolving into the dark backdrop with an offscreen gradient mask and dark scrim.
+- **Addon Bit Depth & Clock Rate Extraction:** Parsed bit depth and clock rate metadata across camelCase and snake_case properties from addons, preserving source-reported 24-bit depth on standard 44.1/48kHz tracks.
+
+### Changed & Fixed
+- **Settings Reorganization:** Relocated System Audio Effects from Appearance to Audio → Output & Loudness right beside Equalizer.
+- **Version Bump:** Bumped version to 4.2.3 (versionCode 23).
+
 ## [4.2.2] - 2026-09-27
 
 ### Added
