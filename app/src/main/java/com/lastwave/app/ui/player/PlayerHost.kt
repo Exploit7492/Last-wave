@@ -2126,27 +2126,27 @@ private fun FullPlayer(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .graphicsLayer {
-                                            scaleY = 1.72f
-                                            scaleX = 1.08f
-                                            transformOrigin = TransformOrigin(0.5f, 0.18f)
+                                            scaleY = 1.30f
+                                            transformOrigin = TransformOrigin(0.5f, 0.0f)
                                             alpha = heroCoverAlpha
                                             compositingStrategy = CompositingStrategy.Offscreen
                                         }
+                                        .blur(36.dp)
                                         .drawWithContent {
                                             drawContent()
                                             drawRect(
                                                 brush = Brush.verticalGradient(
                                                     0.00f to Color.Black,
-                                                    0.32f to Color.Black,
-                                                    0.55f to Color.Black.copy(alpha = 0.92f),
-                                                    0.76f to Color.Black.copy(alpha = 0.55f),
-                                                    0.90f to Color.Black.copy(alpha = 0.22f),
+                                                    0.25f to Color.Black,
+                                                    0.45f to Color.Black.copy(alpha = 0.88f),
+                                                    0.65f to Color.Black.copy(alpha = 0.50f),
+                                                    0.82f to Color.Black.copy(alpha = 0.16f),
+                                                    0.94f to Color.Black.copy(alpha = 0.02f),
                                                     1.00f to Color.Transparent,
                                                 ),
                                                 blendMode = BlendMode.DstIn,
                                             )
-                                        }
-                                        .blur(34.dp),
+                                        },
                                 ) {
                                     ArtworkImage(
                                         name = track.title,
@@ -2169,11 +2169,11 @@ private fun FullPlayer(
                                         }
                                         .drawWithContent {
                                             drawContent()
-                                            // Bottom 26% dissolves seamlessly into the stretched melting blur underneath
+                                            // Bottom 28% dissolves seamlessly into the stretched melting blur underneath
                                             drawRect(
                                                 brush = Brush.verticalGradient(
                                                     colors = listOf(Color.Black, Color.Transparent),
-                                                    startY = size.height * 0.74f,
+                                                    startY = size.height * 0.72f,
                                                     endY = size.height,
                                                 ),
                                                 blendMode = BlendMode.DstIn,
@@ -2196,22 +2196,6 @@ private fun FullPlayer(
                                         modifier = Modifier.fillMaxSize(),
                                     )
                                 }
-
-                                // Layer 3: Strong bottom-to-top dark gradient scrim for high readability of song title and controls
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(
-                                            Brush.verticalGradient(
-                                                0.00f to Color.Transparent,
-                                                0.36f to Color.Transparent,
-                                                0.55f to Color.Black.copy(alpha = 0.28f),
-                                                0.72f to Color.Black.copy(alpha = 0.64f),
-                                                0.85f to Color.Black.copy(alpha = 0.86f),
-                                                1.00f to Color.Black.copy(alpha = 0.96f),
-                                            )
-                                        )
-                                )
                             }
                         } else {
                             // ── Canvas Video Playback Mode ──────────────────────────────────
@@ -2274,6 +2258,24 @@ private fun FullPlayer(
                                         0.00f to Color.Black.copy(alpha = 0.35f),
                                         0.60f to Color.Black.copy(alpha = 0.12f),
                                         1.00f to Color.Transparent,
+                                    )
+                                )
+                        )
+                    }
+
+                    // Continuous dark gradient scrim extending through bottom of screen for legibility without horizontal cuts
+                    if (isStaticArtwork && heroCoverAlpha > 0.001f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        0.00f to Color.Transparent,
+                                        0.30f to Color.Transparent,
+                                        0.50f to Color.Black.copy(alpha = 0.22f),
+                                        0.68f to Color.Black.copy(alpha = 0.52f),
+                                        0.84f to Color.Black.copy(alpha = 0.76f),
+                                        1.00f to Color.Black.copy(alpha = 0.88f),
                                     )
                                 )
                         )
