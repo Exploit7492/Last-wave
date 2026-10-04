@@ -215,8 +215,11 @@ class LosslessMusicApi @Inject constructor(
 
         /** True when the stream bytes are E-AC-3 spatial. Fail-open (false) when unreadable. */
         fun isAtmosStreamUrl(url: String): Boolean {
-            if (!url.startsWith("data:application/dash+xml")) return false
-            return isAtmosCodec(manifestCodecOf(url))
+            if (url.startsWith("data:application/dash+xml")) {
+                return isAtmosCodec(manifestCodecOf(url))
+            }
+            val lower = url.lowercase()
+            return lower.contains("atmos") || lower.contains("eac3") || lower.contains("ec-3")
         }
 
         /** True when the stream points to a known prank or decoy CDN stream. */
@@ -446,7 +449,7 @@ class LosslessMusicApi @Inject constructor(
                         albumArtistName = track.artist,
                         albumTitle = track.album,
                         performers = track.artist,
-                        isAtmos = track.atmos || track.audioModes.any { it.contains("DOLBY", ignoreCase = true) || it.contains("ATMOS", ignoreCase = true) },
+                        isAtmos = track.isDolbyAtmos || track.atmos || track.audioModes.any { it.contains("DOLBY", ignoreCase = true) || it.contains("ATMOS", ignoreCase = true) },
                         isSpatial = track.audioModes.any { it.contains("360", ignoreCase = true) || it.contains("SPATIAL", ignoreCase = true) },
                         rawAddonId = track.id,
                         audioQuality = track.audioQuality,
@@ -536,7 +539,10 @@ class LosslessMusicApi @Inject constructor(
                 // Atmos is a property of the STREAM (audioMode flag or spatial
                 // URL), never of the request: a stereo fallback for an Atmos
                 // preference must be labeled (and badged) as what it is.
-                val isStreamAtmos = (stream.audioMode?.contains("ATMOS", ignoreCase = true) == true) || isAtmosStreamUrl(rawUrl)
+                val isStreamAtmos = stream.isDolbyAtmos ||
+                    (stream.audioMode?.contains("ATMOS", ignoreCase = true) == true) ||
+                    isAtmosCodec(stream.codec) ||
+                    isAtmosStreamUrl(rawUrl)
 
                 // Downloads never upscale to spatial: a hi-res/CD/320 request
                 // must not come home as Dolby (the URL check above misses
