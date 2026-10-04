@@ -706,7 +706,12 @@ class MusicPlayer @Inject constructor(
                 val prepared = mediaItem.localConfiguration
                     ?.customCacheKey
                     ?.let(preparedStreams::get)
-                if (mediaItem.localConfiguration?.uri?.scheme == "lastwave" || prepared?.isExpired() == true) {
+                val misc = runCatching { settingsPreferences.settings.value }.getOrDefault(MiscSettings())
+                val wantLossless = misc.preferLosslessStreaming &&
+                    misc.losslessQuality != LosslessMusicApi.QUALITY_YOUTUBE &&
+                    losslessMusicApi.isConfigured
+                val isPreparedValidLossless = prepared?.isLossless == true || prepared?.audioCodec == "DOLBY ATMOS"
+                if (mediaItem.localConfiguration?.uri?.scheme == "lastwave" || prepared?.isExpired() == true || (wantLossless && !isPreparedValidLossless)) {
                     // During lazy-player construction a restored queue is
                     // installed before the lazy value is published. Defer
                     // resolution until the first explicit playback action.
@@ -1551,6 +1556,8 @@ class MusicPlayer @Inject constructor(
         }
 
         applicationScope.launch {
+            var lastAddonUrl: String? = null
+            var lastAddonEnabled: Boolean? = null
             settingsPreferences.settings.collect { settings ->
                 crossfadeEnabled = settings.crossfadeEnabled
                 crossfadeDurationMs = settings.crossfadeSeconds.coerceIn(1, 12) * 1000L
@@ -1574,6 +1581,14 @@ class MusicPlayer @Inject constructor(
                         runCatching { UsbExclusivePrefs.setEnabled(appContext, false) }
                     }
                 }
+                // Purge stale pre-cached lossy streams from queue when addon is added/refreshed
+                if (lastAddonUrl != null && (lastAddonUrl != settings.addonUrl || lastAddonEnabled != settings.addonEnabled)) {
+                    losslessMusicApi.invalidateCredentialsCache()
+                    losslessBypassMediaIds.clear()
+                    preparedStreams.entries.removeIf { !it.value.isLossless && it.value.audioCodec != "DOLBY ATMOS" }
+                }
+                lastAddonUrl = settings.addonUrl
+                lastAddonEnabled = settings.addonEnabled
                 onMain {
                     applyDacRoutingFor(currentSourceRateHz())
                     updateSignalPath()
@@ -3352,7 +3367,12 @@ class MusicPlayer @Inject constructor(
         unavailableSkipJob = null
         val mediaItem = player.getMediaItemAt(index)
         val prepared = mediaItem.localConfiguration?.customCacheKey?.let(preparedStreams::get)
-        if (mediaItem.localConfiguration?.uri?.scheme != "lastwave" && prepared?.isExpired() != true) {
+        val misc = runCatching { settingsPreferences.settings.value }.getOrDefault(MiscSettings())
+        val wantLossless = misc.preferLosslessStreaming &&
+            misc.losslessQuality != LosslessMusicApi.QUALITY_YOUTUBE &&
+            losslessMusicApi.isConfigured
+        val isPreparedValidLossless = prepared?.isLossless == true || prepared?.audioCodec == "DOLBY ATMOS"
+        if (mediaItem.localConfiguration?.uri?.scheme != "lastwave" && prepared?.isExpired() != true && (!wantLossless || isPreparedValidLossless)) {
             // Already resolved: publish quality synchronously so the badge is
             // correct from the first frame (no transition may fire for a
             // same-item play to republish it later). The stream is also staged,
@@ -5390,9 +5410,14 @@ class MusicPlayer @Inject constructor(
             } else {
                 val isDolbyPreferred = misc.dolbyAtmosEnabled || misc.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS
                 val losslessTimeoutMs = if (isDolbyPreferred) {
-                    if (!videoId.isNullOrBlank()) 10_000L else 12_000L
+                    if (!videoId.isNullOrBlank()) 12_000L else 15_000L
                 } else {
-                    if (!videoId.isNullOrBlank()) 3_500L else 4_500L
+                    // A backend lookup can involve candidate search + a
+                    // manifest request (each with its own 4s call timeout).
+                    // Leave room for the optional exact-video metadata lookup
+                    // instead of promoting the staged YouTube Opus stream too
+                    // early for a valid FLAC result to arrive.
+                    if (!videoId.isNullOrBlank()) 10_000L else 12_000L
                 }
                 val losslessBudgetMs = (losslessTimeoutMs - (SystemClock.elapsedRealtime() - forkStart)).coerceAtLeast(0L)
                 // Unbounded skips the deadline entirely rather than passing
