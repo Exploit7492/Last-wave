@@ -550,6 +550,8 @@ class LosslessMusicApi @Inject constructor(
                 val isHiResFlagged = candidate.isHiResFlagged() ||
                     stream.quality.contains("HI_RES", ignoreCase = true) ||
                     stream.quality.contains("HI-RES", ignoreCase = true) ||
+                    stream.audioQuality.contains("HI_RES", ignoreCase = true) ||
+                    stream.audioQuality.contains("HI-RES", ignoreCase = true) ||
                     stream.quality.contains("24-BIT", ignoreCase = true) ||
                     stream.quality.contains("24BIT", ignoreCase = true) ||
                     stream.quality.contains("24/") ||
@@ -562,7 +564,11 @@ class LosslessMusicApi @Inject constructor(
                     (reportedDepth ?: 0) > 0 -> reportedDepth
                     effectiveSampleRate > 192000.0 -> 32
                     isHiResFlagged -> 24
-                    else -> reportedDepth
+                    stream.codec.equals("flac", ignoreCase = true) ||
+                        candidate.audioQuality.contains("LOSSLESS", ignoreCase = true) ||
+                        stream.quality.contains("LOSSLESS", ignoreCase = true) ||
+                        stream.audioQuality.contains("LOSSLESS", ignoreCase = true) -> 16
+                    else -> reportedDepth ?: 16
                 }
                 val formatId = when {
                     isStreamAtmos -> QUALITY_DOLBY_ATMOS
@@ -593,7 +599,7 @@ class LosslessMusicApi @Inject constructor(
                 return LosslessAudioStream(
                     url = rawUrl,
                     mimeType = "application/dash+xml",
-                    bitDepth = effectiveBitDepth ?: 0,
+                    bitDepth = effectiveBitDepth ?: (if (isHiResFlagged || effectiveSampleRate > 48000.0) 24 else 16),
                     samplingRate = effectiveSampleRate / 1000.0,
                     formatId = formatId,
                     bitrateKbps = stream.bitrate?.let { if (it > 10_000) it / 1000 else it },

@@ -168,18 +168,16 @@ class AddonClient(
                 } else {
                     json.decodeFromString<AddonStream>(body)
                 }
-                val finalStream = if (parsed.bitDepth == null && rootJson != null) {
-                    val fallbackDepth = extractBitDepthFromElement(rootJson)
-                    val fallbackRate = if (parsed.sampleRate <= 0.0 || parsed.sampleRate == 44100.0) {
-                        extractSampleRateFromElement(rootJson) ?: parsed.sampleRate
-                    } else parsed.sampleRate
-                    if (fallbackDepth != null || fallbackRate != parsed.sampleRate) {
-                        parsed.copy(
-                            rawBitDepth = fallbackDepth?.let { JsonPrimitive(it) } ?: parsed.rawBitDepth,
-                            rawSampleRate = (fallbackRate.takeIf { it > 0.0 } ?: parsed.sampleRate).let { JsonPrimitive(it) },
-                        )
-                    } else parsed
-                } else parsed
+                val fallbackDepth = parsed.bitDepth
+                    ?: extractBitDepthFromElement(streamElement)
+                    ?: extractBitDepthFromElement(rootJson)
+                val fallbackRate = extractSampleRateFromElement(streamElement)
+                    ?: extractSampleRateFromElement(rootJson)
+                    ?: parsed.sampleRate
+                val finalStream = parsed.copy(
+                    rawBitDepth = (fallbackDepth ?: parsed.bitDepth)?.let { JsonPrimitive(it) } ?: parsed.rawBitDepth,
+                    rawSampleRate = (fallbackRate.takeIf { it > 0.0 } ?: parsed.sampleRate).let { JsonPrimitive(it) },
+                )
                 Result.success(finalStream)
             }
         } catch (e: Exception) {

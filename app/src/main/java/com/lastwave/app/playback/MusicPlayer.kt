@@ -1201,7 +1201,8 @@ class MusicPlayer @Inject constructor(
                             val sourceDepth = resolveDepthForDisplay(
                                 updated.bitDepth,
                                 updated.samplingRateKHz ?: (if (rateHz > 0) rateHz / 1000.0 else null),
-                            )
+                            ) ?: parseQualityFromCodec(updated.audioCodec)?.substringBefore('/')?.toIntOrNull()
+                              ?: if (detectedCodec == "FLAC" || updated.isLossless) (if (rateHz > 48_000) 24 else 16) else null
                             if (isSpatialAudioCodec(detectedCodec)) {
                                 updated = updated.copy(audioCodec = detectedCodec, isLossless = false)
                             } else if (!isSpatialAudioCodec(updated.audioCodec) && detectedCodec != null) {
@@ -1215,7 +1216,11 @@ class MusicPlayer @Inject constructor(
                                     else -> detectedCodec
                                 }
                                 val finalCodec = if (detectedCodec == "FLAC") {
-                                    detectedBadge
+                                    if (detectedBadge == "FLAC" && currentIsExplicit && updated.audioCodec?.contains("/") == true) {
+                                        updated.audioCodec
+                                    } else {
+                                        detectedBadge
+                                    }
                                 } else if (currentIsExplicit && updated.audioCodec != "FLAC" && updated.audioCodec != "HI-RES FLAC" && updated.audioCodec != "LOSSLESS") {
                                     updated.audioCodec
                                 } else {
@@ -1223,6 +1228,7 @@ class MusicPlayer @Inject constructor(
                                 }
                                 updated = updated.copy(
                                     audioCodec = finalCodec,
+                                    bitDepth = updated.bitDepth ?: sourceDepth,
                                     bitrateKbps = if (detectedCodec == "FLAC") (updated.bitrateKbps ?: bitrate) else (updated.bitrateKbps ?: bitrate ?: if (detectedCodec == "OPUS") 160 else null),
                                     isLossless = detectedCodec == "FLAC",
                                 )
@@ -5487,14 +5493,11 @@ class MusicPlayer @Inject constructor(
             else -> null
         }
         val effectiveRate = if (stream.samplingRate > 1000.0) stream.samplingRate / 1000.0 else stream.samplingRate
-        // Depth the stream reported, through the shared hi-res rule: a rate
-        // above 48kHz is 24-bit in practice, so a reported 16 there is
-        // corrected to 24 instead of shown as 16. At or below 48kHz nothing
-        // is assumed — an unknown depth stays unknown rather than claiming 24
-        // from the rate alone. The decoder's PCM encoding is not consulted at
-        // all; it describes the decoder's output, not the song.
-        val resolvedBitDepth: Int? = resolveDepthForDisplay(stream.bitDepth.takeIf { it > 0 }, effectiveRate)
+        val streamBitDepth = stream.bitDepth.takeIf { it > 0 }
+            ?: if (isLossless) (if (effectiveRate > 48.0) 24 else 16) else null
+        val resolvedBitDepth: Int? = resolveDepthForDisplay(streamBitDepth, effectiveRate)
             ?: parseQualityFromCodec(stream.audioCodecOverride)?.substringBefore('/')?.toIntOrNull()
+            ?: streamBitDepth
         val badge = when {
             stream.audioCodecOverride != null -> stream.audioCodecOverride
             // Spatial badges only from manifest evidence: the request's
@@ -5507,7 +5510,7 @@ class MusicPlayer @Inject constructor(
             (resolvedBitDepth ?: 0) > 16 || effectiveRate > 48.0 -> "HI-RES FLAC"
             stream.formatId == LosslessMusicApi.QUALITY_MP3_320 -> "MP3 320k"
             stream.formatId == LosslessMusicApi.QUALITY_DATA_SAVER -> "HE-AAC"
-            else -> "LOSSLESS"
+            else -> if ((resolvedBitDepth ?: 0) > 0 && effectiveRate > 0.0) "$resolvedBitDepth/${formatSampleRateKHz(effectiveRate)}kHz" else "LOSSLESS"
         }
         // Device-capability veto: a spatial manifest that slips through on a
         // device that cannot render Atmos (no spatializer, no JOC decoder)
@@ -5611,7 +5614,7 @@ class MusicPlayer @Inject constructor(
             audioCodec = badge,
             cacheKey = "lossless:${track.mediaIdKey()}:${stream.formatId}",
             isLossless = isLossless,
-            bitDepth = resolvedBitDepth?.takeIf { it > 0 } ?: stream.bitDepth.takeIf { it > 0 },
+            bitDepth = resolvedBitDepth?.takeIf { it > 0 } ?: streamBitDepth,
             samplingRateKHz = effectiveRate.takeIf { it > 0.0 },
             durationMs = stream.durationSeconds.takeIf { it > 0 }?.times(1_000L)
                 ?: track.durationMs
