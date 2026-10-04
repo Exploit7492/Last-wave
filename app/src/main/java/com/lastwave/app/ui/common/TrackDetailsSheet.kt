@@ -45,6 +45,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import com.lastwave.app.playback.formatDetailedQualityBadge
 import com.lastwave.app.playback.formatSampleRateKHz
+import com.lastwave.app.playback.isFlacLikeCodec
 import com.lastwave.app.playback.isSpatialAudioCodec
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.MusicPlayerState
@@ -191,6 +192,15 @@ private fun describeLiveResolution(state: MusicPlayerState): String {
     val depth = resolveDepthForDisplay(state.bitDepth, rate)
         ?: com.lastwave.app.playback.inferBitDepth(state.copy(bitDepth = null), allowRateGuess = false)
     val kbps = state.bitrateKbps
+    // Never label a lossy codec as FLAC: the rate-only fallback below used to
+    // append FLAC unconditionally, so an Opus stream read as "48 kHz FLAC".
+    val flacLike = isFlacLikeCodec(state.audioCodec) || state.isLossless
+    val lossyName = when {
+        state.audioCodec?.contains("OPUS", ignoreCase = true) == true -> "Opus"
+        state.audioCodec?.contains("AAC", ignoreCase = true) == true || state.audioCodec?.contains("MP4A", ignoreCase = true) == true -> "AAC"
+        state.audioCodec?.contains("MP3", ignoreCase = true) == true -> "MP3"
+        else -> null
+    }
     if (isSpatialAudioCodec(state.audioCodec)) {
         val rateText = rate?.let { "${formatSampleRateKHz(it)} kHz" } ?: "48.0 kHz"
         return "${depth ?: 24}-bit / $rateText (Spatial)"
@@ -201,7 +211,8 @@ private fun describeLiveResolution(state: MusicPlayerState): String {
     }
     if (rate != null && rate > 0.0) {
         val kbpsText = kbps?.takeIf { it > 0 }?.let { " ($it kbps)" } ?: ""
-        return "${formatSampleRateKHz(rate)} kHz FLAC$kbpsText"
+        val label = if (flacLike) "FLAC" else (lossyName ?: "Audio")
+        return "${formatSampleRateKHz(rate)} kHz $label$kbpsText"
     }
     return "Analyzing..."
 }

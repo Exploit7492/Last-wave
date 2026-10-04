@@ -774,6 +774,7 @@ fun PlayerHost(
                     DraggableSleepTimerOverlay(
                         sleepTimerRemainingMs = playbackState.sleepTimerRemainingMs,
                         onCycleTimer = { viewModel.player.cycleSleepTimer() },
+                        onCloseTimer = { viewModel.player.setSleepTimerMinutes(0) },
                     )
                 }
             }
@@ -1888,8 +1889,10 @@ private fun FullPlayer(
                     modifier = Modifier.fillMaxSize(),
                     // Lyrics legibility lives or dies on background
                     // suppression; the Now Playing tab keeps its light blur.
+                    // Lyrics tab uses static blur only (no fluid shader) for
+                    // smooth scrolling like 4.0.0.
                     extraBlur = currentTab == FullPlayerTab.LYRICS,
-                    rotatingBackgroundEnabled = rotatingBackgroundEnabled,
+                    rotatingBackgroundEnabled = rotatingBackgroundEnabled && currentTab != FullPlayerTab.LYRICS,
                     fallback = {
                         val staticBlurTransform = remember(currentTab) {
                             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
@@ -2430,7 +2433,7 @@ private fun FullPlayer(
                                             )
 
                                             Surface(
-                                                shape = RoundedCornerShape(32.dp),
+                                                shape = RoundedCornerShape(22.dp),
                                                 color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.88f * sleeveAlpha),
                                                 tonalElevation = 6.dp * sleeveAlpha,
                                                 shadowElevation = if (state.isPlaying) 28.dp * sleeveAlpha else 12.dp * sleeveAlpha,
@@ -2448,7 +2451,7 @@ private fun FullPlayer(
                                                     PlayerArtwork(
                                                         track = track,
                                                         modifier = Modifier.fillMaxSize(),
-                                                        corner = 32.dp,
+                                                        corner = 22.dp,
                                                         canvas = if (showSleeveCanvas) canvas else null,
                                                         isPlaying = state.isPlaying,
                                                         pausedForTransition = shownDismissY > 0f || currentTab != FullPlayerTab.NOW_PLAYING,

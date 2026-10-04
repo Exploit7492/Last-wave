@@ -85,6 +85,8 @@ data class AddonMetadata(
             ?: extractSampleRateFromElement(bitDepthRate)
 }
 
+private val ATMOS_HINT = Regex("""atmos|dolby|eac3[_-]?joc|ec-?3""", RegexOption.IGNORE_CASE)
+
 @Serializable
 data class AddonTrack(
     @SerialName("id") val id: String = "",
@@ -97,6 +99,7 @@ data class AddonTrack(
     @SerialName("quality") val quality: String = "",
     @SerialName("audio_quality") val audioQualitySnake: String = "",
     @SerialName("atmos") val atmos: Boolean = false,
+    @SerialName("audioMode") val audioMode: String? = null,
     @SerialName("audioModes") val audioModes: List<String> = emptyList(),
     @SerialName("artworkURL") val artworkURL: String? = null,
     @SerialName("bitDepth") val rawBitDepth: JsonElement? = null,
@@ -169,6 +172,12 @@ data class AddonTrack(
             ?: parseRateFromQualityString(audioQualitySnake)
             ?: parseRateFromQualityString(quality)
             ?: parseRateFromQualityString(format)
+
+    val isDolbyAtmos: Boolean
+        get() = atmos ||
+            ATMOS_HINT.containsMatchIn(
+                "$audioQuality $quality $audioQualitySnake ${audioMode.orEmpty()} ${audioModes.joinToString(" ")} $format"
+            )
 }
 
 @Serializable
@@ -200,6 +209,9 @@ data class AddonStream(
     @SerialName("manifest") val manifest: String = "dash",
     @SerialName("manifestXml") val manifestXml: String? = null,
     @SerialName("audioMode") val audioMode: String? = null,
+    @SerialName("audioModes") val audioModes: List<String> = emptyList(),
+    @SerialName("atmos") val atmos: Boolean = false,
+    @SerialName("streamQuality") val streamQuality: String = "",
     @SerialName("encrypted") val encrypted: Boolean = false,
     @SerialName("metadata") val rawMetadata: JsonElement? = null,
     @SerialName("meta") val rawMeta: JsonElement? = null,
@@ -262,6 +274,12 @@ data class AddonStream(
             ?: parseRateFromQualityString(audioQualitySnake)
             ?: parseRateFromQualityString(format)
             ?: 44100.0
+
+    val isDolbyAtmos: Boolean
+        get() = atmos ||
+            ATMOS_HINT.containsMatchIn(
+                "$quality $streamQuality $audioQuality $audioQualitySnake ${audioMode.orEmpty()} ${audioModes.joinToString(" ")} $format $codec"
+            )
 }
 
 fun extractBitDepthFromElement(element: JsonElement?): Int? {
