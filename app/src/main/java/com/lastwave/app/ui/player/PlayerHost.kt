@@ -1685,44 +1685,6 @@ private fun AddToPlaylistDialog(
 
 private enum class SeekDirection { REWIND, FORWARD }
 
-private const val HERO_FADE_FRACTION = 0.42f
-
-/**
- * The motion clip currently mounted in the tree, plus whether it is on its way out.
- */
-private class CanvasMount(
-    val value: MutableState<com.lastwave.app.data.canvas.CanvasArtwork?>,
-    val retiring: MutableState<Boolean>,
-)
-
-/**
- * Holds [next] in the tree for one [CANVAS_FADE_MS] crossfade after it turns null.
- *
- * The clip is the moving layer and the still cover is what fades up underneath it,
- * so the clip has to outlive the request to unmount it. Dropping it on the same
- * frame that `next` went null is exactly what turned every animated -> static song
- * change into a pop followed by a full player/TextureView rebuild.
- */
-@Composable
-private fun rememberRetiringCanvas(next: com.lastwave.app.data.canvas.CanvasArtwork?): CanvasMount {
-    val mount = remember { CanvasMount(mutableStateOf(next), mutableStateOf(false)) }
-    LaunchedEffect(next) {
-        if (next != null) {
-            mount.value.value = next
-            mount.retiring.value = false
-            return@LaunchedEffect
-        }
-        if (mount.value.value == null) return@LaunchedEffect
-        mount.retiring.value = true
-        // CANVAS_FADE_MS is an Int; delay() needs Long.
-        delay(CANVAS_FADE_MS.toLong())
-        // Unmount last and leave `retiring` set: clearing it first would briefly
-        // re-target the clip's fade back to full opacity on its way out.
-        mount.value.value = null
-    }
-    return mount
-}
-
 @Composable
 private fun FullPlayer(
     state: MusicPlayerState,
@@ -1771,14 +1733,8 @@ private fun FullPlayer(
             }
         }
     }
-    // Clip geometry is held across track changes: the hero sizes itself from the last
-    // reported aspect instead of collapsing to zero between clips.
-    var canvasAspect by remember { mutableFloatStateOf(0f) }
-    // The exact alpha CanvasArtworkPlayer is painting this frame. The still cover is
-    // simply its complement, so a single fade owns the whole crossfade and the pair
-    // always sums to full opacity.
-    var canvasFade by remember { mutableFloatStateOf(0f) }
-    val canvasMount = rememberRetiringCanvas(activeCanvas)
+    var canvasAspect by remember(activeCanvas?.url) { mutableFloatStateOf(0f) }
+    var canvasRendered by remember(activeCanvas?.url) { mutableStateOf(false) }
     var lyricsFullscreen by remember(currentTab) { mutableStateOf(false) }
     val view = LocalView.current
     DisposableEffect(view, lyricsFullscreen) {
@@ -1935,18 +1891,6 @@ private fun FullPlayer(
                     extraBlur = currentTab == FullPlayerTab.LYRICS,
                     rotatingBackgroundEnabled = rotatingBackgroundEnabled,
                     fallback = {
-                        val staticBlurTransform = remember(currentTab) {
-                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-                                listOf(
-                                    BlurTransformation(
-                                        radius = if (currentTab == FullPlayerTab.LYRICS) 25 else 18,
-                                        maxDimension = 100,
-                                    )
-                                )
-                            } else {
-                                emptyList()
-                            }
-                        }
                         PlayerArtwork(
                             track = track,
                             modifier = Modifier
@@ -1957,19 +1901,14 @@ private fun FullPlayer(
                                     alpha = 0.9f
                                 }
                                 .then(
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                        if (currentTab == FullPlayerTab.LYRICS) {
-                                            Modifier.blur(36.dp)
-                                        } else {
-                                            Modifier.blur(20.dp)
-                                        }
+                                    if (currentTab == FullPlayerTab.LYRICS) {
+                                        Modifier.blur(36.dp)
                                     } else {
                                         Modifier
                                     }
                                 ),
                             corner = 0.dp,
                             decodeSizePx = 200,
-                            transformations = staticBlurTransform,
                         )
                         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.52f)))
                         Box(
@@ -2013,18 +1952,16 @@ private fun FullPlayer(
                         )
                     }
                 )
-                // Contrast scrim gradient (ensures text & controls are clear while preserving vibrant colors).
-                // Bottom is intentionally softer now — the seamless melt below carries
-                // the dominant hue, so heavy black here would recreate the hard cut.
+                // Contrast scrim gradient (ensures text & controls are clear while preserving vibrant colors)
                 Box(
                     Modifier
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
                                 0.00f to Color.Black.copy(alpha = 0.35f),
-                                0.28f to Color.Black.copy(alpha = 0.12f),
-                                0.65f to Color.Black.copy(alpha = 0.28f),
-                                1.00f to Color.Black.copy(alpha = 0.52f),
+                                0.28f to Color.Black.copy(alpha = 0.15f),
+                                0.65f to Color.Black.copy(alpha = 0.40f),
+                                1.00f to Color.Black.copy(alpha = 0.72f),
                             )
                         )
                 )
@@ -2045,241 +1982,38 @@ private fun FullPlayer(
                             ),
                         ),
                 )
-                if (showFullBleed) {
-                    val density = LocalDensity.current
-                    val isTallCanvas = canvasMount.value.value != null && canvasAspect in 0.30f..0.82f
-                    val isStaticArtwork = activeCanvas == null
-
-                    // Natural aspect ratio for crisp artwork at screen width,
-                    // responsively scaled down on shorter screens to prevent crowding controls.
-                    val crispCoverHeightPx = if (bgHeight < bgWidth * 1.55f) {
-                        minOf(bgWidth, bgHeight * 0.44f)
+                if (showFullBleed && activeCanvas != null) {
+                    val heroHeight = if (heroBottomPx > 0f) {
+                        with(LocalDensity.current) { heroBottomPx.toDp() }
                     } else {
-                        minOf(bgWidth, bgHeight * 0.50f)
+                        with(LocalDensity.current) { (bgHeight * 0.54f).toDp() }
                     }
-
-                    // Stretchy melt extends downwards through the title and controls area,
-                    // eliminating empty whitespace and embedding title/artist in the lower fade.
-                    val measuredPx = if (isStaticArtwork) {
-                        if (heroBottomPx > 0f) {
-                            (heroBottomPx + with(density) { 72.dp.toPx() })
-                                .coerceIn(crispCoverHeightPx + with(density) { 100.dp.toPx() }, bgHeight * 0.86f)
-                        } else {
-                            bgHeight * 0.74f
-                        }
-                    } else {
-                        if (heroBottomPx > 0f) {
-                            heroBottomPx + with(density) { 8.dp.toPx() }
-                        } else {
-                            bgHeight * 0.58f
-                        }
-                    }
-
-                    val maxPx = if (isStaticArtwork) {
-                        bgHeight * 0.88f
-                    } else if (isTallCanvas) {
-                        bgHeight * 0.70f
-                    } else {
-                        minOf(bgWidth * 1.08f, bgHeight * 0.62f)
-                    }
-
-                    val minPx = if (isStaticArtwork) {
-                        crispCoverHeightPx
-                    } else {
-                        minOf(bgWidth * 0.92f, bgHeight * 0.50f)
-                    }
-
-                    val heroTargetPx = measuredPx.coerceIn(minPx, maxPx).coerceAtLeast(1f).roundToInt().toFloat()
-                    val heroPx by animateFloatAsState(
-                        targetValue = heroTargetPx,
-                        animationSpec = tween(CANVAS_FADE_MS),
-                        label = "heroPx",
-                    )
-                    val heroHeight = with(density) { heroPx.toDp() }
                     val lyricsCanvasBlurDp by animateDpAsState(
                         targetValue = if (currentTab == FullPlayerTab.LYRICS) 32.dp else 0.dp,
                         animationSpec = tween(350),
                         label = "lyricsCanvasBlur",
                     )
-                    // Canvas wins over the static cover - never both. The cover is only a
-                    // loading / decode-error placeholder, so once the motion canvas reports a
-                    // real rendered frame (CanvasArtworkPlayer sets rendered from
-                    // onSurfaceTextureUpdated, i.e. after pixels exist) the cover fades out.
-                    //
-                    // The cover alpha is read straight off the clip's own reported fade
-                    // instead of running a second animation against it. Two fades of
-                    // different lengths that do not start on the same frame sum to less
-                    // than full opacity through the middle of the swap, which is what
-                    // let the backdrop bleed through the artwork box.
-                    val heroCoverAlpha = if (canvasFade >= 0.95f) 0f else (1f - canvasFade).coerceIn(0f, 1f)
-                    Box(
+                    CanvasArtworkPlayer(
+                        canvas = activeCanvas,
+                        isPlaying = state.isPlaying,
+                        contentMode = CanvasContentMode.CROP,
+                        alignPortraitTop = true,
+                        bottomFade = 0.38f,
+                        onAspectRatioChanged = { canvasAspect = it },
+                        onRenderedChanged = { canvasRendered = it },
+                        pausedForTransition = shownDismissY > 0f || currentTab != FullPlayerTab.NOW_PLAYING,
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .fillMaxWidth()
-                            .height(heroHeight),
-                    ) {
-                        if (isStaticArtwork) {
-                            // ── Stretchy Artwork Fade for Static Full-Bleed ──────────────────
-                            if (heroCoverAlpha > 0.001f) {
-                                // Layer 1: Background vertically stretched continuation + progressive blur + melting opacity gradient
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .graphicsLayer {
-                                            scaleY = 1.30f
-                                            transformOrigin = TransformOrigin(0.5f, 0.0f)
-                                            alpha = heroCoverAlpha
-                                            compositingStrategy = CompositingStrategy.Offscreen
-                                        }
-                                        .blur(36.dp)
-                                        .drawWithContent {
-                                            drawContent()
-                                            drawRect(
-                                                brush = Brush.verticalGradient(
-                                                    0.00f to Color.Black,
-                                                    0.25f to Color.Black,
-                                                    0.45f to Color.Black.copy(alpha = 0.88f),
-                                                    0.65f to Color.Black.copy(alpha = 0.50f),
-                                                    0.82f to Color.Black.copy(alpha = 0.16f),
-                                                    0.94f to Color.Black.copy(alpha = 0.02f),
-                                                    1.00f to Color.Transparent,
-                                                ),
-                                                blendMode = BlendMode.DstIn,
-                                            )
-                                        },
-                                ) {
-                                    ArtworkImage(
-                                        name = track.title,
-                                        artist = track.artist,
-                                        embeddedUrl = track.artworkUrl,
-                                        fallbackIcon = Icons.Filled.MusicNote,
-                                        alignment = Alignment.TopCenter,
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
+                            .height(heroHeight)
+                            .then(
+                                if (lyricsCanvasBlurDp > 0.dp) {
+                                    Modifier.blur(lyricsCanvasBlurDp)
+                                } else {
+                                    Modifier
                                 }
-
-                                // Layer 2: Original album artwork kept at natural aspect ratio at top
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(with(density) { crispCoverHeightPx.toDp() })
-                                        .graphicsLayer {
-                                            alpha = heroCoverAlpha
-                                            compositingStrategy = CompositingStrategy.Offscreen
-                                        }
-                                        .drawWithContent {
-                                            drawContent()
-                                            // Bottom 28% dissolves seamlessly into the stretched melting blur underneath
-                                            drawRect(
-                                                brush = Brush.verticalGradient(
-                                                    colors = listOf(Color.Black, Color.Transparent),
-                                                    startY = size.height * 0.72f,
-                                                    endY = size.height,
-                                                ),
-                                                blendMode = BlendMode.DstIn,
-                                            )
-                                        }
-                                        .then(
-                                            if (lyricsCanvasBlurDp > 0.dp) {
-                                                Modifier.blur(lyricsCanvasBlurDp)
-                                            } else {
-                                                Modifier
-                                            }
-                                        ),
-                                ) {
-                                    ArtworkImage(
-                                        name = track.title,
-                                        artist = track.artist,
-                                        embeddedUrl = track.artworkUrl,
-                                        fallbackIcon = Icons.Filled.MusicNote,
-                                        alignment = Alignment.TopCenter,
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
-                                }
-                            }
-                        } else {
-                            // ── Canvas Video Playback Mode ──────────────────────────────────
-                            if (heroCoverAlpha > 0.001f) {
-                                ArtworkImage(
-                                    name = track.title,
-                                    artist = track.artist,
-                                    embeddedUrl = track.artworkUrl,
-                                    fallbackIcon = Icons.Filled.MusicNote,
-                                    alignment = Alignment.TopCenter,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .graphicsLayer {
-                                            alpha = heroCoverAlpha
-                                            compositingStrategy = CompositingStrategy.Offscreen
-                                        }
-                                        .drawWithContent {
-                                            drawContent()
-                                            drawRect(
-                                                brush = Brush.verticalGradient(
-                                                    colors = listOf(Color.Black, Color.Transparent),
-                                                    startY = size.height * (1f - HERO_FADE_FRACTION),
-                                                    endY = size.height,
-                                                ),
-                                                blendMode = BlendMode.DstIn,
-                                            )
-                                        }
-                                        .then(
-                                            if (lyricsCanvasBlurDp > 0.dp) {
-                                                Modifier.blur(lyricsCanvasBlurDp)
-                                            } else {
-                                                Modifier
-                                            }
-                                        ),
-                                )
-                            }
-                            canvasMount.value.value?.let { mountedCanvas ->
-                                CanvasArtworkPlayer(
-                                    canvas = mountedCanvas,
-                                    isPlaying = state.isPlaying,
-                                    contentMode = CanvasContentMode.CROP,
-                                    alignPortraitTop = true,
-                                    bottomFade = HERO_FADE_FRACTION,
-                                    onAspectRatioChanged = { canvasAspect = it },
-                                    onCoverChanged = { canvasFade = it },
-                                    fadeOut = canvasMount.retiring.value,
-                                    pausedForTransition = shownDismissY > 0f,
-                                    modifier = Modifier.fillMaxSize(),
-                                )
-                            }
-                        }
-
-                        // Top status bar vignette only (ensures system indicators remain legible over bright artwork)
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(110.dp)
-                                .background(
-                                    Brush.verticalGradient(
-                                        0.00f to Color.Black.copy(alpha = 0.35f),
-                                        0.60f to Color.Black.copy(alpha = 0.12f),
-                                        1.00f to Color.Transparent,
-                                    )
-                                )
-                        )
-                    }
-
-                    // Continuous dark gradient scrim extending through bottom of screen for legibility without horizontal cuts
-                    if (isStaticArtwork && heroCoverAlpha > 0.001f) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Brush.verticalGradient(
-                                        0.00f to Color.Transparent,
-                                        0.30f to Color.Transparent,
-                                        0.50f to Color.Black.copy(alpha = 0.22f),
-                                        0.68f to Color.Black.copy(alpha = 0.52f),
-                                        0.84f to Color.Black.copy(alpha = 0.76f),
-                                        1.00f to Color.Black.copy(alpha = 0.88f),
-                                    )
-                                )
-                        )
-                    }
+                            ),
+                    )
                 }
 
                 // Lyrics-only readability veil: heavy blur still can't tame a
@@ -2527,7 +2261,7 @@ private fun FullPlayer(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                 ) {
                                     val sleeveAlpha by animateFloatAsState(
-                                        targetValue = if (showFullBleed) 0f else 1f,
+                                        targetValue = if (showFullBleed && canvasRendered) 0f else 1f,
                                         animationSpec = tween(350),
                                         label = "sleeveAlpha",
                                     )
@@ -2700,7 +2434,7 @@ private fun FullPlayer(
                                                         corner = 32.dp,
                                                         canvas = if (showSleeveCanvas) canvas else null,
                                                         isPlaying = state.isPlaying,
-                                                        pausedForTransition = shownDismissY > 0f,
+                                                        pausedForTransition = shownDismissY > 0f || currentTab != FullPlayerTab.NOW_PLAYING,
                                                         onAspectRatioChanged = { canvasAspect = it },
                                                     )
                                                 }
@@ -4034,40 +3768,23 @@ private fun PlayerArtwork(
     canvas: com.lastwave.app.data.canvas.CanvasArtwork? = null,
     isPlaying: Boolean = false,
     pausedForTransition: Boolean = false,
-    transformations: List<coil.transform.Transformation> = emptyList(),
     onAspectRatioChanged: (Float) -> Unit = {},
 ) {
-    // Same rule as the full-bleed hero: the canvas is the artwork, the static cover is
-    // only a loading / decode-error placeholder. The clip reports the alpha it is
-    // painting and the cover is exactly its complement, so one fade owns the swap and
-    // the pair always sums to full opacity. The clip is held for one crossfade past
-    // the point [canvas] goes null, so animated -> static fades instead of popping.
-    // With canvas == null this is exactly the old static-only behaviour.
-    val canvasMount = rememberRetiringCanvas(canvas)
-    var canvasFade by remember { mutableFloatStateOf(0f) }
-    val coverAlpha = if (canvasFade >= 0.95f) 0f else (1f - canvasFade).coerceIn(0f, 1f)
     Box(modifier.clip(RoundedCornerShape(corner)).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
-        if (coverAlpha > 0.001f) {
-            ArtworkImage(
-                name = track.title,
-                artist = track.artist,
-                embeddedUrl = track.artworkUrl,
-                fallbackIcon = Icons.Filled.MusicNote,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { alpha = coverAlpha },
-                decodeSizePx = decodeSizePx,
-                transformations = transformations,
-            )
-        }
-        canvasMount.value.value?.let { mountedCanvas ->
+        ArtworkImage(
+            name = track.title,
+            artist = track.artist,
+            embeddedUrl = track.artworkUrl,
+            fallbackIcon = Icons.Filled.MusicNote,
+            modifier = Modifier.fillMaxSize(),
+            decodeSizePx = decodeSizePx,
+        )
+        if (canvas != null) {
             CanvasArtworkPlayer(
-                canvas = mountedCanvas,
+                canvas = canvas,
                 isPlaying = isPlaying,
                 pausedForTransition = pausedForTransition,
                 onAspectRatioChanged = onAspectRatioChanged,
-                onCoverChanged = { canvasFade = it },
-                fadeOut = canvasMount.retiring.value,
                 contentMode = CanvasContentMode.CROP,
                 modifier = Modifier.fillMaxSize(),
             )

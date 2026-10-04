@@ -274,6 +274,7 @@ fun FluidArtworkBackground(
 
     val context = LocalContext.current
     val embeddedUrl = track.artworkUrl
+    val isReal = remember(embeddedUrl) { ArtworkNormalizer.isRealImage(embeddedUrl) }
     
     val key = remember(track.title, track.artist) { ArtworkNormalizer.cacheKey(track.title, track.artist) }
     val resolvedUrl by remember(key) {
@@ -281,13 +282,12 @@ fun FluidArtworkBackground(
     }.collectAsStateWithLifecycle(initialValue = artworkViewModel.resolved.value[key])
     
     LaunchedEffect(key) {
-        if (resolvedUrl == null) {
+        if (!isReal && resolvedUrl.isNullOrBlank()) {
             artworkViewModel.resolve(track.title, track.artist)
         }
     }
     
-    val artworkUrl = resolvedUrl?.takeIf { it.isNotBlank() }
-        ?: ArtworkNormalizer.upscaleYoutubeArtwork(embeddedUrl)
+    val artworkUrl = if (isReal) embeddedUrl else resolvedUrl
     
     var current by remember { mutableStateOf<Bitmap?>(null) }
     var previous by remember { mutableStateOf<Bitmap?>(null) }
@@ -323,13 +323,15 @@ fun FluidArtworkBackground(
     var seconds by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(Unit) {
         var last = 0L
+        var pending = 0f
         while (true) {
             withFrameNanos { now ->
-                if (last != 0L) {
-                    val dt = ((now - last) / 1_000_000_000f).coerceIn(0f, 0.05f)
-                    seconds += dt
-                }
+                if (last != 0L) pending += ((now - last) / 1_000_000_000f).coerceIn(0f, 0.1f)
                 last = now
+            }
+            if (pending >= FRAME_SECONDS) {
+                seconds += pending
+                pending = 0f
             }
         }
     }
@@ -355,6 +357,13 @@ fun FluidArtworkBackground(
                             }.getOrNull()
                         }
                     }
+                    .then(
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                            Modifier.blur(if (extraBlur) 240.dp else 120.dp)
+                        } else {
+                            Modifier
+                        }
+                    )
                     .drawBehind {
                         val cur = current ?: return@drawBehind
                         val prv = previous ?: cur
