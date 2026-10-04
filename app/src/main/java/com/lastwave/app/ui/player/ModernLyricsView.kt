@@ -128,9 +128,11 @@ fun ModernLyricsPanel(
 ) {
     val track = state.current ?: return
 
-    val progress by (progressState ?: player.progressState).collectAsStateWithLifecycle(
-        initialValue = PlaybackProgressState(positionMs = state.positionMs, durationMs = state.durationMs),
-    )
+    // High-frequency progress is collected ONLY in the leaf hosts below
+    // (lyrics list + controls). Collecting it here would recompose the whole
+    // panel incl. AnimatedContent + badge ~16x/sec. Other players isolate it.
+    val progressFlow = progressState ?: player.progressState
+    val progressInitial = PlaybackProgressState(positionMs = state.positionMs, durationMs = state.durationMs)
 
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -262,14 +264,15 @@ fun ModernLyricsPanel(
                                         )
                                     }
                                 }
-                                KaraokeLineWrapScope(
+                                SyncedLyricsProgressHost(
                                     lines = targetState.lines,
                                     isOverallRtl = isOverallRtl,
                                     trackTitle = track.title,
                                     trackArtist = track.artist,
                                     normalStyle = karaokeNormalStyle,
                                     accompanimentStyle = karaokeAccompanimentStyle,
-                                    currentPosition = { (progress.positionMs + lyricsOffsetMs).toInt() },
+                                    progressFlow = progressFlow,
+                                    progressInitial = progressInitial,
                                     player = player,
                                     lyricsOffsetMs = lyricsOffsetMs,
                                     modifier = Modifier
@@ -298,10 +301,10 @@ fun ModernLyricsPanel(
             }
         }
 
-        ModernLyricsControls(
+        ModernLyricsControlsHost(
             state = state,
-            currentPositionMs = progress.positionMs,
-            totalDurationMs = if (progress.durationMs > 0) progress.durationMs else state.durationMs,
+            progressFlow = progressFlow,
+            progressInitial = progressInitial,
             player = player,
             wavySeekbarEnabled = wavySeekbarEnabled,
             onToggleFullscreen = onToggleFullscreen,
@@ -640,6 +643,90 @@ private fun ModernEmptyLyricsView(
             }
         }
     }
+}
+
+/**
+ * Leaf host: collects 60ms progress ONLY for the karaoke list, so badge +
+ * AnimatedContent above never recompose on ticks. Throttles downstream reads
+ * to ~8Hz (lyric lines change on seconds, syllables >=50ms) to halve canvas
+ * work without visible step. Static when paused (no-op).
+ */
+@Composable
+private fun SyncedLyricsProgressHost(
+    lines: List<com.lastwave.app.data.lyrics.LyricLine>,
+    isOverallRtl: Boolean,
+    trackTitle: String,
+    trackArtist: String,
+    normalStyle: TextStyle,
+    accompanimentStyle: TextStyle,
+    progressFlow: StateFlow<PlaybackProgressState>,
+    progressInitial: PlaybackProgressState,
+    player: MusicPlayer,
+    lyricsOffsetMs: Long = 0L,
+    modifier: Modifier = Modifier,
+) {
+    val progress by progressFlow.collectAsStateWithLifecycle(initialValue = progressInitial)
+    // Sample to ~120ms: progress ticks at 60ms, karaoke fill steps below that
+    // are invisible but cost a full list recomposition each. Lambda is
+    // remembered on the quantized value so downstream skips ticks entirely.
+    val sampledMs = (progress.positionMs / 120L) * 120L
+    val currentPosition = remember(sampledMs, lyricsOffsetMs) {
+        { (sampledMs + lyricsOffsetMs).toInt() }
+    }
+    KaraokeLineWrapScope(
+        lines = lines,
+        isOverallRtl = isOverallRtl,
+        trackTitle = trackTitle,
+        trackArtist = trackArtist,
+        normalStyle = normalStyle,
+        accompanimentStyle = accompanimentStyle,
+        currentPosition = currentPosition,
+        player = player,
+        lyricsOffsetMs = lyricsOffsetMs,
+        modifier = modifier,
+    )
+}
+
+/**
+ * Leaf host for transport controls: owns the 60ms seekbar clock so the panel
+ * above stays static. No behavior change, strictly fewer recompositions.
+ */
+@Composable
+private fun ModernLyricsControlsHost(
+    state: MusicPlayerState,
+    progressFlow: StateFlow<PlaybackProgressState>,
+    progressInitial: PlaybackProgressState,
+    player: MusicPlayer,
+    wavySeekbarEnabled: Boolean = true,
+    onToggleFullscreen: (() -> Unit)? = null,
+    isFullscreen: Boolean = false,
+    lyricsOffsetMs: Long = 0L,
+    onOpenLyricsOffset: (() -> Unit)? = null,
+    lyricsFontScale: Float = 1f,
+    onLyricsFontScaleChange: (Float) -> Unit = {},
+    primaryColor: Color = MaterialTheme.colorScheme.primary,
+    secondaryColor: Color = MaterialTheme.colorScheme.secondary,
+    tertiaryColor: Color = MaterialTheme.colorScheme.tertiary,
+    modifier: Modifier = Modifier,
+) {
+    val progress by progressFlow.collectAsStateWithLifecycle(initialValue = progressInitial)
+    ModernLyricsControls(
+        state = state,
+        currentPositionMs = progress.positionMs,
+        totalDurationMs = if (progress.durationMs > 0) progress.durationMs else state.durationMs,
+        player = player,
+        wavySeekbarEnabled = wavySeekbarEnabled,
+        onToggleFullscreen = onToggleFullscreen,
+        isFullscreen = isFullscreen,
+        lyricsOffsetMs = lyricsOffsetMs,
+        onOpenLyricsOffset = onOpenLyricsOffset,
+        lyricsFontScale = lyricsFontScale,
+        onLyricsFontScaleChange = onLyricsFontScaleChange,
+        primaryColor = primaryColor,
+        secondaryColor = secondaryColor,
+        tertiaryColor = tertiaryColor,
+        modifier = modifier,
+    )
 }
 
 @Composable

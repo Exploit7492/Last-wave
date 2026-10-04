@@ -159,6 +159,10 @@ class LosslessMusicApi @Inject constructor(
 
         private val MANIFEST_CODECS = Regex("""codecs="([^"]+)"""")
         private val MANIFEST_SAMPLE_RATE = Regex("""audioSamplingRate="(\d+)"""", RegexOption.IGNORE_CASE)
+        // Tidal rendition id carries ground truth: id="FLAC_HIRES,48000,24".
+        // Parsed when present so a missing/slow probe or stale catalogue tier
+        // can never downgrade a real 24-bit rendition to a fabricated 16.
+        private val MANIFEST_RENDITION = Regex("""Representation[^>]*id="[^"]*,(\d+),(\d+)"""", RegexOption.IGNORE_CASE)
 
         /**
          * True when DASH manifest XML carries E-AC-3 / Dolby Atmos (or JOC).
@@ -205,6 +209,20 @@ class LosslessMusicApi @Inject constructor(
             } else null
             if (xml.isNullOrBlank()) return null
             return MANIFEST_SAMPLE_RATE.find(xml)?.groupValues?.getOrNull(1)?.toIntOrNull()?.takeIf { it > 0 }
+        }
+
+        /** Depth from the rendition id (`FLAC_HIRES,48000,24` -> 24). Null when unreadable. */
+        fun manifestBitDepthOf(dataUrl: String): Int? {
+            val b64 = dataUrl.substringAfter("base64,", "").trim()
+            val xml = if (b64.isNotEmpty() && dataUrl.startsWith("data:application/dash+xml")) {
+                runCatching {
+                    String(android.util.Base64.decode(b64, android.util.Base64.DEFAULT), Charsets.UTF_8)
+                }.getOrNull()
+            } else if (dataUrl.trimStart().startsWith("<")) {
+                dataUrl
+            } else null
+            if (xml.isNullOrBlank()) return null
+            return MANIFEST_RENDITION.find(xml)?.groupValues?.getOrNull(2)?.toIntOrNull()?.takeIf { it in 8..32 }
         }
 
         /** True for E-AC-3 spatial codec labels. Pure; safe to unit-test on JVM. */
@@ -503,7 +521,11 @@ class LosslessMusicApi @Inject constructor(
 
         val qualitiesToTry = if (isAtmosPreferred) listOf("atmos", "lossless", "hi_res", "high") else listOf(qualityParam, "lossless", "high")
         for (q in qualitiesToTry) {
-            val wantAtmos = q == "atmos" || isAtmosPreferred
+            // Each tier declares its own intent: only the immersive tier
+            // asks for the spatial mix, later tiers ask for stereo so a
+            // missing/unplayable spatial mix still resolves to stereo
+            // instead of failing the whole waterfall.
+            val wantAtmos = q == "atmos"
             val targetCandidates = if (wantAtmos) {
                 val atmosMatches = ordered.filter { it.isAtmos || it.isSpatial }
                 if (atmosMatches.isNotEmpty()) atmosMatches else ordered
@@ -553,6 +575,7 @@ class LosslessMusicApi @Inject constructor(
                     continue
                 }
                 val manifestSampleRate = manifestSampleRateOf(rawUrl)
+                val manifestDepth = manifestBitDepthOf(rawUrl)
                 val rawSampleRate = if (stream.sampleRate > 1000) stream.sampleRate else stream.sampleRate * 1000.0
                 val effectiveSampleRate = manifestSampleRate?.toDouble() ?: rawSampleRate
                 val isHiResFlagged = candidate.isHiResFlagged() ||
@@ -564,19 +587,20 @@ class LosslessMusicApi @Inject constructor(
                     stream.quality.contains("24BIT", ignoreCase = true) ||
                     stream.quality.contains("24/") ||
                     stream.bitDepth == 24 ||
+                    (manifestDepth ?: 0) >= 24 ||
                     (wantsHiRes && q == "hi_res") ||
                     effectiveSampleRate > 48000.0
-                // Depth the addon actually reported in metadata/stream/candidate
-                val reportedDepth = stream.bitDepth?.takeIf { it > 0 } ?: candidate.bitDepth?.takeIf { it > 0 }
+                // Depth precedence: manifest rendition id (ground truth for
+                // these bytes) > addon numbers > hi-res inference. 0 stays
+                // unknown — never fabricate 16 for an unmeasured depth.
+                val reportedDepth = manifestDepth
+                    ?: stream.bitDepth?.takeIf { it > 0 }
+                    ?: candidate.bitDepth?.takeIf { it > 0 }
                 val effectiveBitDepth = when {
                     (reportedDepth ?: 0) > 0 -> reportedDepth
                     effectiveSampleRate > 192000.0 -> 32
                     isHiResFlagged -> 24
-                    stream.codec.equals("flac", ignoreCase = true) ||
-                        candidate.audioQuality.contains("LOSSLESS", ignoreCase = true) ||
-                        stream.quality.contains("LOSSLESS", ignoreCase = true) ||
-                        stream.audioQuality.contains("LOSSLESS", ignoreCase = true) -> 16
-                    else -> reportedDepth ?: 16
+                    else -> null
                 }
                 val formatId = when {
                     isStreamAtmos -> QUALITY_DOLBY_ATMOS
@@ -607,7 +631,7 @@ class LosslessMusicApi @Inject constructor(
                 return LosslessAudioStream(
                     url = rawUrl,
                     mimeType = "application/dash+xml",
-                    bitDepth = effectiveBitDepth ?: (if (isHiResFlagged || effectiveSampleRate > 48000.0) 24 else 16),
+                    bitDepth = effectiveBitDepth ?: (if (isHiResFlagged || effectiveSampleRate > 48000.0) 24 else 0),
                     samplingRate = effectiveSampleRate / 1000.0,
                     formatId = formatId,
                     bitrateKbps = stream.bitrate?.let { if (it > 10_000) it / 1000 else it },

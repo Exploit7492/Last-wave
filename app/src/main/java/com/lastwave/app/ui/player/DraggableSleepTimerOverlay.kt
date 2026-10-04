@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -40,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -54,6 +56,7 @@ import kotlin.math.roundToInt
 fun DraggableSleepTimerOverlay(
     sleepTimerRemainingMs: Long?,
     onCycleTimer: () -> Unit,
+    onCloseTimer: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     AnimatedVisibility(
@@ -93,6 +96,21 @@ fun DraggableSleepTimerOverlay(
             var offsetY by remember { mutableFloatStateOf(screenHeightPx / 2f) }
             var isDragging by remember { mutableStateOf(false) }
             var dragDistance by remember { mutableFloatStateOf(0f) }
+            var hoveringClose by remember { mutableStateOf(false) }
+
+            // Drag-to-close target: bottom-center above mini-player/nav.
+            // Shown only while dragging; dropping the pill on it cancels timer.
+            val closeSizeDp = 64.dp
+            val closeSizePx = with(density) { closeSizeDp.toPx() }
+            val closeCenterX = screenWidthPx / 2f
+            val closeCenterY = (screenHeightPx - with(density) { 190.dp.toPx() })
+                .coerceIn(minMarginY, (screenHeightPx - closeSizePx / 2f).coerceAtLeast(minMarginY))
+            val closeHitRadiusPx = with(density) { 72.dp.toPx() }
+            val closeScale by animateFloatAsState(
+                targetValue = if (hoveringClose) 1.18f else 1f,
+                animationSpec = tween(150),
+                label = "sleepTimerCloseScale",
+            )
 
             // Track max duration for smooth circular remaining-time indicator
             var maxDurationMs by remember { mutableLongStateOf(remainingMs.coerceAtLeast(1L)) }
@@ -120,19 +138,32 @@ fun DraggableSleepTimerOverlay(
                             },
                             onDragEnd = {
                                 isDragging = false
-                                if (dragDistance < 15f) {
+                                if (hoveringClose) {
+                                    hoveringClose = false
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onCloseTimer()
+                                } else if (dragDistance < 15f) {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     onCycleTimer()
                                 }
                             },
                             onDragCancel = {
                                 isDragging = false
+                                hoveringClose = false
                             },
                             onDrag = { change, dragAmount ->
                                 change.consume()
                                 dragDistance += kotlin.math.hypot(dragAmount.x, dragAmount.y)
                                 offsetX = (offsetX + dragAmount.x).coerceIn(minMarginX, maxMarginX)
                                 offsetY = (offsetY + dragAmount.y).coerceIn(minMarginY, maxMarginY)
+                                val pillCx = offsetX + diameterPx / 2f
+                                val pillCy = offsetY + diameterPx / 2f
+                                val dist = kotlin.math.hypot(pillCx - closeCenterX, pillCy - closeCenterY)
+                                val hovering = dist <= closeHitRadiusPx
+                                if (hovering && !hoveringClose) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
+                                hoveringClose = hovering
                             },
                         )
                     },
@@ -190,6 +221,59 @@ fun DraggableSleepTimerOverlay(
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 softWrap = false,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Drag-to-close target: appears only while dragging.
+            // Drop the pill here to cancel the sleep timer.
+            AnimatedVisibility(
+                visible = isDragging,
+                enter = fadeIn(tween(180)) + scaleIn(tween(180)),
+                exit = fadeOut(tween(180)) + scaleOut(tween(180)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .offset {
+                            IntOffset(
+                                (closeCenterX - closeSizePx / 2f).roundToInt(),
+                                (closeCenterY - closeSizePx / 2f).roundToInt(),
+                            )
+                        }
+                        .size(closeSizeDp)
+                        .graphicsLayer {
+                            scaleX = closeScale
+                            scaleY = closeScale
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = if (hoveringClose) MaterialTheme.colorScheme.errorContainer
+                        else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.95f),
+                        shadowElevation = if (hoveringClose) 12.dp else 6.dp,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                            .border(
+                                width = if (hoveringClose) 2.dp else 1.dp,
+                                color = if (hoveringClose) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                shape = CircleShape,
+                            ),
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "Cancel sleep timer",
+                                tint = if (hoveringClose) MaterialTheme.colorScheme.onErrorContainer
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(26.dp),
                             )
                         }
                     }
