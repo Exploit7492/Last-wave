@@ -184,6 +184,7 @@ internal fun parseQualityFromCodec(codec: String?): String? {
     val c = codec.orEmpty()
     if (c.isBlank()) return null
     val match = Regex("""(?:^|[^\d])(16|24|32)\s*(?:[-_]bit)?\s*[/]\s*(\d{2,6}(?:\.\d+)?)\s*k?""", RegexOption.IGNORE_CASE).find(c)
+        ?: Regex("""(?:^|[^\d])(16|24|32)\s*[-_]bit\s*(?:[/,\s])\s*(\d{2,6}(?:\.\d+)?)\s*(?:k|khz)?""", RegexOption.IGNORE_CASE).find(c)
     if (match != null) {
         // Trust an explicit "depth/rate" label verbatim: a parsed 16/96 is
         // a real (if unusual) combination, never to be "corrected" to 24.
