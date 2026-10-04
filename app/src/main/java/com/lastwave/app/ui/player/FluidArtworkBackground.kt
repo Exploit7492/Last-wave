@@ -1,5 +1,6 @@
 package com.lastwave.app.ui.player
 
+import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
@@ -23,7 +24,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asComposeRenderEffect
@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -185,9 +186,10 @@ private const val FRAME_SECONDS = 1f / 30f
 
 private val textureCache = LinkedHashMap<String, Bitmap>()
 
-private suspend fun loadTexture(context: Context, url: String): Bitmap? = withContext(Dispatchers.IO) {
+private suspend fun loadTexture(context: Context, url: String, preBlur: Boolean = false): Bitmap? = withContext(Dispatchers.IO) {
+    val cacheKey = if (preBlur) "$url-preblurred" else url
     synchronized(textureCache) {
-        textureCache.remove(url)?.also { textureCache[url] = it }
+        textureCache.remove(cacheKey)?.also { textureCache[cacheKey] = it }
     }?.let { return@withContext it }
 
     val request = ImageRequest.Builder(context)
@@ -197,10 +199,14 @@ private suspend fun loadTexture(context: Context, url: String): Bitmap? = withCo
         .build()
     val loader = ImageLoader(context)
     val result = runCatching { loader.execute(request) }.getOrNull()
-    val bitmap = ((result as? SuccessResult)?.drawable as? BitmapDrawable)?.bitmap ?: return@withContext null
+    var bitmap = ((result as? SuccessResult)?.drawable as? BitmapDrawable)?.bitmap ?: return@withContext null
+
+    if (preBlur) {
+        bitmap = FastBlur.blurArtwork(bitmap, radius = 18, maxDimension = 64)
+    }
 
     synchronized(textureCache) {
-        textureCache[url] = bitmap
+        textureCache[cacheKey] = bitmap
         while (textureCache.size > TEXTURE_CACHE) {
             textureCache.remove(textureCache.keys.first())
         }
@@ -256,6 +262,36 @@ private class AgslFluidRenderer {
     }
 }
 
+/**
+ * Checks whether this device can render the fluid background.
+ * Requires:
+ *  - Android 12+ (API >= 31) because RenderEffect and AGSL (API 33+) are unsupported on API <= 30
+ *    (where Modifier.blur() is an explicit no-op in Jetpack Compose).
+ *  - Hardware acceleration enabled on the current View.
+ *  - Not a low-RAM device where background blurs are unsupported or disabled by the OS/GPU.
+ */
+@Composable
+fun isFluidSupported(): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        return false
+    }
+
+    val context = LocalContext.current
+    val view = LocalView.current
+
+    if (view.isInEditMode) return false
+    if (!view.isHardwareAccelerated) return false
+
+    val activityManager = remember(context) {
+        runCatching { context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager }.getOrNull()
+    }
+    if (activityManager?.isLowRamDevice == true) {
+        return false
+    }
+
+    return true
+}
+
 @Composable
 fun FluidArtworkBackground(
     track: PlayableTrack,
@@ -265,7 +301,8 @@ fun FluidArtworkBackground(
     artworkViewModel: ArtworkViewModel = hiltViewModel(),
     fallback: @Composable () -> Unit,
 ) {
-    if (!rotatingBackgroundEnabled) {
+    val fluidSupported = isFluidSupported()
+    if (!rotatingBackgroundEnabled || !fluidSupported) {
         Box(modifier) {
             fallback()
         }
@@ -303,9 +340,9 @@ fun FluidArtworkBackground(
         }
     }
 
-    LaunchedEffect(artworkUrl) {
+    LaunchedEffect(artworkUrl, agslRenderer == null) {
         val url = artworkUrl?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
-        val bitmap = loadTexture(context, url) ?: return@LaunchedEffect
+        val bitmap = loadTexture(context, url, preBlur = (agslRenderer == null)) ?: return@LaunchedEffect
         val showing = current
         current = bitmap
         if (showing != null && showing !== bitmap) {
@@ -357,13 +394,6 @@ fun FluidArtworkBackground(
                             }.getOrNull()
                         }
                     }
-                    .then(
-                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-                            Modifier.blur(if (extraBlur) 240.dp else 120.dp)
-                        } else {
-                            Modifier
-                        }
-                    )
                     .drawBehind {
                         val cur = current ?: return@drawBehind
                         val prv = previous ?: cur
