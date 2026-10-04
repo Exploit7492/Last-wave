@@ -1214,14 +1214,16 @@ class MusicPlayer @Inject constructor(
                                         ((sourceDepth ?: 0) > 16 || rateHz > 48_000) -> "HI-RES FLAC"
                                     else -> detectedCodec
                                 }
-                                val finalCodec = if (currentIsExplicit && updated.audioCodec != "FLAC" && updated.audioCodec != "HI-RES FLAC" && updated.audioCodec != "LOSSLESS") {
+                                val finalCodec = if (detectedCodec == "FLAC") {
+                                    detectedBadge
+                                } else if (currentIsExplicit && updated.audioCodec != "FLAC" && updated.audioCodec != "HI-RES FLAC" && updated.audioCodec != "LOSSLESS") {
                                     updated.audioCodec
                                 } else {
                                     detectedBadge
                                 }
                                 updated = updated.copy(
                                     audioCodec = finalCodec,
-                                    bitrateKbps = updated.bitrateKbps ?: bitrate ?: if (detectedCodec == "OPUS") 160 else null,
+                                    bitrateKbps = if (detectedCodec == "FLAC") (updated.bitrateKbps ?: bitrate) else (updated.bitrateKbps ?: bitrate ?: if (detectedCodec == "OPUS") 160 else null),
                                     isLossless = detectedCodec == "FLAC",
                                 )
                             }
@@ -5388,33 +5390,19 @@ class MusicPlayer @Inject constructor(
                 android.util.Log.i("MusicPlayer", "[PLAYBACK] local-download hit for '${track.title}' key=${localStream.cacheKey}")
                 localStream
             } else {
-                val isDolbyPreferred = misc.dolbyAtmosEnabled || misc.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS
-                val losslessTimeoutMs = if (isDolbyPreferred) {
-                    if (!videoId.isNullOrBlank()) 10_000L else 12_000L
-                } else {
-                    if (!videoId.isNullOrBlank()) 3_500L else 4_500L
-                }
-                val losslessBudgetMs = (losslessTimeoutMs - (SystemClock.elapsedRealtime() - forkStart)).coerceAtLeast(0L)
-                // Unbounded skips the deadline entirely rather than passing
-                // Long.MAX_VALUE to withTimeoutOrNull, whose deadline
-                // computation would overflow.
                 val losslessStream: ResolvedStream? = if (losslessDeferred.isCompleted) {
                     runCatching { losslessDeferred.await() }.getOrNull()
                 } else if (losslessBudget == LosslessBudget.Unbounded) {
                     runCatching { losslessDeferred.await() }.getOrNull()
-                } else if (losslessBudgetMs <= 0L) {
-                    null
                 } else {
-                    withTimeoutOrNull(losslessBudgetMs) {
-                        runCatching { losslessDeferred.await() }.getOrNull()
-                    }
+                    null
                 }
 
                 if (losslessStream != null) {
                     youtubeDeferred.cancel()
                     android.util.Log.i(
                         "MusicPlayer",
-                        "[PLAYBACK] Lossless stream resolved for '${track.title}' (${SystemClock.elapsedRealtime() - forkStart}ms); locking playback pipeline to ${losslessStream.audioCodec}",
+                        "[PLAYBACK] Lossless stream resolved for '${track.title}' (${SystemClock.elapsedRealtime() - forkStart}ms); playing ${losslessStream.audioCodec}",
                     )
                     losslessStream
                 } else {
@@ -5427,7 +5415,7 @@ class MusicPlayer @Inject constructor(
                         ?: resolveYoutubeTrackAudioStream(track, null)
                     android.util.Log.i(
                         "MusicPlayer",
-                        "[PLAYBACK] YouTube stream resolved for '${track.title}' (${SystemClock.elapsedRealtime() - forkStart}ms); locking playback pipeline to ${ytStream.audioCodec}",
+                        "[PLAYBACK] YouTube stream resolved for '${track.title}' (${SystemClock.elapsedRealtime() - forkStart}ms); playing ${ytStream.audioCodec}, background lossless upgrade pending",
                     )
                     ytStream
                 }
@@ -5867,8 +5855,6 @@ class MusicPlayer @Inject constructor(
                 currentCoroutineContext().ensureActive()
                 if (generation != playRequestGeneration.get()) return@launch
 
-                // Lock the playback pipeline to the source track's format throughout this session.
-                // Upgrades are registered and cached for future playback without interrupting active playback.
                 val knownDur = upgraded.durationMs
                     ?: track.durationMs
                     ?: findKnownDuration(track)
@@ -5880,14 +5866,195 @@ class MusicPlayer @Inject constructor(
                 registerPreparedStream(upgraded)
                 cacheCurrentTrackStream(upgraded)
                 logStreamEvent("stream-upgrade-cached", upgraded, retry = 0)
-                android.util.Log.i(
-                    "MusicPlayer",
-                    "[STREAM UPGRADE] Cached upgraded stream for '${track.title}' (${upgraded.audioCodec}) for future playback without interrupting active session",
+
+                // Check whether the active track is still playing and eligible for swap
+                val currentPos = withContext(Dispatchers.Main.immediate) {
+                    if (!playerDelegate.isInitialized()) return@withContext -1L
+                    if (generation != playRequestGeneration.get()) return@withContext -1L
+                    val currentIndex = player.currentMediaItemIndex
+                    if (currentIndex !in 0 until player.mediaItemCount) return@withContext -1L
+                    val currentItem = player.getMediaItemAt(currentIndex)
+                    if (currentItem.mediaId != expectedMediaId && currentItem.mediaId != track.mediaIdKey()) return@withContext -1L
+
+                    val dur = player.duration
+                    val pos = player.currentPosition
+                    if (dur > 0L && pos > dur - 12_000L) {
+                        android.util.Log.d("MusicPlayer", "[STREAM UPGRADE] Near end of track (${pos}/${dur}ms), omitting swap")
+                        return@withContext -1L
+                    }
+                    if (outgoingPlayer != null || crossfadeStandbyPreparing || crossfadeStandbyArmed) {
+                        android.util.Log.d("MusicPlayer", "[STREAM UPGRADE] Crossfade in flight, omitting swap")
+                        return@withContext -1L
+                    }
+                    pos
+                }
+                if (currentPos < 0L) return@launch
+
+                // Pre-audition on silent background player before touching active playback
+                val auditionSuccess = auditionStream(
+                    track = track,
+                    upgraded = upgraded,
+                    targetPositionMs = currentPos,
+                    expectedDurationMs = knownDur,
                 )
+                if (!auditionSuccess) {
+                    android.util.Log.w("MusicPlayer", "[STREAM UPGRADE] Audition failed or timed out for '${track.title}'; retaining active stream without interruption")
+                    return@launch
+                }
+
+                currentCoroutineContext().ensureActive()
+                if (generation != playRequestGeneration.get()) return@launch
+
+                // Perform seamless swap on Main thread with cached bytes ready
+                withContext(Dispatchers.Main.immediate) {
+                    if (generation != playRequestGeneration.get()) return@withContext
+                    if (!playerDelegate.isInitialized()) return@withContext
+                    val currentIndex = player.currentMediaItemIndex
+                    if (currentIndex !in 0 until player.mediaItemCount) return@withContext
+                    val currentItem = player.getMediaItemAt(currentIndex)
+                    if (currentItem.mediaId != expectedMediaId && currentItem.mediaId != track.mediaIdKey()) return@withContext
+
+                    val dur = player.duration
+                    val swapPos = player.currentPosition
+                    if (dur > 0L && swapPos > dur - 10_000L) {
+                        android.util.Log.d("MusicPlayer", "[STREAM UPGRADE] Near end of track (${swapPos}/${dur}ms), omitting swap")
+                        return@withContext
+                    }
+                    if (outgoingPlayer != null || crossfadeStandbyPreparing || crossfadeStandbyArmed) {
+                        android.util.Log.d("MusicPlayer", "[STREAM UPGRADE] Crossfade in flight, omitting swap")
+                        return@withContext
+                    }
+
+                    val playWhenReady = player.playWhenReady
+                    val updatedMediaItem = track.toMediaItem(upgraded)
+
+                    replaceMediaItemPreservingShuffle(currentIndex, updatedMediaItem)
+                    lastSeekTargetMs = swapPos
+                    lastSeekAtElapsedMs = SystemClock.elapsedRealtime()
+                    player.seekTo(currentIndex, swapPos)
+                    player.prepare()
+                    if (playWhenReady) {
+                        player.play()
+                    }
+
+                    // Update quality pill and signal path quality teller immediately
+                    publishResolvedQuality(upgraded, expectedMediaId = track.mediaIdKey())
+                    applyDacRoutingFor(dacRateFor(upgraded), upgraded.audioCodec)
+                    updateBitPerfectState()
+
+                    logStreamEvent("stream-upgrade-swapped", upgraded, retry = 0)
+                    android.util.Log.i(
+                        "MusicPlayer",
+                        "[STREAM UPGRADE] Seamlessly hot-swapped '${track.title}' to ${upgraded.audioCodec} (${upgraded.bitrateKbps}kbps, ${upgraded.samplingRateKHz}kHz) at ${swapPos}ms",
+                    )
+                }
             } catch (_: CancellationException) {
             } catch (e: Throwable) {
                 android.util.Log.w("MusicPlayer", "[STREAM UPGRADE] Exception upgrading '${track.title}': ${e.message}")
             }
+        }
+    }
+
+    private suspend fun auditionStream(
+        track: PlayableTrack,
+        upgraded: ResolvedStream,
+        targetPositionMs: Long,
+        expectedDurationMs: Long?,
+    ): Boolean = withContext(Dispatchers.Main) {
+        var auditionPlayer: ExoPlayer? = null
+        try {
+            val resolvingFactory = ResolvingDataSource.Factory(cacheDataSourceFactory) { dataSpec ->
+                val stream = dataSpec.key?.let(preparedStreams::get)
+                    ?: preparedStreams.values.firstOrNull { it.url == dataSpec.uri.toString() }
+                if (stream != null) {
+                    dataSpec.buildUpon()
+                        .setKey(stream.cacheKey)
+                        .build()
+                        .withRequestHeaders(stream.requestHeaders)
+                } else {
+                    dataSpec
+                }
+            }
+            val renderersFactory = DefaultRenderersFactory(appContext).apply {
+                setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+                setEnableDecoderFallback(true)
+            }
+            val loadControl = DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                    /* minBufferMs = */ 15_000,
+                    /* maxBufferMs = */ 15_000,
+                    /* bufferForPlaybackMs = */ 1_500,
+                    /* bufferForPlaybackAfterRebufferMs = */ 1_500,
+                )
+                .build()
+
+            auditionPlayer = ExoPlayer.Builder(appContext, renderersFactory)
+                .setMediaSourceFactory(DefaultMediaSourceFactory(appContext).setDataSourceFactory(resolvingFactory))
+                .setLoadControl(loadControl)
+                .build().apply {
+                    playWhenReady = false
+                    volume = 0f
+                }
+
+            val testItem = track.toMediaItem(upgraded)
+            auditionPlayer.setMediaItem(testItem)
+            if (targetPositionMs > 0L) {
+                auditionPlayer.seekTo(targetPositionMs)
+            }
+            auditionPlayer.prepare()
+
+            val isReady = withTimeoutOrNull(10_000L) {
+                while (isActive) {
+                    if (auditionPlayer.playerError != null) {
+                        android.util.Log.w(
+                            "MusicPlayer",
+                            "[STREAM AUDITION] Stream failed: ${auditionPlayer.playerError?.errorCodeName}",
+                        )
+                        return@withTimeoutOrNull false
+                    }
+                    if (auditionPlayer.playbackState == Player.STATE_ENDED) {
+                        android.util.Log.w(
+                            "MusicPlayer",
+                            "[STREAM AUDITION] Stream ended prematurely",
+                        )
+                        return@withTimeoutOrNull false
+                    }
+                    if (auditionPlayer.playbackState == Player.STATE_READY) {
+                        val candidateDur = auditionPlayer.duration
+                        if (expectedDurationMs != null && expectedDurationMs > 0L && candidateDur > 0L) {
+                            if (kotlin.math.abs(candidateDur - expectedDurationMs) > 12_000L) {
+                                android.util.Log.w(
+                                    "MusicPlayer",
+                                    "[STREAM AUDITION] Duration mismatch: expected ${expectedDurationMs}ms vs candidate ${candidateDur}ms",
+                                )
+                                return@withTimeoutOrNull false
+                            }
+                        }
+                        val currentLivePos = if (playerDelegate.isInitialized()) player.currentPosition else targetPositionMs
+                        val neededBuffer = currentLivePos + 4_000L
+                        if (auditionPlayer.bufferedPosition >= neededBuffer || auditionPlayer.bufferedPercentage >= 100) {
+                            android.util.Log.i(
+                                "MusicPlayer",
+                                "[STREAM AUDITION] Stream audition successful! Buffered through ${auditionPlayer.bufferedPosition}ms",
+                            )
+                            return@withTimeoutOrNull true
+                        }
+                    }
+                    delay(150L)
+                }
+                false
+            } ?: false
+
+            isReady
+        } catch (e: Throwable) {
+            android.util.Log.w("MusicPlayer", "[STREAM AUDITION] Exception during audition: ${e.message}")
+            false
+        } finally {
+            auditionPlayer?.let { p ->
+                runCatching { p.release() }
+            }
+            // Grace period for Media3 cache locks to release before main player accesses the cache
+            delay(150L)
         }
     }
 
