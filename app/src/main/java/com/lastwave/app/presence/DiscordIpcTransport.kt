@@ -158,7 +158,7 @@ class DiscordIpcTransport private constructor(
             // Prefer query (returns ServiceInfo with the concrete class) so the
             // subsequent bind can be explicit.
             val queried = if (Build.VERSION.SDK_INT >= 33) {
-                pm.queryIntentServices(intent, PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_ALL))
+                pm.queryIntentServices(intent, PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_ALL.toLong()))
             } else {
                 @Suppress("DEPRECATION")
                 pm.queryIntentServices(intent, PackageManager.MATCH_ALL)
@@ -167,7 +167,7 @@ class DiscordIpcTransport private constructor(
                 return ComponentName(it.packageName, it.name)
             }
             val resolved = if (Build.VERSION.SDK_INT >= 33) {
-                pm.resolveService(intent, PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_ALL))
+                pm.resolveService(intent, PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_ALL.toLong()))
             } else {
                 @Suppress("DEPRECATION")
                 pm.resolveService(intent, PackageManager.MATCH_ALL)
