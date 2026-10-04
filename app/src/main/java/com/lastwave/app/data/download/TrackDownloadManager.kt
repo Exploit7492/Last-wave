@@ -2515,19 +2515,20 @@ class TrackDownloadManager @Inject constructor(
      * (video-passthrough silicon) cannot render an Atmos music stream.
      */
     private fun isAtmosCapableDevice(): Boolean = runCatching {
-        val jocDecoder = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.any { info ->
+        val dolbyDecoder = MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos.any { info ->
             !info.isEncoder && info.supportedTypes.any { type ->
-                type.equals("audio/eac3-joc", ignoreCase = true)
+                type.equals("audio/eac3-joc", ignoreCase = true) ||
+                    type.equals("audio/eac3", ignoreCase = true) ||
+                    type.equals("audio/ac3", ignoreCase = true)
             }
         }
-        if (!jocDecoder) return@runCatching false
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S_V2) {
             val am = context.getSystemService(AudioManager::class.java) ?: return@runCatching true
             val spatializer = am.spatializer
             if (spatializer.isAvailable || spatializer.isEnabled) return@runCatching true
         }
-        jocDecoder
-    }.getOrDefault(false)
+        dolbyDecoder
+    }.getOrDefault(true)
 
     private fun updateProgress(progress: DownloadProgress) {
         _downloads.update { it + (progress.key to progress) }

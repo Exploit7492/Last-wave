@@ -489,27 +489,29 @@ class LosslessMusicApi @Inject constructor(
         // order kept within each group). A CD-only master otherwise scores
         // identically to the 24-bit master and backend order wins the coin
         // flip, parking playback at 16-bit forever.
-        val wantsHiRes = (qualityParam == "hi_res" || isAtmosPreferred)
-        val ordered = if (wantsHiRes) {
+        val wantsHiRes = qualityParam == "hi_res" && !isAtmosPreferred
+        val ordered = if (isAtmosPreferred) {
+            candidates.sortedWith(compareByDescending<TidalCandidateItem> { it.isAtmos || it.isSpatial })
+        } else if (wantsHiRes) {
             candidates.sortedWith(compareByDescending<TidalCandidateItem> { it.isHiResFlagged() })
         } else {
             candidates
         }
 
-        val qualitiesToTry = if (isAtmosPreferred) listOf("atmos", "hi_res", "lossless", "high") else listOf(qualityParam, "lossless", "high")
+        val qualitiesToTry = if (isAtmosPreferred) listOf("atmos", "lossless", "hi_res", "high") else listOf(qualityParam, "lossless", "high")
         for (q in qualitiesToTry) {
-            val wantAtmos = q == "atmos"
+            val wantAtmos = q == "atmos" || isAtmosPreferred
             val targetCandidates = if (wantAtmos) {
                 val atmosMatches = ordered.filter { it.isAtmos || it.isSpatial }
-                if (atmosMatches.isNotEmpty()) atmosMatches else listOf(ordered.first())
+                if (atmosMatches.isNotEmpty()) atmosMatches else ordered
             } else {
                 val stereoMatches = ordered.filter { !it.isAtmos && !it.isSpatial }
                 if (stereoMatches.isNotEmpty()) stereoMatches else ordered
             }
 
-            // Hi-res tier scans wider: a silently-downgraded 16-bit answer
+            // Hi-res / Atmos tiers scan wider: a silently-downgraded answer
             // below must not consume the attempt budget for the whole tier.
-            val tierBudget = if (wantsHiRes && q == "hi_res") 4 else 2
+            val tierBudget = if (wantAtmos) 3 else if (wantsHiRes && q == "hi_res") 4 else 2
             for (candidate in targetCandidates.take(tierBudget)) {
                 currentCoroutineContext().ensureActive()
                 val trackId = candidate.rawAddonId.ifBlank { candidate.id.toString() }

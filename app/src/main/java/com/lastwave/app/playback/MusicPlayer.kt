@@ -2739,13 +2739,15 @@ class MusicPlayer @Inject constructor(
      *  "Playback interrupted") instead of dropping to stereo. */
     private val isAtmosDecoderAvailable: Boolean by lazy {
         runCatching {
-            val codecList = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+            val codecList = MediaCodecList(MediaCodecList.ALL_CODECS)
             codecList.codecInfos.any { info ->
                 !info.isEncoder && info.supportedTypes.any { type ->
-                    type.equals("audio/eac3-joc", ignoreCase = true)
+                    type.equals("audio/eac3-joc", ignoreCase = true) ||
+                        type.equals("audio/eac3", ignoreCase = true) ||
+                        type.equals("audio/ac3", ignoreCase = true)
                 }
             }
-        }.getOrDefault(false)
+        }.getOrDefault(true)
     }
 
     fun isSpatialAudioSupportedOnDevice(): Boolean {
@@ -5441,24 +5443,12 @@ class MusicPlayer @Inject constructor(
         excludedLosslessUrls: Set<String> = emptySet(),
         expectedDurationSeconds: Int? = null,
     ): ResolvedStream? {
+        val isAtmosRequested = misc.dolbyAtmosEnabled || misc.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS
         val atmosSupported = isSpatialAudioSupportedOnDevice()
-        val effectiveQuality = if (misc.dolbyAtmosEnabled && atmosSupported) {
+        val effectiveQuality = if (isAtmosRequested) {
             LosslessMusicApi.QUALITY_DOLBY_ATMOS
         } else {
-            if (misc.dolbyAtmosEnabled && !atmosSupported) {
-                android.util.Log.w(
-                    "MusicPlayer",
-                    "Dolby Atmos enabled in settings, but device lacks spatial/Dolby decoding capabilities; falling back to lossless stereo tier",
-                )
-            }
-            // If the user's lossless quality is also set to Atmos but the
-            // device can't play it, demote to hi-res stereo so the addon
-            // waterfall skips the spatial tier entirely.
-            if (!atmosSupported && misc.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS) {
-                LosslessMusicApi.QUALITY_MAX_HI_RES
-            } else {
-                misc.losslessQuality
-            }
+            misc.losslessQuality
         }
         val stream = losslessMusicApi.resolveStream(
             title = track.title,
@@ -5520,7 +5510,7 @@ class MusicPlayer @Inject constructor(
         val spatialResult = manifestCodecBadge == "DOLBY ATMOS" ||
             manifestCodecBadge == "SPATIAL AUDIO" ||
             stream.audioCodecOverride == "DOLBY ATMOS"
-        if (spatialResult && !atmosSupported) {
+        if (spatialResult && !isAtmosRequested && !atmosSupported) {
             android.util.Log.w(
                 "MusicPlayer",
                 "[LOSSLESS] veto: spatial manifest for '${track.title}' on incapable device; re-requesting stereo tier",
