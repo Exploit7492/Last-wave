@@ -133,21 +133,13 @@ class NativeAudioEngine @Inject constructor(
     /** Updates the native 15-band EQ; its gains are smoothed in C++.
      *  Dropped while [systemFlattened] — external effects own the feed. */
     fun setEqualizer(enabled: Boolean, gainsDb: FloatArray) {
-        if (systemFlattened) {
-            Log.d(TAG, "setEqualizer dropped (systemFlattened=true)")
-            return
-        }
-        if (!isAvailable) {
-            Log.w(TAG, "setEqualizer dropped (native engine unavailable)")
-            return
-        }
+        if (systemFlattened) return
         require(gainsDb.size == EQUALIZER_BAND_COUNT) { "Expected 15 equalizer bands" }
         val safeGains = FloatArray(gainsDb.size) { index ->
             val gain = gainsDb[index]
             if (gain.isFinite()) gain.coerceIn(-EQ_MAX_GAIN_DB, EQ_MAX_GAIN_DB) else 0f
         }
         withHandle(Unit) { nativeSetEqualizer(it, enabled, safeGains) }
-        Log.d(TAG, "setEqualizer pushed enabled=$enabled peak=${safeGains.maxOrNull() ?: 0f}dB")
     }
 
     /**

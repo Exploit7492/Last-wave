@@ -129,23 +129,6 @@ object SettingsSearchIndex {
             )
             add(
                 SettingsEntry(
-                    id = "audio.dolby_atmos",
-                    title = "Dolby Atmos / Spatial Audio",
-                    subtitle = "Direct multi-channel spatial audio playback or standard stereo lossless",
-                    keywords = listOf(
-                        "dolby", "atmos", "spatial", "spatial audio", "surround", "3d audio",
-                        "multichannel", "multi-channel", "immersive", "binaural", "headphone"
-                    ),
-                    icon = Icons.Filled.GraphicEq,
-                    iconContainer = { MaterialTheme.colorScheme.tertiaryContainer },
-                    iconTint = { MaterialTheme.colorScheme.onTertiaryContainer },
-                    parentTab = SettingsTab.AUDIO,
-                    section = "Audio & Playback",
-                    type = EntryType.TOGGLE,
-                )
-            )
-            add(
-                SettingsEntry(
                     id = "audio.bit_perfect",
                     title = "Bit-Perfect Mode",
                     subtitle = "Bypass Android mixer & DSP; stream bit-exact audio to USB DAC",

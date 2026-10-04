@@ -5295,7 +5295,7 @@ class MusicPlayer @Inject constructor(
         losslessBudget: LosslessBudget = LosslessBudget.Interactive,
     ): ResolvedStream = withContext(Dispatchers.IO) {
         val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
-        val key = listOf(track.title, track.artist, track.album, videoId, allowLossless, misc.losslessQuality, misc.dolbyAtmosEnabled, misc.preferLosslessStreaming, misc.preferProviderModules, excludedLosslessUrls, allowLocalDownloads, losslessBudget)
+        val key = listOf(track.title, track.artist, track.album, videoId, allowLossless, misc.losslessQuality, misc.preferLosslessStreaming, misc.preferProviderModules, excludedLosslessUrls, allowLocalDownloads, losslessBudget)
         val now = SystemClock.elapsedRealtime()
         resolutionRequests.entries.removeIf { now - it.value.first > 60_000L }
         if (resolutionRequests.size >= 64) {
@@ -5457,14 +5457,11 @@ class MusicPlayer @Inject constructor(
         excludedLosslessUrls: Set<String> = emptySet(),
         expectedDurationSeconds: Int? = null,
     ): ResolvedStream? {
-        val atmosEnabledByUser = misc.dolbyAtmosEnabled || misc.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS
         val atmosSupported = isSpatialAudioSupportedOnDevice()
-        // Immersive hint is sent only when the listener wants it AND the
-        // device can render it; otherwise stereo is requested so an ordinary
-        // track still plays instead of turning into an error.
-        val effectiveQuality = if (atmosEnabledByUser && atmosSupported) {
-            LosslessMusicApi.QUALITY_DOLBY_ATMOS
-        } else if (misc.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS) {
+        // Atmos plays only when explicitly selected (quality 28) AND the device
+        // can render it. No toggle, no auto-upgrade: any other tier never becomes Atmos.
+        // An Atmos request on an incapable device falls back to hi-res stereo.
+        val effectiveQuality = if (misc.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS && !atmosSupported) {
             LosslessMusicApi.QUALITY_MAX_HI_RES
         } else {
             misc.losslessQuality
@@ -5579,7 +5576,7 @@ class MusicPlayer @Inject constructor(
             android.util.Log.i("MusicPlayer", "[LOSSLESS] stereo fallback succeeded for '${track.title}'")
             return resolveLosslessTrackAudioStream(
                 track = track,
-                misc = misc.copy(dolbyAtmosEnabled = false, losslessQuality = stereoQuality),
+                misc = misc.copy(losslessQuality = stereoQuality),
                 excludedLosslessUrls = excludedLosslessUrls,
                 expectedDurationSeconds = expectedDurationSeconds,
             )
@@ -5926,7 +5923,6 @@ class MusicPlayer @Inject constructor(
                     // still promotes off lossy instead of sticking on it.
                     android.util.Log.w("MusicPlayer", "[STREAM UPGRADE] Immersive audition failed for '${track.title}'; trying stereo fallback via hot-swap")
                     val stereoMisc = misc.copy(
-                        dolbyAtmosEnabled = false,
                         losslessQuality = if (misc.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS) {
                             LosslessMusicApi.QUALITY_MAX_HI_RES
                         } else {

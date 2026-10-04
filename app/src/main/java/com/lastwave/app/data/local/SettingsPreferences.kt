@@ -101,8 +101,6 @@ data class MiscSettings(
     val losslessQuality: Int = 27,
     /** Preferred quality preset for downloads (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k, -1: YouTube Music). */
     val downloadQuality: Int = 27,
-    /** When true, queries for Dolby Atmos / max resolution audio. */
-    val dolbyAtmosEnabled: Boolean = false,
     /** Optional studio-clarity curve. On by default; Bit-Perfect disables it. */
     val isStudioMasterClarityEnabled: Boolean = true,
     /** Clarity output preset index (0 Reference, 1 Speaker, 2 Headphone, 3 DAC). */
@@ -266,7 +264,6 @@ class SettingsPreferences @Inject constructor(
         val DOWNLOAD_FOLDER = stringPreferencesKey("lw_download_folder")
         val DOWNLOAD_TREE_URI = stringPreferencesKey("lw_download_tree_uri")
         val DOWNLOAD_STRUCTURE = stringPreferencesKey("lw_download_structure")
-        val DOLBY_ATMOS_ENABLED = booleanPreferencesKey("lw_dolby_atmos_enabled")
         val SYSTEM_EFFECTS_MODE = booleanPreferencesKey("lw_system_effects_mode")
         val USE_ALBUM_ARTIST_FOLDERS = booleanPreferencesKey("lw_use_album_artist_folders")
         val PRIMARY_ARTIST_ONLY = booleanPreferencesKey("lw_primary_artist_only")
@@ -290,7 +287,6 @@ class SettingsPreferences @Inject constructor(
                 preferProviderModules = p.readSafely(Keys.PREFER_PROVIDER_MODULES) ?: true,
                 losslessQuality = p.readSafely(Keys.LOSSLESS_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES } ?: 27,
                 downloadQuality = p.readSafely(Keys.DOWNLOAD_QUALITY)?.takeIf { it in DOWNLOAD_QUALITIES } ?: 27,
-                dolbyAtmosEnabled = p.readSafely(Keys.DOLBY_ATMOS_ENABLED) ?: false,
                 systemEffectsMode = p.readSafely(Keys.SYSTEM_EFFECTS_MODE) ?: false,
                 isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: true,
                 clarityPreset = p.readSafely(Keys.CLARITY_PRESET)?.takeIf { it in 0..3 } ?: 0,
@@ -387,10 +383,6 @@ class SettingsPreferences @Inject constructor(
             val q = quality.takeIf { it in DOWNLOAD_QUALITIES } ?: 27
             it[Keys.DOWNLOAD_QUALITY] = q
         }
-    }
-
-    suspend fun setDolbyAtmosEnabled(enabled: Boolean) {
-        dataStore.edit { it[Keys.DOLBY_ATMOS_ENABLED] = enabled }
     }
 
     suspend fun setSystemEffectsMode(enabled: Boolean) {

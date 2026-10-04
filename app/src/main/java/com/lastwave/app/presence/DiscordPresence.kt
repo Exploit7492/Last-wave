@@ -131,6 +131,21 @@ object DiscordPresence {
     }
 
     /**
+     * Cover Discord can actually fetch: the track's own http(s) artwork,
+     * else the video thumbnail, else the uploaded logo key. Pure so the
+     * format stays unit-testable.
+     */
+    fun largeImage(artworkUrl: String?, videoId: String?): String {
+        val artwork = artworkUrl?.trim().orEmpty()
+        val vid = videoId?.trim().orEmpty()
+        return when {
+            artwork.startsWith("http://") || artwork.startsWith("https://") -> artwork
+            vid.isNotEmpty() -> "https://i.ytimg.com/vi/$vid/hqdefault.jpg"
+            else -> FALLBACK_ASSET
+        }
+    }
+
+    /**
      * Everything the card renders that is not a position tick. Two states with
      * the same signature are visually identical, so a repush would be pure
      * cost — this is the dedupe that keeps a 16 Hz position stream off the
@@ -147,6 +162,10 @@ object DiscordPresence {
             append(track.videoId.orEmpty()).append('|')
             append(track.title).append('|')
             append(track.artist).append('|')
+            // Artwork is part of identity: provider art typically resolves
+            // after playback starts, and its arrival must repush the card
+            // instead of being deduped away as "unchanged".
+            append(track.artworkUrl.orEmpty()).append('|')
             append("playing=").append(state.isPlaying)
             append("|dur=").append(durationMs(state) / 1000L)
             append("|br=").append(state.bitrateKbps)
@@ -187,12 +206,9 @@ object DiscordPresence {
             null
         }
 
-        // Discord fetches external images itself but will not render a URL that
-        // is not http(s) — local file paths fall back to the uploaded logo key.
-        val artwork = track.artworkUrl?.trim().orEmpty()
-        val artIsUrl = artwork.startsWith("http://") || artwork.startsWith("https://")
         val album = track.album?.trim().orEmpty()
         val videoId = track.videoId?.trim().orEmpty()
+        val largeImage = largeImage(track.artworkUrl, track.videoId)
 
         return buildJsonObject {
             put("type", TYPE_LISTENING)
@@ -201,7 +217,7 @@ object DiscordPresence {
             put("state", stateLine(track.artist, track.album, track.title, qualityLine(state)))
             timestamps?.let { put("timestamps", it) }
             put("assets", buildJsonObject {
-                put("large_image", if (artIsUrl) artwork else FALLBACK_ASSET)
+                put("large_image", largeImage)
                 put("large_text", if (album.isEmpty()) title else clip(album))
                 put("small_image", if (playing) "play" else "pause")
                 put("small_text", if (playing) "Playing" else "Paused")

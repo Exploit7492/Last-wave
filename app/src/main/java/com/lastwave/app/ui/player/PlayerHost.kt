@@ -544,19 +544,20 @@ class PlayerViewModel @Inject constructor(
         }
         when (result) {
             is LyricsResult.Success -> {
-                // Single funnel for everything the views draw: de-overlap the
-                // timeline once so word fill, line focus and auto-scroll all
-                // read the same edge-to-edge clock, then group continuation
-                // rows into phrases (no constant-gapped fragments) and merge
-                // provider fragments into whitespace-true words so spacing
-                // and punctuation render as authored. Word-sync rows render
+                // Single funnel for everything the views draw, mirroring the
+                // reference clients (Metrolist/SimpMusic): one provider
+                // timestamp stays one drawn row. The timeline is de-overlapped
+                // once so word fill, line focus and auto-scroll all read the
+                // same edge-to-edge clock, then provider fragments are merged
+                // into whitespace-true words so spacing and punctuation render
+                // as authored. Rows are never merged or re-timed here — that
+                // grouping is what broke line-by-line sync (two sung lines
+                // shown as one, focus arriving late). Word-sync rows render
                 // word-by-word; rows without syllables fall back to
                 // line-by-line focus on the same clock.
                 val lines = if (result.isSynced && result.lines.isNotEmpty() && !result.isInstrumental) {
                     com.lastwave.app.ui.player.normalizeWordSpacing(
-                        com.lastwave.app.data.lyrics.LyricsRepository.mergeContinuationLines(
-                            com.lastwave.app.data.lyrics.LyricsRepository.normalizeLyricTiming(result.lines),
-                        ),
+                        com.lastwave.app.data.lyrics.LyricsRepository.normalizeLyricTiming(result.lines),
                     )
                 } else result.lines
                 _lyricsState.value = LyricsUiState.Success(
@@ -592,24 +593,26 @@ class PlayerViewModel @Inject constructor(
             runCatching {
                 val generatedTrack = track.toGeneratedTrack()
                 var remoteChanged = false
+                var anyAdded = false
                 playlistIds.forEach { playlistId ->
                     val allowDuplicate = playlistId in duplicatePlaylistIds
                     if (playlistId < 0L) {
                         val added = ytMusicLibraryManager.addTrack(playlistId, generatedTrack, allowDuplicate)
                         remoteChanged = remoteChanged || added
+                        anyAdded = anyAdded || added
                     } else {
-                        playlistRepository.addTrack(
+                        anyAdded = playlistRepository.addTrack(
                             id = playlistId,
                             track = generatedTrack,
                             allowDuplicate = allowDuplicate,
-                        )
+                        ) != null || anyAdded
                     }
                 }
                 if (remoteChanged) {
                     ytMusicLibraryManager.refresh()
                     refreshCustomPlaylists()
                 }
-                _toastMessage.emit("Added to playlist")
+                _toastMessage.emit(if (anyAdded) "Added to playlist" else "Couldn't add to playlist")
             }
         }
     }

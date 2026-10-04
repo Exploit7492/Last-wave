@@ -3,6 +3,8 @@ package com.lastwave.app.presence
 import android.content.Context
 import android.os.SystemClock
 import android.util.Log
+import com.lastwave.app.data.artwork.ArtworkNormalizer
+import com.lastwave.app.data.artwork.ArtworkRepository
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.MusicPlayerState
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -46,6 +48,7 @@ import kotlinx.coroutines.sync.withLock
 class DiscordPresenceManager @Inject constructor(
     private val musicPlayer: MusicPlayer,
     private val preferences: DiscordPresencePreferences,
+    private val artworkRepository: ArtworkRepository,
     private val applicationScope: CoroutineScope,
     @ApplicationContext private val context: Context,
 ) {
@@ -58,6 +61,7 @@ class DiscordPresenceManager @Inject constructor(
     private var lastAttemptMs = 0L
     private var lastKey = ""
     private var lastPushMs = 0L
+    @Volatile private var lastArtResolveKey = ""
     private var observer: Job? = null
     private var heartbeat: Job? = null
 
@@ -67,11 +71,15 @@ class DiscordPresenceManager @Inject constructor(
         started = true
         observer = applicationScope.launch(Dispatchers.Default) {
             try {
-                combine(musicPlayer.state, preferences.enabled) { state, on ->
-                    state to on
-                }.collect { (state, on) ->
+                combine(
+                    musicPlayer.state,
+                    preferences.enabled,
+                    artworkRepository.resolved,
+                ) { state, on, resolved ->
+                    Triple(state, on, resolved)
+                }.collect { (state, on, resolved) ->
                     enabled = on
-                    evaluate(state)
+                    evaluate(state, resolved)
                 }
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -83,7 +91,7 @@ class DiscordPresenceManager @Inject constructor(
             while (isActive) {
                 delay(DiscordPresence.PUSH_INTERVAL_MS)
                 val snapshot = musicPlayer.state.value
-                evaluate(snapshot)
+                evaluate(snapshot, artworkRepository.resolved.value)
             }
         }
     }
@@ -91,11 +99,11 @@ class DiscordPresenceManager @Inject constructor(
     /** Re-evaluates immediately (settings toggle, or an explicit refresh). */
     fun refresh() {
         applicationScope.launch(Dispatchers.Default) {
-            evaluate(musicPlayer.state.value)
+            evaluate(musicPlayer.state.value, artworkRepository.resolved.value)
         }
     }
 
-    private suspend fun evaluate(state: MusicPlayerState) {
+    private suspend fun evaluate(state: MusicPlayerState, resolvedArt: Map<String, String>) {
         val now = SystemClock.elapsedRealtime()
         lock.withLock {
             // Disabled or unconfigured: hide anything still on the profile.
@@ -108,7 +116,33 @@ class DiscordPresenceManager @Inject constructor(
                 clearQuiet()
                 return
             }
-            val key = DiscordPresence.signature(state)
+            // The track's own http(s) art is exact; otherwise take whatever
+            // the multi-provider pipeline (Apple -> Tidal -> Deezer ->
+            // Spotify -> YouTube) has resolved for this title+artist. Either
+            // way Discord gets a fetchable cover instead of the logo key.
+            val ownArt = track.artworkUrl?.trim()
+                ?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+            val pipelineArt = resolvedArt[ArtworkNormalizer.cacheKey(track.title, track.artist)]
+                ?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+            if (ownArt == null && pipelineArt == null) {
+                // Nothing to show yet: fire the pipeline once per track. Its
+                // publish re-emits `resolved`, which re-runs this evaluation
+                // with art and repushes the card (artwork is in the signature).
+                val artKey = ArtworkNormalizer.cacheKey(track.title, track.artist)
+                if (artKey != lastArtResolveKey) {
+                    lastArtResolveKey = artKey
+                    applicationScope.launch {
+                        runCatching { artworkRepository.resolve(track.title, track.artist) }
+                    }
+                }
+            }
+            val effectiveState =
+                if (pipelineArt != null && pipelineArt != track.artworkUrl) {
+                    state.copy(current = track.copy(artworkUrl = pipelineArt))
+                } else {
+                    state
+                }
+            val key = DiscordPresence.signature(effectiveState)
             if (key == lastKey && now - lastPushMs < DiscordPresence.PUSH_INTERVAL_MS) {
                 return // Position ticks must not become frames.
             }
@@ -118,7 +152,7 @@ class DiscordPresenceManager @Inject constructor(
                 return
             }
             val sent = runCatching {
-                active.setActivity(DiscordPresence.buildActivity(state, System.currentTimeMillis()))
+                active.setActivity(DiscordPresence.buildActivity(effectiveState, System.currentTimeMillis()))
             }.onFailure {
                 Log.w(TAG, "Discord presence push failed", it)
             }.getOrDefault(false)

@@ -725,37 +725,15 @@ class TrackDownloadManager @Inject constructor(
 
                 if (!isYouTubeRequested && !losslessMusicApi.isCoolingDown) {
                     updateStage("Finding lossless stream…")
-                    // Tier cascade: an Atmos request walks down through every
-                    // stereo tier (hi-res -> CD -> 320) before the YouTube
-                    // fallback below; a stereo request walks down from its own
-                    // tier and NEVER steps up to Dolby (28 appears only when
-                    // explicitly requested). Tiers sharing a backend search
-                    // param (27/7 = "hi_res") are not repeated.
-                    val qualitiesToAttempt = when (requestedDownloadQuality) {
-                        LosslessMusicApi.QUALITY_DOLBY_ATMOS -> listOf(
-                            LosslessMusicApi.QUALITY_DOLBY_ATMOS,
-                            LosslessMusicApi.QUALITY_MAX_HI_RES,
-                            LosslessMusicApi.QUALITY_HI_RES_96,
-                            LosslessMusicApi.QUALITY_CD_LOSSLESS,
-                            LosslessMusicApi.QUALITY_MP3_320,
-                        )
-                        LosslessMusicApi.QUALITY_MAX_HI_RES -> listOf(
-                            LosslessMusicApi.QUALITY_MAX_HI_RES,
-                            LosslessMusicApi.QUALITY_HI_RES_96,
-                            LosslessMusicApi.QUALITY_CD_LOSSLESS,
-                            LosslessMusicApi.QUALITY_MP3_320,
-                        )
-                        LosslessMusicApi.QUALITY_HI_RES_96 -> listOf(
-                            LosslessMusicApi.QUALITY_HI_RES_96,
-                            LosslessMusicApi.QUALITY_CD_LOSSLESS,
-                            LosslessMusicApi.QUALITY_MP3_320,
-                        )
-                        LosslessMusicApi.QUALITY_CD_LOSSLESS -> listOf(
-                            LosslessMusicApi.QUALITY_CD_LOSSLESS,
-                            LosslessMusicApi.QUALITY_MP3_320,
-                        )
-                        else -> listOf(requestedDownloadQuality)
-                    }
+                    // Single source of truth: same tier order as streaming
+                    // (LosslessMusicApi.getQualityAttemptOrder). Rules:
+                    // - YouTube requested: strict, never reaches here.
+                    // - Atmos (28): atmos -> hi-res -> CD -> 320, then YouTube. Only path with 28.
+                    // - Hi-Res (27/7): step DOWN only, never up to Atmos. YouTube last.
+                    // - Lower tiers: preferred first, then higher above, then lower. Never Atmos.
+                    // Data Saver (96k) is skipped unless explicitly chosen (YouTube beats it).
+                    val qualitiesToAttempt =
+                        LosslessMusicApi.getQualityAttemptOrder(requestedDownloadQuality)
                     for (downloadQuality in qualitiesToAttempt) {
                     // Spatial-tier veto (mirrors playback): never download an
                     // Atmos manifest on a device that cannot render it. The

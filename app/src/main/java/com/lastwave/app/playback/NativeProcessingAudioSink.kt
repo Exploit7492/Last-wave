@@ -164,16 +164,6 @@ class NativeProcessingAudioSink(
             return
         }
 
-        reconfigureActivePath(format, specifiedBufferSize, outputChannels)
-    }
-
-    private fun reconfigureActivePath(
-        format: Format,
-        specifiedBufferSize: Int = configuredBufferSize,
-        outputChannels: IntArray? = configuredOutputChannels,
-    ) {
-        clearPending()
-        clearEndOfStream()
         if (bitPerfectRequested) {
             Log.i(
                 TAG,
@@ -782,7 +772,7 @@ class NativeProcessingAudioSink(
     }
 
     fun setBitPerfectRequested(enabled: Boolean) {
-        val changed = bitPerfectRequested != enabled
+        if (bitPerfectRequested == enabled) return
         bitPerfectRequested = enabled
         usbOutput?.setEnabled(enabled)
         if (enabled) {
@@ -792,15 +782,7 @@ class NativeProcessingAudioSink(
             // are additionally dropped in setAuxEffectInfo while requested.)
             setSkipSilenceEnabled(false)
         }
-        val format = configuredFormat
-        if (hasConfigured && format != null) {
-            if (usbExclusive && !enabled) {
-                leaveExclusiveUsb(configureAndroid = true)
-            } else if (!usbExclusive && (changed || bitPerfectAtConfigure != enabled || (!enabled && !processingActive))) {
-                reconfigureActivePath(format)
-            }
-        }
-        Log.i(TAG, "BIT-PERFECT requested=$enabled (active reconfigured: ${hasConfigured && format != null})")
+        Log.i(TAG, "BIT-PERFECT requested=$enabled (takes effect on next configure)")
     }
 
     fun isPlatformBitPerfectConfigured(): Boolean = usbOutput?.isConfigured() == true
@@ -925,7 +907,14 @@ class NativeProcessingAudioSink(
         runCatching { exclusiveUsb?.reset() }
         if (!configureAndroid) return
         val format = configuredFormat ?: return
-        reconfigureActivePath(format)
+        if (bitPerfectRequested &&
+            tryConfigureBitPerfectDirect(format, configuredBufferSize, configuredOutputChannels)
+        ) {
+            bitPerfectAtConfigure = true
+            return
+        }
+        configureFallback(format, configuredBufferSize, configuredOutputChannels)
+        bitPerfectAtConfigure = false
     }
 
     /**
