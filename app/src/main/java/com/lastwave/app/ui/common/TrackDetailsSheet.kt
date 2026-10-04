@@ -196,9 +196,9 @@ private fun describeLiveResolution(state: MusicPlayerState): String {
     // append FLAC unconditionally, so an Opus stream read as "48 kHz FLAC".
     val flacLike = isFlacLikeCodec(state.audioCodec) || state.isLossless
     val lossyName = when {
-        state.audioCodec.contains("OPUS", ignoreCase = true) -> "Opus"
-        state.audioCodec.contains("AAC", ignoreCase = true) || state.audioCodec.contains("MP4A", ignoreCase = true) -> "AAC"
-        state.audioCodec.contains("MP3", ignoreCase = true) -> "MP3"
+        state.audioCodec?.contains("OPUS", ignoreCase = true) == true -> "Opus"
+        state.audioCodec?.contains("AAC", ignoreCase = true) == true || state.audioCodec?.contains("MP4A", ignoreCase = true) == true -> "AAC"
+        state.audioCodec?.contains("MP3", ignoreCase = true) == true -> "MP3"
         else -> null
     }
     if (isSpatialAudioCodec(state.audioCodec)) {
