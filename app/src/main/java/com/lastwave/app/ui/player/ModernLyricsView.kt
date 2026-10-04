@@ -1,6 +1,5 @@
 package com.lastwave.app.ui.player
 
-import android.os.SystemClock
 import kotlinx.coroutines.delay
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -64,12 +63,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameMillis
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import com.lastwave.app.ui.theme.LocalLiquidGlass
 import com.lastwave.app.ui.theme.LiquidGlassPreset
@@ -108,7 +104,6 @@ import com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeSyllable
 import com.mocharealm.accompanist.lyrics.core.model.synced.SyncedLine
 import com.mocharealm.accompanist.lyrics.ui.composable.lyrics.KaraokeLyricsView
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.isActive
 
 @Composable
 fun ModernLyricsPanel(
@@ -137,39 +132,6 @@ fun ModernLyricsPanel(
         initialValue = PlaybackProgressState(positionMs = state.positionMs, durationMs = state.durationMs),
     )
 
-    // High-precision hardware-synced position clock for 60/120/144fps+ bit-perfect vocal sync
-    var anchorProgressMs by remember(track) { mutableLongStateOf(progress.positionMs) }
-    var anchorNanos by remember(track) { mutableLongStateOf(System.nanoTime()) }
-    var smoothedPositionMs by remember(track) { mutableLongStateOf(progress.positionMs) }
-
-    LaunchedEffect(progress.positionMs, state.isPlaying, track) {
-        val nowNanos = System.nanoTime()
-        val elapsedMs = if (state.isPlaying) (nowNanos - anchorNanos) / 1_000_000L else 0L
-        val estimatedMs = anchorProgressMs + elapsedMs
-        val drift = progress.positionMs - estimatedMs
-
-        if (!state.isPlaying || kotlin.math.abs(drift) > 500L) {
-            // Hard seek, pause, or big drift: snap anchor immediately
-            anchorProgressMs = progress.positionMs
-            anchorNanos = nowNanos
-            smoothedPositionMs = progress.positionMs
-        } else {
-            // Micro-drift: gently steer anchor without any sudden jumping or stutter
-            anchorProgressMs += (drift * 0.25f).toLong()
-            anchorNanos = nowNanos
-        }
-    }
-
-    LaunchedEffect(state.isPlaying, track) {
-        if (!state.isPlaying) return@LaunchedEffect
-        while (isActive) {
-            withFrameNanos { nowNanos ->
-                val elapsedMs = (nowNanos - anchorNanos) / 1_000_000L
-                val dur = progress.durationMs.takeIf { it > 0 } ?: state.durationMs.takeIf { it > 0 } ?: Long.MAX_VALUE
-                smoothedPositionMs = (anchorProgressMs + elapsedMs).coerceIn(0L, dur)
-            }
-        }
-    }
 
     Column(modifier = modifier.fillMaxSize()) {
         AnimatedContent(
@@ -307,7 +269,7 @@ fun ModernLyricsPanel(
                                     trackArtist = track.artist,
                                     normalStyle = karaokeNormalStyle,
                                     accompanimentStyle = karaokeAccompanimentStyle,
-                                    currentPosition = { (smoothedPositionMs + lyricsOffsetMs).toInt() },
+                                    currentPosition = { (progress.positionMs + lyricsOffsetMs).toInt() },
                                     player = player,
                                     lyricsOffsetMs = lyricsOffsetMs,
                                     modifier = Modifier
@@ -449,11 +411,20 @@ private fun KaraokeLineWrapScope(
     }
 }
 
-private fun LyricLine.toISyncedLine(isOverallRtl: Boolean = false): ISyncedLine {
+private fun LyricLine.toISyncedLine(
+    isOverallRtl: Boolean = false,
+    nextStartMs: Long? = null,
+): ISyncedLine {
     val lineStart = timeMs.toInt()
-    val lineEnd = if (durationMs > 0) (timeMs + durationMs).toInt()
-    else if (syllables.isNotEmpty()) (syllables.last().timeMs + syllables.last().durationMs).toInt()
-    else lineStart + 4500  // reasonable fallback; backfilled by toSyncedLyrics
+    val naturalEnd = if (durationMs > 0) timeMs + durationMs
+    else if (syllables.isNotEmpty()) syllables.last().let { it.timeMs + it.durationMs }
+    else timeMs + 4500L
+
+    val lineEnd = if (nextStartMs != null && nextStartMs > timeMs) {
+        maxOf(naturalEnd, nextStartMs).toInt()
+    } else {
+        naturalEnd.toInt()
+    }
 
     val isLineRtl = isRtl || (isOverallRtl && (text.isBlank() || text == "♪"))
 
@@ -561,7 +532,10 @@ private fun List<LyricLine>.toSyncedLyrics(title: String, artist: String, isOver
     // row — word-sync or line-sync — maps onto one contiguous clock.
     val backfilled = backfillLineSyncDurations(this)
     return SyncedLyrics(
-        lines = backfilled.map { it.toISyncedLine(isOverallRtl) },
+        lines = backfilled.mapIndexed { index, line ->
+            val nextStart = backfilled.getOrNull(index + 1)?.timeMs
+            line.toISyncedLine(isOverallRtl, nextStart)
+        },
         title = title,
         artists = listOf(Artist(type = "artist", name = artist)),
     )
