@@ -106,7 +106,8 @@ class LosslessMusicApi @Inject constructor(
         get() {
             if (System.currentTimeMillis() < failureCooldownUntilMs) return false
             val addonUrl = settingsPreferences.addonUrl.value
-            return settingsPreferences.addonEnabled.value && !addonUrl.isNullOrBlank()
+            if (settingsPreferences.addonEnabled.value && !addonUrl.isNullOrBlank()) return true
+            return runCatching { moduleManager.list().any { it.enabled } }.getOrDefault(false)
         }
 
     /**
@@ -347,6 +348,19 @@ class LosslessMusicApi @Inject constructor(
         if (addonEnabled && !addonUrl.isNullOrBlank()) {
             val normalized = AddonClient.normalizeBase(addonUrl)
             return@withContext BackendCredentials(baseUrl = normalized, apiKey = "addon", isAddon = true)
+        }
+
+        // Support installed and enabled LWP modules
+        val activeHandle = runCatching { moduleManager.enabledHandles().firstOrNull() }.getOrNull()
+        if (activeHandle != null) {
+            val config = moduleManager.readDecryptedConfig(activeHandle)
+            val moduleUrl = config?.optString("baseUrl")?.ifBlank {
+                config.optJSONObject("tidal")?.optString("baseUrl").orEmpty()
+            }
+            if (!moduleUrl.isNullOrBlank()) {
+                val normalized = AddonClient.normalizeBase(moduleUrl)
+                return@withContext BackendCredentials(baseUrl = normalized, apiKey = "addon", isAddon = true)
+            }
         }
 
         null

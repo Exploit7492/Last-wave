@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.lastwave.app.data.lossless.LosslessMusicApi
 import com.lastwave.app.data.lossless.NativeSecrets
 import javax.inject.Inject
 
@@ -29,6 +30,7 @@ class ModulesViewModel @Inject constructor(
     private val moduleManager: ModuleManager,
     private val settingsPreferences: SettingsPreferences,
     private val nativeSecrets: NativeSecrets,
+    private val losslessMusicApi: LosslessMusicApi,
 ) : ViewModel() {
 
     private val refreshTick = MutableStateFlow(0)
@@ -63,6 +65,7 @@ class ModulesViewModel @Inject constructor(
     fun setAddonEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsPreferences.setAddonEnabled(enabled)
+            losslessMusicApi.invalidateCredentialsCache()
         }
     }
 
@@ -84,6 +87,7 @@ class ModulesViewModel @Inject constructor(
                 settingsPreferences.setAddonUrl(trimmed)
                 settingsPreferences.setAddonName(manifestName)
                 settingsPreferences.setAddonEnabled(true)
+                losslessMusicApi.invalidateCredentialsCache()
 
                 when (health) {
                     is com.lastwave.app.data.addon.AddonHealth.Ok -> _notice.value = "Connected: $manifestName"
@@ -104,6 +108,7 @@ class ModulesViewModel @Inject constructor(
             settingsPreferences.setAddonName(null)
             settingsPreferences.setAddonEnabled(false)
             _addonHealth.value = null
+            losslessMusicApi.invalidateCredentialsCache()
             _notice.value = "Addon removed"
         }
     }
@@ -111,6 +116,7 @@ class ModulesViewModel @Inject constructor(
     fun testAddon() {
         val current = addonUrl.value
         if (current.isNullOrBlank()) return
+        losslessMusicApi.invalidateCredentialsCache()
         viewModelScope.launch {
             _busy.value = true
             try {
@@ -134,8 +140,19 @@ class ModulesViewModel @Inject constructor(
             _notice.value = null
             try {
                 when (val result = moduleManager.install(uri)) {
-                    is ModuleInstallResult.Installed ->
+                    is ModuleInstallResult.Installed -> {
                         _notice.value = "Installed ${result.module.manifest.name}"
+                        val handle = moduleManager.findHandleById(result.module.manifest.id)
+                        if (handle != null) {
+                            val config = moduleManager.readDecryptedConfig(handle)
+                            val url = config?.optString("baseUrl")?.ifBlank {
+                                config.optJSONObject("tidal")?.optString("baseUrl").orEmpty()
+                            }
+                            if (!url.isNullOrBlank()) {
+                                saveAddon(url)
+                            }
+                        }
+                    }
                     is ModuleInstallResult.Rejected ->
                         _notice.value = result.reason
                 }
