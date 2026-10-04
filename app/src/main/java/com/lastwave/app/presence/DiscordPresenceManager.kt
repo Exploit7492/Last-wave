@@ -112,13 +112,20 @@ class DiscordPresenceManager @Inject constructor(
             if (key == lastKey && now - lastPushMs < DiscordPresence.PUSH_INTERVAL_MS) {
                 return // Position ticks must not become frames.
             }
-            val active = ensureConnected(now) ?: return
+            val active = ensureConnected(now)
+            if (active == null) {
+                // ensureConnected already logged why (throttled vs missing).
+                return
+            }
             val sent = runCatching {
                 active.setActivity(DiscordPresence.buildActivity(state, System.currentTimeMillis()))
+            }.onFailure {
+                Log.w(TAG, "Discord presence push failed", it)
             }.getOrDefault(false)
             if (!sent) {
                 // Transport died mid-push: drop it so the next evaluation
                 // reconnects instead of writing into a dead connection.
+                Log.w(TAG, "Discord push rejected; dropping connection")
                 runCatching { active.close() }
                 transport = null
                 lastAttemptMs = SystemClock.elapsedRealtime()
@@ -133,11 +140,20 @@ class DiscordPresenceManager @Inject constructor(
     private suspend fun ensureConnected(now: Long): DiscordTransport? {
         val existing = transport
         if (existing != null && existing.isOpen) return existing
+        if (existing != null && !existing.isOpen) {
+            Log.d(TAG, "Discord transport dead; reconnecting")
+            runCatching { existing.close() }
+            transport = null
+        }
         if (now - lastAttemptMs < DiscordPresence.RETRY_INTERVAL_MS) return null
         runCatching { existing?.close() }
         transport = null
         lastAttemptMs = now
-        return DiscordIpcTransport.connectOrNull(context)?.also { transport = it }
+        val fresh = DiscordIpcTransport.connectOrNull(context)
+        if (fresh == null) {
+            Log.w(TAG, "Discord connect failed (app missing/signed-out/refusing?); retry in 15s")
+        }
+        return fresh?.also { transport = it }
     }
 
     /**

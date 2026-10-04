@@ -458,6 +458,7 @@ class SettingsViewModel @Inject constructor(
                 // Enabling DSP clarity disables Bit-Perfect mode
                 settingsPreferences.setBitPerfectEnabled(false)
                 applyNativeAudio { it.setBitPerfect(false) }
+                com.lastwave.app.playback.usb.UsbExclusivePrefs.setEnabled(context, false)
             }
         }
     }

@@ -1062,7 +1062,7 @@ class MusicPlayer @Inject constructor(
                             }
                     }
                     val isSpatial = isSpatialAudioCodec(_state.value.audioCodec)
-                    sink.setBitPerfectRequested(!isSpatial && (bitPerfectEnabled || usbExclusivePrefEnabled))
+                    sink.setBitPerfectRequested(!isSpatial && bitPerfectEnabled)
                     sink.syncExclusiveUsb(handleAudioFocus && exclusiveUsbWanted())
                     audioSinks.add(sink)
                     runCatching {
@@ -1566,6 +1566,13 @@ class MusicPlayer @Inject constructor(
                     // Freshly engaged: ask for direct USB access right away so
                     // the DAC route is usable without hunting for the dialog.
                     maybeRequestUsbPermission()
+                } else if (!bitPerfectEnabled) {
+                    if (usbExclusivePrefEnabled) {
+                        usbExclusivePrefEnabled = false
+                    }
+                    applicationScope.launch {
+                        runCatching { UsbExclusivePrefs.setEnabled(appContext, false) }
+                    }
                 }
                 onMain {
                     applyDacRoutingFor(currentSourceRateHz())
@@ -1592,7 +1599,7 @@ class MusicPlayer @Inject constructor(
 
         applicationScope.launch {
             usbDacMonitor.state.collect {
-                if (bitPerfectEnabled || usbExclusivePrefEnabled) {
+                if (bitPerfectEnabled && usbExclusivePrefEnabled) {
                     maybeRequestUsbPermission()
                 }
                 onMain {
@@ -1604,8 +1611,8 @@ class MusicPlayer @Inject constructor(
 
         applicationScope.launch {
             UsbExclusivePrefs.enabledFlow(appContext).collect { enabled ->
-                usbExclusivePrefEnabled = enabled
-                if (enabled) maybeRequestUsbPermission()
+                usbExclusivePrefEnabled = enabled && bitPerfectEnabled
+                if (usbExclusivePrefEnabled) maybeRequestUsbPermission()
                 onMain {
                     applyDacRoutingFor(currentSourceRateHz())
                     updateSignalPath()
@@ -2469,7 +2476,18 @@ class MusicPlayer @Inject constructor(
         )
 
         when (plan) {
-            is CrossfadeDecision.Idle -> return false
+            // Idle carries the blocking gate (disabled/bit-perfect/paused/no-next/
+            // too-early/...). It used to return silently, which made a missed fade
+            // indistinguishable from a disabled one in logcat; rate-limited here
+            // so the 60ms ticker cannot flood.
+            is CrossfadeDecision.Idle -> {
+                logCrossfadeDecision(
+                    "idle-${plan.reason.name.lowercase()}",
+                    "remaining=${timingDurationMs - livePosMs}ms hasNext=$hasNext " +
+                        "armed=$armedForNext ready=${standby?.playbackState == Player.STATE_READY}",
+                )
+                return false
+            }
 
             is CrossfadeDecision.ResolveNext -> {
                 // Unresolved or dead-signed next item. Refreshing early
@@ -2669,7 +2687,7 @@ class MusicPlayer @Inject constructor(
      * No peripheral / already granted / toggle off = silent no-op.
      */
     private fun maybeRequestUsbPermission() {
-        if (!bitPerfectEnabled && !usbExclusivePrefEnabled) return
+        if (!bitPerfectEnabled || !usbExclusivePrefEnabled) return
         val dac = usbDacMonitor.state.value.dac ?: run {
             usbPermissionPromptedKey = null
             return
@@ -2698,7 +2716,7 @@ class MusicPlayer @Inject constructor(
     private fun exclusiveUsbWanted(): Boolean {
         if (isCasting) return false
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return false
-        if (!bitPerfectEnabled && !usbExclusivePrefEnabled) return false
+        if (!bitPerfectEnabled || !usbExclusivePrefEnabled) return false
         // E-AC-3 JOC / 360 RA is multichannel. Exclusive USB is stereo PCM
         // only — keep Android's decoder+mixer so Atmos actually plays.
         if (isSpatialAudioCodec(_state.value.audioCodec)) return false
@@ -2787,7 +2805,7 @@ class MusicPlayer @Inject constructor(
         val exclusiveWanted = exclusiveUsbWanted()
         exclusiveUsbOutput.setWanted(exclusiveWanted)
         audioSinks.forEach { sink ->
-            sink.setBitPerfectRequested(!isSpatial && (bitPerfectEnabled || exclusiveWanted))
+            sink.setBitPerfectRequested(!isSpatial && bitPerfectEnabled)
             sink.syncExclusiveUsb(exclusiveWanted)
         }
         val exclusive = exclusiveUsbOutput.isActive()
@@ -2837,7 +2855,7 @@ class MusicPlayer @Inject constructor(
         )
         usbDacMonitor.setRouteRequested(exclusive || device != null)
         exclusiveUsbOutput.syncListeningGain()
-        manageDacSystemVolume(!isSpatial && (bitPerfectEnabled || exclusiveWanted))
+        manageDacSystemVolume(!isSpatial && bitPerfectEnabled)
         updateSystemEffectsState()
     }
 

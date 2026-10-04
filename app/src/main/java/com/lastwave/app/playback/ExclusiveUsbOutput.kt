@@ -79,6 +79,7 @@ class ExclusiveUsbOutput @Inject constructor(
     private var volumeProbed = false
     @Volatile private var lastNonMaxListeningGain = Float.NaN
     @Volatile private var ignoreStreamMusicMax = false
+    @Volatile private var attachTimeMs = 0L
 
     private val audioManager: AudioManager? =
         appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -112,6 +113,7 @@ class ExclusiveUsbOutput @Inject constructor(
             if (!enabled) {
                 teardownLocked(closeDevice = true)
             } else {
+                attachTimeMs = SystemClock.elapsedRealtime()
                 ensureVolumeObserverLocked()
                 syncListeningGainLocked()
             }
@@ -225,7 +227,12 @@ class ExclusiveUsbOutput @Inject constructor(
 
     fun syncListeningGain() {
         val stream = readStreamMusicGain() ?: return
-        val next = stream
+        val isAttachSettling = (SystemClock.elapsedRealtime() - attachTimeMs) in 0L..2_000L
+        val next = if (stream <= 0.001f && isAttachSettling) {
+            listeningGainForDac(stream)
+        } else {
+            stream
+        }
         if (lastAppliedCombined.isFinite() &&
             kotlin.math.abs(next - listeningGain) < 1e-4f
         ) {
@@ -605,6 +612,37 @@ class ExclusiveUsbOutput @Inject constructor(
         val feedbackPacketSize = selectedFeedback?.maxPacketSize?.let { isoPacketBytes(it) }
             ?: info.feedbackPacketSize
         val feedbackInterval = selectedFeedback?.interval?.coerceAtLeast(1) ?: dataInterval
+        val controlId = (0 until usbDevice.interfaceCount)
+            .map { usbDevice.getInterface(it) }
+            .firstOrNull {
+                it.interfaceClass == UsbConstants.USB_CLASS_AUDIO && it.interfaceSubclass == 1
+            }?.id ?: 0
+        val volumeControl = UacFeatureVolume(info.connection, controlId)
+        featureVolume = volumeControl
+        hardwareVolume = volumeControl.attach()
+
+        ensureVolumeObserverLocked()
+        attachTimeMs = SystemClock.elapsedRealtime()
+        val safeGain = initialListeningGainForDac()
+        rememberStreamGain(safeGain)
+        listeningGain = safeGain
+        lastAppliedCombined = Float.NaN
+
+        if (hardwareVolume) {
+            volumeControl.unmute()
+            applyVolumeLocked()
+        } else {
+            // DAC hardware volume cannot be controlled via UAC Feature Unit (fixed-volume DAC or
+            // write-verification failed). Ensure all channels of the hardware Feature Unit are
+            // completely unmuted and maximized to 0 dB (unity gain) so software PCM scaling is audible.
+            volumeControl.unmuteAndMaximizeAll()
+            applyVolumeLocked()
+        }
+        Log.i(
+            TAG,
+            "exclusive volume ready hardware=$hardwareVolume listening=$listeningGain softwareGain=$softwareGainValue",
+        )
+
         val created = UsbAudioStream(
             info.fd,
             info.interfaceId,
@@ -642,43 +680,11 @@ class ExclusiveUsbOutput @Inject constructor(
             clockMatched = rateSetBefore && !autoNegotiatedFallback
         }
         clockRechecked = true
-        val controlId = (0 until usbDevice.interfaceCount)
-            .map { usbDevice.getInterface(it) }
-            .firstOrNull {
-                it.interfaceClass == UsbConstants.USB_CLASS_AUDIO && it.interfaceSubclass == 1
-            }?.id ?: 0
-        val volumeControl = UacFeatureVolume(info.connection, controlId)
-        featureVolume = volumeControl
-        hardwareVolume = volumeControl.attach()
-        if (hardwareVolume) {
-            volumeControl.unmute()
-        }
         Log.i(
             TAG,
             "decent USB started ${usbDevice.productName} ${sampleRate}Hz " +
                 "alt=$alt wireBits=$wireBits reported=$reported clockMatched=$clockMatched " +
                 "hardwareVolume=$hardwareVolume",
-        )
-
-        ensureVolumeObserverLocked()
-        val rawGain = readStreamMusicGain()
-        val safeGain = if (rawGain == null || rawGain <= 0.001f) {
-            if (lastNonMaxListeningGain.isFinite() && lastNonMaxListeningGain > 0.01f) {
-                Log.i(TAG, "Android STREAM_MUSIC reported zero during USB attach; preserving last listening gain $lastNonMaxListeningGain")
-                lastNonMaxListeningGain
-            } else {
-                rawGain ?: 0.8f
-            }
-        } else {
-            rawGain
-        }
-        rememberStreamGain(safeGain)
-        listeningGain = safeGain
-        lastAppliedCombined = Float.NaN
-        applyVolumeLocked()
-        Log.i(
-            TAG,
-            "exclusive volume hardware=$hardwareVolume listening=$listeningGain softwareGain=$softwareGainValue",
         )
         startWriterLocked(created)
         return true
@@ -726,25 +732,43 @@ class ExclusiveUsbOutput @Inject constructor(
     }
 
     private fun rememberStreamGain(gain: Float?) {
-        if (gain != null && gain in 0.01f..0.999f) {
+        if (gain != null && gain >= 0.01f) {
             lastNonMaxListeningGain = gain
             runCatching { volumePrefs.edit().putFloat(KEY_LAST_NON_MAX_GAIN, gain).apply() }
         }
     }
 
-    private fun listeningGainForDac(): Float {
+    private fun initialListeningGainForDac(): Float {
         ignoreStreamMusicMax = false
-        val current = readStreamMusicGain()
+        return listeningGainForDac()
+    }
+
+    private fun listeningGainForDac(currentGain: Float? = null): Float {
+        val current = currentGain ?: readStreamMusicGain()
         if (current == null || current <= 0.001f) {
             if (lastNonMaxListeningGain.isFinite() && lastNonMaxListeningGain > 0.01f) {
+                Log.i(TAG, "Preserving last non-zero listening gain $lastNonMaxListeningGain")
                 return lastNonMaxListeningGain
             }
+            if (listeningGain > 0.01f) {
+                Log.i(TAG, "Preserving active listening gain $listeningGain")
+                return listeningGain
+            }
+            Log.i(TAG, "Defaulting to bit-perfect unity gain 1.0")
+            return 1.0f
         }
-        return current ?: listeningGain
+        return current
     }
 
     private fun syncListeningGainLocked() {
-        listeningGain = listeningGainForDac()
+        val stream = readStreamMusicGain()
+        val isAttachSettling = (SystemClock.elapsedRealtime() - attachTimeMs) in 0L..2_000L
+        val next = if ((stream == null || stream <= 0.001f) && isAttachSettling) {
+            listeningGainForDac(stream)
+        } else {
+            stream ?: listeningGain
+        }
+        listeningGain = next
         applyVolumeLocked()
     }
 
@@ -757,6 +781,7 @@ class ExclusiveUsbOutput @Inject constructor(
                 val applied = featureVolume?.setNormalized(combined) == true
                 if (!applied) {
                     hardwareVolume = false
+                    featureVolume?.unmuteAndMaximizeAll()
                     softwareGainValue = UacFeatureVolume.perceptualLinearGain(combined)
                     Log.w(TAG, "Feature Unit SET_CUR failed; falling back to perceptual software gain")
                 }
@@ -862,6 +887,7 @@ class ExclusiveUsbOutput @Inject constructor(
         startMediaTimeUs = 0L
         mediaTimeBaseFrames = 0L
         paused = false
+        attachTimeMs = 0L
         if (closeDevice) unregisterVolumeObserverLocked()
     }
 

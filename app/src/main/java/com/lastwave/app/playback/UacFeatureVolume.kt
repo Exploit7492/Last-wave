@@ -29,8 +29,9 @@ class UacFeatureVolume(
 
     fun attach(): Boolean {
         available = false
-        val ids = parseFeatureUnitIds().ifEmpty { FALLBACK_UNIT_IDS.toList() }
-        for (id in ids.distinct()) {
+        val ids = parseFeatureUnitIds()
+        val candidateIds = if (ids.isNotEmpty()) ids.distinct() else FALLBACK_UNIT_IDS.distinct()
+        for (id in candidateIds) {
             val found = discoverChannels(id)
             if (found.isEmpty()) continue
             val range = queryVolumeRange(id, found)
@@ -55,10 +56,62 @@ class UacFeatureVolume(
         return false
     }
 
+    /**
+     * Explicitly sets all channels of all discovered or fallback Feature Units
+     * to 0.0 dB (unity gain, maxRaw) and unmuted (MUTE = 0).
+     *
+     * Crucial for bit-perfect output and dongles/DACs without writable Feature Units:
+     * When Android detaches its own USB driver, it often leaves the hardware volume
+     * at minimum or muted. Setting the hardware DAC to unity gain (0 dB) unmuted
+     * ensures that software PCM scaling (or bit-perfect 1.0 pass-through) produces
+     * full audible sound rather than silence.
+     */
+    fun unmuteAndMaximizeAll(): Boolean {
+        val ids = parseFeatureUnitIds()
+        val candidateIds = if (ids.isNotEmpty()) ids.distinct() else FALLBACK_UNIT_IDS.distinct()
+        var anyOk = false
+        val channelsToTry = intArrayOf(0, 1, 2)
+        for (id in candidateIds) {
+            for (channel in channelsToTry) {
+                val muteData = byteArrayOf(0) // 0 = unmuted
+                val wIndex = (id shl 8) or controlInterfaceId
+                val muteValue = MUTE_WVALUE or (channel and 0xFF)
+                val muteRet = connection.controlTransfer(
+                    0x21,
+                    0x01,
+                    muteValue,
+                    wIndex,
+                    muteData,
+                    muteData.size,
+                    TIMEOUT_MS,
+                )
+                if (muteRet >= 0) anyOk = true
+
+                val volData = ByteArray(2)
+                volData[0] = (maxRaw and 0xFF).toByte()
+                volData[1] = ((maxRaw shr 8) and 0xFF).toByte()
+                val volValue = VOLUME_WVALUE or (channel and 0xFF)
+                val volRet = connection.controlTransfer(
+                    0x21,
+                    0x01,
+                    volValue,
+                    wIndex,
+                    volData,
+                    volData.size,
+                    TIMEOUT_MS,
+                )
+                if (volRet >= 0) anyOk = true
+            }
+        }
+        return anyOk
+    }
+
     /** Explicitly unmutes the hardware DAC via SET_CUR on the Feature Unit Mute control. */
     fun unmute(): Boolean {
-        if (!available || featureUnitId == 0) return false
-        return writeMute(featureUnitId, false)
+        if (featureUnitId != 0) {
+            return writeMute(featureUnitId, false)
+        }
+        return unmuteAndMaximizeAll()
     }
 
     fun setNormalized(volume: Float): Boolean {
@@ -243,7 +296,13 @@ class UacFeatureVolume(
         val data = byteArrayOf(if (mute) 1 else 0)
         val wIndex = (unitId shl 8) or controlInterfaceId
         var ok = false
-        val targetChannels = if (0 !in channels) intArrayOf(0) + channels else channels
+        val targetChannels = if (channels.isEmpty()) {
+            intArrayOf(0, 1, 2)
+        } else if (0 !in channels) {
+            intArrayOf(0) + channels
+        } else {
+            channels
+        }
         for (channel in targetChannels) {
             val wValue = MUTE_WVALUE or (channel and 0xFF)
             val ret = connection.controlTransfer(

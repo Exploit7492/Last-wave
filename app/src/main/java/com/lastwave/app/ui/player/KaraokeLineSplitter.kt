@@ -382,7 +382,7 @@ fun backfillLineSyncDurations(lines: List<LyricLine>): List<LyricLine> {
             val nextStart = lines[i + 1].timeMs
             if (nextStart > line.timeMs) {
                 val gap = nextStart - line.timeMs
-                line.copy(durationMs = if (gap <= 6000L) gap else 4500L)
+                line.copy(durationMs = gap)
             } else line
         } else line.copy(durationMs = 4500L)
     }
