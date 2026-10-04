@@ -103,18 +103,27 @@ class DiscordPresenceTest {
     }
 
     @Test
+    fun artworkFallsBackToVideoThumbnailBeforeLogo() {
+        // No artwork URL but a video id: Discord can still fetch the thumbnail.
+        assertEquals(
+            "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+            str(DiscordPresence.buildActivity(state(track = track(artworkUrl = null)), NOW_MS)["assets"], "large_image"),
+        )
+    }
+
+    @Test
     fun artworkFallsBackToLogoWhenNotHttp() {
         assertEquals(
             "https://lh3.googleusercontent.com/cover=abc",
             str(DiscordPresence.buildActivity(state(), NOW_MS)["assets"], "large_image"),
         )
         // A local file path cannot be fetched by Discord, and neither can a
-        // missing one — both fall back to the uploaded logo key.
+        // missing one — without a video id both fall back to the uploaded logo key.
         assertEquals(
             "logo",
             str(
                 DiscordPresence.buildActivity(
-                    state(track = track(artworkUrl = "/data/user/0/com.lastwave.app/files/cover.jpg")),
+                    state(track = track(artworkUrl = "/data/user/0/com.lastwave.app/files/cover.jpg", videoId = null)),
                     NOW_MS,
                 )["assets"],
                 "large_image",
@@ -122,7 +131,7 @@ class DiscordPresenceTest {
         )
         assertEquals(
             "logo",
-            str(DiscordPresence.buildActivity(state(track = track(artworkUrl = null)), NOW_MS)["assets"], "large_image"),
+            str(DiscordPresence.buildActivity(state(track = track(artworkUrl = null, videoId = null)), NOW_MS)["assets"], "large_image"),
         )
     }
 
@@ -213,6 +222,37 @@ class DiscordPresenceTest {
         assertFalse(base == DiscordPresence.signature(state(track = track(title = "Different"))))
         assertFalse(base == DiscordPresence.signature(state(isLossless = false, audioCodec = "MP3 320k")))
         assertEquals("none", DiscordPresence.signature(state(track = null)))
+    }
+
+    @Test
+    fun signatureChangesWhenProviderArtworkArrives() {
+        // Provider art (Apple/Tidal/Deezer/Spotify/YouTube) resolves after
+        // playback starts. Its arrival changes what the card shows, so the
+        // throttle must repush instead of deduping it away as "unchanged".
+        assertFalse(
+            DiscordPresence.signature(state(track = track(artworkUrl = null, videoId = null))) ==
+                DiscordPresence.signature(
+                    state(track = track(artworkUrl = "https://example.com/cover.jpg", videoId = null)),
+                ),
+        )
+    }
+
+    @Test
+    fun largeImagePrefersArtworkThenVideoThumbnailThenLogo() {
+        assertEquals(
+            "https://example.com/cover.jpg",
+            DiscordPresence.largeImage("https://example.com/cover.jpg", "dQw4w9WgXcQ"),
+        )
+        assertEquals(
+            "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+            DiscordPresence.largeImage(null, "dQw4w9WgXcQ"),
+        )
+        assertEquals(
+            "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+            DiscordPresence.largeImage("/data/user/0/com.lastwave.app/files/cover.jpg", "dQw4w9WgXcQ"),
+        )
+        assertEquals("logo", DiscordPresence.largeImage(null, null))
+        assertEquals("logo", DiscordPresence.largeImage("", ""))
     }
 
     @Test

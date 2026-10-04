@@ -461,8 +461,14 @@ class YtMusicLibraryManager @Inject constructor(
             ?: _accountPlaylists.value.firstOrNull { stableRemoteId(it.id) == localId }?.id
             ?: return@withContext false
         val exactVideoId = track.youtubeVideoIdOrNull()
-        val match = if (exactVideoId == null) innerTube.findBestMatchOrNull(track.name, track.artist) else null
-        val videoId = exactVideoId ?: match?.videoId ?: return@withContext false
+        // Remote writes require an explicit YouTube identity on the track
+        // itself (watch URL / videoId). A fuzzy search guess must never be
+        // pushed: a wrong guess lands as a song the user never added in
+        // their YouTube playlist, and the next sync pass then pulls it back
+        // into the local copy — phantom + duplicated songs on both sides.
+        // Same rule as the sync-path push guard in YtMusicSyncManager.
+        val videoId = exactVideoId ?: return@withContext false
+        val match: YouTubeMusicTrack? = null
         if (!allowDuplicate) {
             val playlist = cachedPlaylist?.takeIf { it.tracks.isNotEmpty() } ?: loadDetail(localId)
             if (playlist != null && playlist.tracks.any { it.matches(track, match) }) return@withContext false

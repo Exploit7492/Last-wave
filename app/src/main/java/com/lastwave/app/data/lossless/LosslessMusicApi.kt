@@ -130,16 +130,38 @@ class LosslessMusicApi @Inject constructor(
         const val QUALITY_YOUTUBE = -1    // YouTube Music standard stream
 
         fun getQualityAttemptOrder(preferred: Int): List<Int> {
+            // YouTube is strict: no lossless attempt, no upgrade. Empty = caller goes straight to YouTube.
             if (preferred == QUALITY_YOUTUBE) return emptyList()
+            // Atmos only when explicitly selected: atmos -> hi-res -> CD -> 320, then YouTube.
+            // Data Saver (96k) is skipped — YouTube 128-256k beats it; tried only when explicitly chosen.
             if (preferred == QUALITY_DOLBY_ATMOS) {
                 return listOf(
                     QUALITY_DOLBY_ATMOS,
                     QUALITY_MAX_HI_RES,
+                    QUALITY_HI_RES_96,
                     QUALITY_CD_LOSSLESS,
                     QUALITY_MP3_320,
-                    QUALITY_DATA_SAVER,
                 )
             }
+            // Hi-Res steps DOWN only, never up to Atmos. YouTube last.
+            if (preferred == QUALITY_MAX_HI_RES) {
+                return listOf(
+                    QUALITY_MAX_HI_RES,
+                    QUALITY_HI_RES_96,
+                    QUALITY_CD_LOSSLESS,
+                    QUALITY_MP3_320,
+                )
+            }
+            if (preferred == QUALITY_HI_RES_96) {
+                return listOf(
+                    QUALITY_HI_RES_96,
+                    QUALITY_CD_LOSSLESS,
+                    QUALITY_MP3_320,
+                )
+            }
+            // Lower tiers: preferred first, then higher above, then lower below.
+            // Never includes Atmos (28) — Atmos plays only when explicitly selected.
+            // Data Saver is excluded from fallback (YouTube beats 96k) unless explicitly chosen.
             val tiersAscending = listOf(
                 QUALITY_DATA_SAVER,
                 QUALITY_MP3_320,
@@ -148,13 +170,15 @@ class LosslessMusicApi @Inject constructor(
                 QUALITY_MAX_HI_RES,
             )
             val index = tiersAscending.indexOf(preferred)
-            if (index == -1) return listOf(QUALITY_MAX_HI_RES, QUALITY_CD_LOSSLESS, QUALITY_MP3_320, QUALITY_DATA_SAVER)
+            if (index == -1) return listOf(QUALITY_MAX_HI_RES, QUALITY_HI_RES_96, QUALITY_CD_LOSSLESS, QUALITY_MP3_320)
 
             val preferredQuality = tiersAscending[index]
             val above = tiersAscending.subList(index + 1, tiersAscending.size)
             val below = tiersAscending.subList(0, index).reversed()
 
-            return (listOf(preferredQuality) + above + below).distinct()
+            return (listOf(preferredQuality) + above + below)
+                .distinct()
+                .filter { it != QUALITY_DATA_SAVER || preferred == QUALITY_DATA_SAVER }
         }
 
         private val MANIFEST_CODECS = Regex("""codecs="([^"]+)"""")
@@ -333,6 +357,14 @@ class LosslessMusicApi @Inject constructor(
             """(?i)[\[(]\s*(?:explicit|clean|(?:official\s+)?(?:music\s+)?(?:audio|video|lyrics?|lyric\s+video|visualizer|hd|4k|mv|full\s+song|full\s+audio|prod\.?\s*(?:by\s*)?[^\])]+))\s*[\])]""",
         )
         private val TRAILING_DISPLAY_NOISE = Regex("""(?i)\s*[-–—]\s*(?:official\s+)?(?:music\s+)?(?:audio|video|lyrics?|visualizer|mv|full\s+song)\s*$""")
+        /** Atmos/Spatial version markers ("(Dolby Atmos)", "(Atmos)", "- Dolby Atmos",
+         *  "(Spatial Audio)", "(360 Reality Audio)"). Stripped for title matching so an
+         *  Atmos mix of the same song verifies against the stereo request title; the
+         *  "atmos" identity-variant tag (below) still de-preferences it for stereo
+         *  tiers while the Atmos boost/ordering prefers it when 28 is selected. */
+        private val ATMOS_VERSION_MARKER = Regex(
+            """(?i)[\[(]\s*(?:dolby\s+atmos|dolby|atmos|spatial\s+audio|spatial|360(?:\s*reality\s*audio)?|sony\s+360|mpeg-?\s*h)\s*[\])]|\s*[-–—]\s*(?:dolby\s+atmos|dolby|atmos|spatial\s+audio|spatial)\s*$""",
+        )
         private val ARTIST_NOISE_WORDS = setOf("the", "and", "feat", "ft", "featuring", "with", "x", "topic")
         private val PERFORMING_ROLE_WORDS = setOf(
             "mainartist", "featuredartist", "performer", "vocal", "vocals", "vocalist", "singer",
@@ -353,6 +385,7 @@ class LosslessMusicApi @Inject constructor(
             "nightcore" to Regex("\\bnightcore\\b"),
             "radio-edit" to Regex("\\bradio edit\\b"),
             "extended" to Regex("\\bextended(?: version| mix)?\\b"),
+            "atmos" to Regex("\\bdolby\\b|\\batmos\\b|\\bspatial\\b|360\\s*reality|sony\\s*360"),
         )
     }
 
@@ -483,7 +516,7 @@ class LosslessMusicApi @Inject constructor(
                         expectedAlbum = expectedAlbum,
                     )?.let { score ->
                         var finalScore = score
-                        if (isAtmosPreferred && (item.isAtmos || item.isSpatial)) finalScore += 200
+                        if (isAtmosPreferred && isAtmosCandidate(item)) finalScore += 200
                         item to finalScore
                     }
                 }
@@ -512,14 +545,26 @@ class LosslessMusicApi @Inject constructor(
         // flip, parking playback at 16-bit forever.
         val wantsHiRes = qualityParam == "hi_res" && !isAtmosPreferred
         val ordered = if (isAtmosPreferred) {
-            candidates.sortedWith(compareByDescending<TidalCandidateItem> { it.isAtmos || it.isSpatial })
+            candidates.sortedWith(compareByDescending<TidalCandidateItem> { isAtmosCandidate(it) })
         } else if (wantsHiRes) {
             candidates.sortedWith(compareByDescending<TidalCandidateItem> { it.isHiResFlagged() })
         } else {
             candidates
         }
 
-        val qualitiesToTry = if (isAtmosPreferred) listOf("atmos", "lossless", "hi_res", "high") else listOf(qualityParam, "lossless", "high")
+        // Tier waterfall (backend search params). Rules:
+        // - YouTube: strict, never reaches here (resolveStream returns null early).
+        // - Atmos (28): atmos -> hi_res -> lossless -> high, then YouTube. Only path containing "atmos".
+        // - Hi-Res (27/7): step DOWN only (hi_res -> lossless -> high), never up to Atmos. YouTube last.
+        // - Lower tiers: preferred first, then higher above, then lower. Never Atmos.
+        val qualitiesToTry = when {
+            isAtmosPreferred -> listOf("atmos", "hi_res", "lossless", "high")
+            qualityParam == "hi_res" -> listOf("hi_res", "lossless", "high")
+            qualityParam == "lossless" -> listOf("lossless", "hi_res", "high")
+            qualityParam == "high" -> listOf("high", "lossless", "hi_res")
+            qualityParam == "low" -> listOf("low", "high", "lossless", "hi_res")
+            else -> listOf(qualityParam, "lossless", "high")
+        }
         for (q in qualitiesToTry) {
             // Each tier declares its own intent: only the immersive tier
             // asks for the spatial mix, later tiers ask for stereo so a
@@ -527,10 +572,10 @@ class LosslessMusicApi @Inject constructor(
             // instead of failing the whole waterfall.
             val wantAtmos = q == "atmos"
             val targetCandidates = if (wantAtmos) {
-                val atmosMatches = ordered.filter { it.isAtmos || it.isSpatial }
+                val atmosMatches = ordered.filter { isAtmosCandidate(it) }
                 if (atmosMatches.isNotEmpty()) atmosMatches else ordered
             } else {
-                val stereoMatches = ordered.filter { !it.isAtmos && !it.isSpatial }
+                val stereoMatches = ordered.filter { !isAtmosCandidate(it) }
                 if (stereoMatches.isNotEmpty()) stereoMatches else ordered
             }
 
@@ -566,12 +611,12 @@ class LosslessMusicApi @Inject constructor(
                     isAtmosCodec(stream.codec) ||
                     isAtmosStreamUrl(rawUrl)
 
-                // Downloads never upscale to spatial: a hi-res/CD/320 request
-                // must not come home as Dolby (the URL check above misses
-                // manifests whose spatial-ness is only in the audioMode flag).
-                // Streaming is untouched — only downloads take this path.
-                if (isDownload && !isAtmosPreferred && isStreamAtmos) {
-                    Log.i(TAG, "resolveFromAddon: skipping spatial stream for track $trackId (download tier is stereo-only)")
+                // Atmos isolation: a hi-res/CD/320 request must never come home
+                // as Dolby (the URL check above misses manifests whose
+                // spatial-ness is only in the audioMode flag). Atmos plays
+                // only when explicitly selected (quality 28).
+                if (!isAtmosPreferred && isStreamAtmos) {
+                    Log.i(TAG, "resolveFromAddon: skipping spatial stream for track $trackId (stereo tier requested)")
                     continue
                 }
                 val manifestSampleRate = manifestSampleRateOf(rawUrl)
@@ -804,6 +849,7 @@ class LosslessMusicApi @Inject constructor(
             .replace(PIPE_NOISE, "")
             .replace(SOUNDTRACK_SUFFIX, "")
             .replace(FEATURING_CLAUSE, " ")
+            .replace(ATMOS_VERSION_MARKER, " ")
             .replace(BRACKETED_DISPLAY_NOISE, " ")
             .replace(TRAILING_DISPLAY_NOISE, " ")
             .replace(Regex("""\s+"""), " ")
@@ -865,6 +911,14 @@ class LosslessMusicApi @Inject constructor(
             name.takeIf { pattern.containsMatchIn(normalized) }
         }
     }
+
+    /** True for an Atmos/Spatial mix by backend flag OR by title label ("(Dolby Atmos)"
+     *  version suffix). Labels matter because some catalogue items omit audioModes; the
+     *  "atmos" identity-variant tag keeps such items de-preferenced (never vetoed) for
+     *  stereo tiers while the Atmos boost/ordering prefers them when 28 is selected. */
+    private fun isAtmosCandidate(item: TidalCandidateItem): Boolean =
+        item.isAtmos || item.isSpatial ||
+            identityVariants(item.title, item.performerName).contains("atmos")
 
     private fun isVerifiedArtistMatch(
         targetArtist: String,
