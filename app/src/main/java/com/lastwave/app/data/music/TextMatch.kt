@@ -39,7 +39,7 @@ internal object TextMatch {
 
     fun tokens(value: String): Set<String> = normalize(value)
         .split(' ')
-        .filter(String::isNotBlank)
+        .filter { it.isNotBlank() && it !in MATCH_NOISE_WORDS }
         .toSet()
 
     fun baseTitle(value: String): String = value
