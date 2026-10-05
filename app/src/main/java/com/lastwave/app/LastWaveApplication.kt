@@ -59,6 +59,17 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
         runCatching { com.lastwave.app.playback.PlaybackDiagnostics.install(this) }
         runCatching { com.lastwave.app.data.music.potoken.BotGuardTokenGenerator.initialize(this) }
         runCatching { com.lastwave.app.data.canvas.CanvasCache.init(this) }
+        // First-song OPUS warmup: visitorData + NewPipe + BotGuard must be
+        // ready before the first tap, not 2.5s after. Immediate and never
+        // throws; the delayed block below keeps the rest lazy.
+        applicationScope.launch(Dispatchers.IO) {
+            // NewPipe is optional fallback infrastructure. A broken extractor
+            // install must not escape an application-scope coroutine.
+            runCatching { streamExtractor.get().preWarm() }
+            // Warm the InnerTube web config (visitor data) so the first
+            // playback's direct-URL fast path can attach it immediately.
+            runCatching { innerTubeMusicApi.get().preWarmPlayback() }
+        }
         applicationScope.launch(Dispatchers.IO) {
             delay(OPTIONAL_STARTUP_DELAY_MS)
             // A process kill can bypass TrackDownloadManager's finally block
@@ -80,12 +91,6 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
                         file.lastModified() < orphanCutoff
                 }?.forEach { file -> runCatching { file.delete() } }
             }
-            // NewPipe is optional fallback infrastructure. A broken extractor
-            // install must not escape an application-scope coroutine.
-            runCatching { streamExtractor.get().preWarm() }
-            // Warm the InnerTube web config (visitor data) so the first
-            // playback's direct-URL fast path can attach it immediately.
-            runCatching { innerTubeMusicApi.get().preWarmPlayback() }
             runCatching { likedSongsManager.get().start() }
                 .onFailure { com.lastwave.app.diagnostics.AppLog.e("LastWaveStartup", "Liked Songs startup disabled", it) }
         }

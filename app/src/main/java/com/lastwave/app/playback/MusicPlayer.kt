@@ -307,6 +307,14 @@ class MusicPlayer @Inject constructor(
     private var unavailableSkipJob: Job? = null
     private val unavailableMediaIds = mutableSetOf<String>()
     /**
+     * Consecutive failure count per mediaId for auto-skip gating. First
+     * transient failure (timeout, throttled OPUS URL, slow first resolve)
+     * holds with tap-to-retry; only proven-dead or repeatedly failing
+     * items auto-advance. Cleared on audible success / new queue.
+     * Main-thread only.
+     */
+    private val unavailableAttemptCounts = mutableMapOf<String, Int>()
+    /**
      * Explicit listening history (mediaIdKeys, oldest first) so Previous
      * under shuffle returns the song actually heard. ExoPlayer's internal
      * shuffle permutation is rebuilt on toggle, crossfade handoff and queue
@@ -621,7 +629,10 @@ class MusicPlayer @Inject constructor(
             if (isPlaying) {
                 unavailableSkipJob?.cancel()
                 unavailableSkipJob = null
-                player.currentMediaItem?.mediaId?.let(unavailableMediaIds::remove)
+                player.currentMediaItem?.mediaId?.let {
+                    unavailableMediaIds.remove(it)
+                    unavailableAttemptCounts.remove(it)
+                }
             }
         }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -1664,6 +1675,7 @@ class MusicPlayer @Inject constructor(
         queueEnrichmentJob?.cancel()
         unavailableSkipJob?.cancel()
         unavailableMediaIds.clear()
+        unavailableAttemptCounts.clear()
         playHistory.clear()
         latePreloadKey = null
         lastPreloadRetryMs = 0L
@@ -1713,11 +1725,22 @@ class MusicPlayer @Inject constructor(
         queueEnrichmentJob?.cancel()
         unavailableSkipJob?.cancel()
         unavailableMediaIds.clear()
+        unavailableAttemptCounts.clear()
         // Fresh queue context: previous-queue history no longer applies.
         // (Same-queue navigations via startResolvedQueuePlayback keep it.)
         playHistory.clear()
         latePreloadKey = null
         lastPreloadRetryMs = 0L
+        // Queue-set warmup: kick the selected YouTube resolve in parallel so
+        // startResolvedQueuePlayback below hits the shared request / stream
+        // cache instead of cold-starting webConfig + BotGuard on first tap.
+        // Fire-and-forget; the real resolve below coalesces via
+        // activeStreamRequests / resolutionRequests.
+        tracks.getOrNull(selectedIndex)?.videoId?.takeIf(String::isNotBlank)?.let { warmVideoId ->
+            applicationScope.launch(Dispatchers.IO) {
+                runCatching { innerTube.resolveAudioStream(warmVideoId) }
+            }
+        }
 
         startResolvedQueuePlayback(
             tracks = tracks,
@@ -1910,7 +1933,24 @@ class MusicPlayer @Inject constructor(
                 }
                 withContext(Dispatchers.Main.immediate) {
                     if (generation == playRequestGeneration.get()) {
-                        unavailableMediaIds += selectedTrack.mediaIdKey()
+                        val failedKey = selectedTrack.mediaIdKey()
+                        val attempts = (unavailableAttemptCounts[failedKey] ?: 0) + 1
+                        unavailableAttemptCounts[failedKey] = attempts
+                        val provenDead = isExplicitlyUnplayableFailure(error) || isUnsupportedMediaFailure(error)
+                        if (!provenDead && attempts < MIN_UNAVAILABLE_ATTEMPTS_BEFORE_SKIP) {
+                            val isOffline = isNetworkException(error)
+                            _state.update {
+                                it.copy(
+                                    isPlaying = false,
+                                    isBuffering = false,
+                                    error = if (isOffline) "Track not available offline"
+                                    else error.message?.takeIf(String::isNotBlank)
+                                        ?: "Couldn't load this track. Tap play to retry.",
+                                )
+                            }
+                            return@withContext
+                        }
+                        unavailableMediaIds += failedKey
                         val nextIndex = if (startShuffled) {
                             tracks.indices
                                 .filter { tracks[it].mediaIdKey() !in unavailableMediaIds }
@@ -4834,6 +4874,26 @@ class MusicPlayer @Inject constructor(
             return
         }
         if (failedIndex == C.INDEX_UNSET || failedMediaId == null) return
+        // No premature 1-2s skip: first transient failure holds with
+        // tap-to-retry; only proven-dead or repeatedly failing items
+        // auto-advance. Player-error retries already exhausted
+        // MAX_PLAYBACK_RETRIES before reaching here, so they skip at once.
+        val provenDead = isExplicitlyUnplayableFailure(failure) || isUnsupportedMediaFailure(failure)
+        val attempts = (unavailableAttemptCounts[failedMediaId] ?: 0) + 1
+        unavailableAttemptCounts[failedMediaId] = attempts
+        val alreadyRetriedExhaustively = errorRetryCount >= MAX_PLAYBACK_RETRIES
+        if (!provenDead && !alreadyRetriedExhaustively && attempts < MIN_UNAVAILABLE_ATTEMPTS_BEFORE_SKIP) {
+            player.pause()
+            _state.update {
+                it.copy(
+                    isPlaying = false,
+                    isBuffering = false,
+                    error = failure.message?.takeIf(String::isNotBlank)
+                        ?: "Couldn't load this track. Tap play to retry.",
+                )
+            }
+            return
+        }
         unavailableSkipJob?.cancel()
         unavailableSkipJob = applicationScope.launch(Dispatchers.Main.immediate) {
             yield()
@@ -6980,6 +7040,11 @@ class MusicPlayer @Inject constructor(
         /** Signal-path report + stream-health sampling cadence while playing. */
         const val SIGNAL_PATH_TICK_MS = 1_000L
         const val MAX_PLAYBACK_RETRIES = 3
+        /** Consecutive failures for the same mediaId before auto-advance is
+         *  allowed. First transient failure holds with tap-to-retry so a
+         *  slow first OPUS resolve never looks like a 1-2s play-then-skip.
+         *  Proven-dead (confirmed-unplayable / unsupported) still skips at once. */
+        const val MIN_UNAVAILABLE_ATTEMPTS_BEFORE_SKIP = 2
         /** A failure at/after this position means the track audibly played,
          *  so it must hold with tap-to-retry instead of auto-skipping. */
         const val MIN_AUDIBLE_PLAYBACK_MS = 1_000L
