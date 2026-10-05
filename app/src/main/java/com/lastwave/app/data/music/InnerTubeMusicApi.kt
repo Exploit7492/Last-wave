@@ -2136,16 +2136,14 @@ class InnerTubeMusicApi @Inject constructor(
         }
     }
 
-    /** Resolves stream specifically optimized for download compatibility (M4A AAC container). */
+    /**
+     * Download-only NewPipe extraction preferring the Opus (WebM) rendition, which
+     * the download pipeline remuxes losslessly into a fully tagged .opus file.
+     * No fallback to [resolveAudioStream]: the download path already tried it.
+     */
     suspend fun resolveDownloadStream(videoId: String): YouTubeAudioStream = withContext(Dispatchers.IO) {
         require(videoId.isNotBlank()) { "Missing YouTube Music video id" }
-        try {
-            streamExtractor.resolveAudioStream(videoId, preferM4a = true)
-        } catch (cancellation: kotlinx.coroutines.CancellationException) {
-            throw cancellation
-        } catch (_: Exception) {
-            resolveAudioStream(videoId)
-        }
+        streamExtractor.resolveAudioStream(videoId, preferOpus = true)
     }
 
     /**
@@ -2827,21 +2825,14 @@ class InnerTubeMusicApi @Inject constructor(
         }
         val best = validCandidates.asSequence()
             .filter { candidate ->
-                val titleMatch = maxOf(similarity(candidate.title, title), similarity(baseTitle(candidate.title), baseTitle(title))) >= 60
+                val titleMatch = TextMatch.isSafeTitleMatch(candidate.title, title, cleanArtist)
                 val artistMatch = cleanArtist.isBlank() ||
-                    similarity(candidate.artist, cleanArtist) >= 35 ||
+                    similarity(candidate.artist, cleanArtist) >= 30 ||
                     normalize(candidate.artist).contains(normalize(cleanArtist)) ||
                     normalize(candidate.title).contains(normalize(cleanArtist))
                 titleMatch && artistMatch
             }
             .maxByOrNull { candidate -> matchScore(candidate, title, cleanArtist) }
-            ?: validCandidates.filter { candidate ->
-                cleanArtist.isBlank() ||
-                    similarity(candidate.artist, cleanArtist) >= 30 ||
-                    normalize(candidate.artist).contains(normalize(cleanArtist)) ||
-                    normalize(candidate.title).contains(normalize(cleanArtist))
-            }.maxByOrNull { candidate -> matchScore(candidate, title, cleanArtist) }
-            ?: validCandidates.firstOrNull().takeIf { cleanArtist.isBlank() }
             ?: throw IOException("No reliable YouTube Music match found for $title by $artist")
         return best.also {
             if (matchCache.size > MAX_MATCH_CACHE_ENTRIES) matchCache.clear()
@@ -2905,18 +2896,10 @@ class InnerTubeMusicApi @Inject constructor(
         }
         if (merged.isEmpty()) return@withContext emptyList()
         val ranked = merged.values.sortedByDescending { matchScore(it, title, cleanArtist) }
-        // Prefer candidates with at least a plausible title link, but keep
-        // the top fallback so download can try the same best-effort stream
-        // playback would have used instead of hard-failing.
         val plausible = ranked.filter { candidate ->
-            maxOf(
-                similarity(candidate.title, title),
-                similarity(baseTitle(candidate.title), baseTitle(title)),
-            ) >= 45 ||
-                normalize(candidate.title).contains(normalize(title)) ||
-                normalize(title).contains(normalize(candidate.title))
+            TextMatch.isSafeTitleMatch(candidate.title, title, cleanArtist)
         }
-        (plausible.ifEmpty { ranked }).take(limit.coerceIn(1, 10))
+        plausible.take(limit.coerceIn(1, 10))
     }
 
     suspend fun isPlayable(title: String, artist: String): Boolean =

@@ -33,7 +33,11 @@ class YouTubeStreamExtractor @Inject constructor(
 
     fun invalidateCache(@Suppress("UNUSED_PARAMETER") videoId: String) = Unit
 
-    suspend fun resolveAudioStream(videoId: String, preferM4a: Boolean = false): YouTubeAudioStream = withContext(Dispatchers.IO) {
+    suspend fun resolveAudioStream(
+        videoId: String,
+        preferM4a: Boolean = false,
+        preferOpus: Boolean = false,
+    ): YouTubeAudioStream = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         initialize()
         val info = try {
@@ -43,7 +47,15 @@ class YouTubeStreamExtractor @Inject constructor(
         } catch (error: Exception) {
             throw IOException("YouTube stream extraction failed for $videoId", error)
         }
-        val stream = if (preferM4a) {
+        val stream = if (preferOpus) {
+            info.audioStreams
+                .filter {
+                    it.format?.mimeType?.contains("webm") == true ||
+                        it.codec?.contains("opus", ignoreCase = true) == true
+                }
+                .maxByOrNull { maxOf(it.averageBitrate, it.bitrate) }
+                ?: info.audioStreams.maxByOrNull { maxOf(it.averageBitrate, it.bitrate) }
+        } else if (preferM4a) {
             info.audioStreams
                 .filter { it.format?.mimeType?.contains("mp4") == true || it.format?.mimeType?.contains("m4a") == true }
                 .maxByOrNull { maxOf(it.averageBitrate, it.bitrate) }
