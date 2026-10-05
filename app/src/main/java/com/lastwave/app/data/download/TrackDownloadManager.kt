@@ -1166,30 +1166,28 @@ class TrackDownloadManager @Inject constructor(
                         val ytFallbackStartMs = android.os.SystemClock.elapsedRealtime()
                         val ytResolveBudgetMs = 60_000L
                         val candidateTracks = linkedMapOf<String, YouTubeMusicTrack>()
-                        fun isPlausibleTrack(track: YouTubeMusicTrack): Boolean {
-                            if (track.videoId.isBlank()) return false
-                            if (track.videoId == videoId) return true
-                            return TextMatch.isSafeTitleMatch(track.title, finalTitle, lookupArtist)
+                        val isPlausibleTrack: (YouTubeMusicTrack) -> Boolean = { track ->
+                            track.videoId.isNotBlank() && (track.videoId == videoId || TextMatch.isSafeTitleMatch(track.title, finalTitle, lookupArtist))
                         }
                         videoId?.takeIf { it.isNotBlank() }?.let { candidateTracks[it] =
                             preloadedBestMatch?.takeIf { match -> match.videoId == it }
                                 ?: YouTubeMusicTrack(videoId = it, title = finalTitle, artist = finalArtist)
                         }
-                        preloadedBestMatch?.takeIf(::isPlausibleTrack)?.let { match ->
+                        preloadedBestMatch?.takeIf(isPlausibleTrack)?.let { match ->
                             candidateTracks.putIfAbsent(match.videoId, match)
                         }
                         // Broad search is capped inside (10 merged candidates);
                         // the 60s resolve budget below bounds the slow path.
                         runCatching {
                             innerTube.findDownloadCandidates(finalTitle, lookupArtist)
-                        }.getOrDefault(emptyList()).filter(::isPlausibleTrack).forEach { track ->
+                        }.getOrDefault(emptyList()).filter(isPlausibleTrack).forEach { track ->
                             candidateTracks.putIfAbsent(track.videoId, track)
                         }
                         // Last resort: legacy single strict match (kept for metadata only).
                         if (candidateTracks.isEmpty()) {
                             runCatching {
                                 innerTube.findBestMatch(finalTitle, lookupArtist, prefetchStreams = false)
-                            }.getOrNull()?.takeIf(::isPlausibleTrack)?.let { track ->
+                            }.getOrNull()?.takeIf(isPlausibleTrack)?.let { track ->
                                 candidateTracks.putIfAbsent(track.videoId, track)
                             }
                         }
@@ -1198,14 +1196,6 @@ class TrackDownloadManager @Inject constructor(
                         var actualVideoId: String? = null
                         var chosenTrack: YouTubeMusicTrack? = null
                         var lastResolveError: Throwable? = null
-                        // Second stream for the same video, used if the picked
-                        // URL is rejected/stalls mid-transfer (expired, 403).
-                        var alternateStream: com.lastwave.app.data.music.YouTubeAudioStream? = null
-                        fun com.lastwave.app.data.music.YouTubeAudioStream.isOpusStream(): Boolean {
-                            val m = mimeType.orEmpty().lowercase()
-                            return m.contains("webm") || m.contains("ogg") ||
-                                codec.orEmpty().contains("opus", ignoreCase = true)
-                        }
                         for ((candidateId, candidateTrack) in candidateTracks) {
                             if (android.os.SystemClock.elapsedRealtime() - ytFallbackStartMs > ytResolveBudgetMs) {
                                 android.util.Log.w(
@@ -1240,8 +1230,6 @@ class TrackDownloadManager @Inject constructor(
                                 null
                             }
                             pickedStream = opusStream?.takeIf { it.isOpusStream() } ?: playbackStream ?: opusStream
-                            alternateStream = listOfNotNull(playbackStream, opusStream)
-                                .firstOrNull { it !== pickedStream && it.url != pickedStream?.url }
                             if (pickedStream != null) {
                                 actualVideoId = candidateId
                                 resolvedYtVideoId = candidateId
@@ -1258,36 +1246,34 @@ class TrackDownloadManager @Inject constructor(
                         if (resolvedAlbum == null) resolvedAlbum = (chosenTrack?.album ?: preloadedBestMatch?.album)?.trim()
                             ?.takeUnless { ArtistHelper.isPlayCountOrStat(it) }
                             ?.takeIf { it.isNotBlank() }
-                        fun applyYtStream(ytStream: com.lastwave.app.data.music.YouTubeAudioStream) {
-                            resolvedUrl = ytStream.url
-                            downloadHeaders = ytStream.requestHeaders
-                            expectedContentLength = ytStream.contentLength
-                                ?: runCatching { Uri.parse(ytStream.url).getQueryParameter("clen")?.toLongOrNull() }.getOrNull()
-                            useParallelDownload = true
-                            val rawMime = ytStream.mimeType.orEmpty().lowercase()
-                            if (rawMime.contains("mp4") || rawMime.contains("m4a") || rawMime.contains("aac")) {
-                                extension = "m4a"
-                                mimeType = "audio/mp4"
-                                formatBadge = "M4A AAC"
-                            } else if (rawMime.contains("webm")) {
-                                extension = "webm"
-                                mimeType = "audio/webm"
-                                formatBadge = "WEBM OPUS"
-                            } else if (rawMime.contains("ogg") || rawMime.contains("opus")) {
-                                extension = "opus"
-                                mimeType = "audio/ogg"
-                                formatBadge = "OPUS"
-                            } else if (rawMime.contains("mpeg") || rawMime.contains("mp3")) {
-                                extension = "mp3"
-                                mimeType = "audio/mpeg"
-                                formatBadge = "MP3"
-                            } else {
-                                extension = "m4a"
-                                mimeType = "audio/mp4"
-                                formatBadge = "AUDIO"
-                            }
+                        val ytStream = resolvedStream
+                        resolvedUrl = ytStream.url
+                        downloadHeaders = ytStream.requestHeaders
+                        expectedContentLength = ytStream.contentLength
+                            ?: runCatching { Uri.parse(ytStream.url).getQueryParameter("clen")?.toLongOrNull() }.getOrNull()
+                        useParallelDownload = true
+                        val rawMime = ytStream.mimeType.orEmpty().lowercase()
+                        if (rawMime.contains("mp4") || rawMime.contains("m4a") || rawMime.contains("aac")) {
+                            extension = "m4a"
+                            mimeType = "audio/mp4"
+                            formatBadge = "M4A AAC"
+                        } else if (rawMime.contains("webm")) {
+                            extension = "webm"
+                            mimeType = "audio/webm"
+                            formatBadge = "WEBM OPUS"
+                        } else if (rawMime.contains("ogg") || rawMime.contains("opus")) {
+                            extension = "opus"
+                            mimeType = "audio/ogg"
+                            formatBadge = "OPUS"
+                        } else if (rawMime.contains("mpeg") || rawMime.contains("mp3")) {
+                            extension = "mp3"
+                            mimeType = "audio/mpeg"
+                            formatBadge = "MP3"
+                        } else {
+                            extension = "m4a"
+                            mimeType = "audio/mp4"
+                            formatBadge = "AUDIO"
                         }
-                        applyYtStream(resolvedStream)
                         isLossless = false
 
                         val rawFile = File.createTempFile("dl_raw_", ".$extension", context.cacheDir)
@@ -1297,7 +1283,14 @@ class TrackDownloadManager @Inject constructor(
                         var lastNotifTime = 0L
                         var lastUnknownProgressBytes = 0L
                         val progressLock = Any()
-                        val ytConnectionCallback: (Boolean) -> Unit = { isWaiting ->
+                        val transfer = downloadToTempFile(
+                            downloadKey = key,
+                            url = checkNotNull(resolvedUrl),
+                            target = rawFile,
+                            requestHeaders = downloadHeaders,
+                            expectedContentLength = expectedContentLength,
+                            useParallelRanges = useParallelDownload,
+                            onConnectionStateChanged = { isWaiting ->
                                 _downloads.value[key]?.let { current ->
                                     val updated = current.copy(isWaitingForConnection = isWaiting)
                                     updateProgress(updated)
@@ -1314,8 +1307,8 @@ class TrackDownloadManager @Inject constructor(
                                         )
                                     }
                                 }
-                            }
-                        val ytProgressCallback: (Long, Long) -> Unit = { downloadedBytes, totalBytes ->
+                            },
+                        ) { downloadedBytes, totalBytes ->
                             synchronized(progressLock) {
                                 val now = android.os.SystemClock.uptimeMillis()
                                 if (totalBytes > 0) {
@@ -1358,35 +1351,6 @@ class TrackDownloadManager @Inject constructor(
                                     }
                                 }
                             }
-                        }
-                        suspend fun runYtTransfer(): DownloadTransfer = downloadToTempFile(
-                            downloadKey = key,
-                            url = checkNotNull(resolvedUrl),
-                            target = rawFile,
-                            requestHeaders = downloadHeaders,
-                            expectedContentLength = expectedContentLength,
-                            useParallelRanges = useParallelDownload,
-                            onConnectionStateChanged = ytConnectionCallback,
-                            onProgress = ytProgressCallback,
-                        )
-                        val transfer = try {
-                            runYtTransfer()
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (firstError: Exception) {
-                            val retryStream = alternateStream ?: throw firstError
-                            android.util.Log.w(
-                                "TrackDownloadManager",
-                                "YouTube transfer failed for $finalTitle by $finalArtist; retrying with alternate stream",
-                                firstError,
-                            )
-                            applyYtStream(retryStream)
-                            truncateFile(rawFile)
-                            synchronized(progressLock) {
-                                lastProgress = 0
-                                lastUnknownProgressBytes = 0L
-                            }
-                            runYtTransfer()
                         }
                         val contentType = transfer.contentType.lowercase()
                         if (contentType.contains("webm")) {
@@ -3420,6 +3384,12 @@ class TrackDownloadManager @Inject constructor(
                 }
             }
         }
+    }
+
+    private fun com.lastwave.app.data.music.YouTubeAudioStream.isOpusStream(): Boolean {
+        val m = mimeType.orEmpty().lowercase()
+        return m.contains("webm") || m.contains("ogg") ||
+            codec.orEmpty().contains("opus", ignoreCase = true)
     }
 
     private fun sanitizeFilename(title: String): String =

@@ -390,7 +390,7 @@ class LosslessMusicApi @Inject constructor(
 
         private fun isRecordLabel(artist: String): Boolean {
             val norm = normalizeText(artist).replace(" ", "")
-            return RECORD_LABELS.any { norm == it.replace(" ", "") }
+            return RECORD_LABELS.any { norm == it.replace(" ", "") || (it.length >= 4 && norm.contains(it.replace(" ", ""))) }
         }
 
         private val TRAILING_NOISE = setOf(
@@ -418,7 +418,7 @@ class LosslessMusicApi @Inject constructor(
         private val SOUNDTRACK_SUFFIX = Regex(
             """(?i)\s*[\[(]\s*(?:from\s+(?:the\s+)?(?:original\s+)?(?:motion\s+picture|movie|film|soundtrack)|soundtrack|ost)\s*(?:["“][^"”\r\n]+["”]|[^\])]+)?\s*[\])]\s*$|\s*[-–—|]\s*(?:from\s+(?:the\s+)?(?:original\s+)?(?:motion\s+picture|movie|film|soundtrack)|soundtrack|ost)\s*.*$""",
         )
-        private val FEATURING_CLAUSE = Regex("""(?i)(?:\s*[\[(])?\s*(feat\.?|ft\.?|featuring)\s+.*$""")
+        private val FEATURING_CLAUSE = Regex("""(?i)(?:\s*[\[(])?\s*(feat\.?|ft\.?|featuring|with)\s+.*$""")
         private val BRACKETED_DISPLAY_NOISE = Regex(
             """(?i)[\[(]\s*(?:explicit|clean|(?:official\s+)?(?:music\s+)?(?:audio|video|lyrics?|lyric\s+video|visualizer|hd|4k|mv|full\s+song|full\s+audio|prod\.?\s*(?:by\s*)?[^\])]+)|remaster(?:ed)?(?:\s*\d{2,4})?|\d{2,4}\s*remaster(?:ed)?|deluxe(?:\s*edition)?|bonus(?:\s*track)?|special\s*edition|anniversary(?:\s*edition)?|radio\s*edit|single\s*version|album\s*version|with\s+[^\])]+|from\s+[^\])]+)\s*[\])]""",
         )
@@ -553,14 +553,22 @@ class LosslessMusicApi @Inject constructor(
                 .map { it.replace(NON_ALPHANUMERIC, "") }
                 .filter { it.isNotEmpty() }
                 .toSet()
-            if (words.all { it in artistWords }) return true
+            if (words.all { it in artistWords } || (artistWords.isNotEmpty() && artistWords.all { it in words })) return true
+
+            for (part in text.split(ARTIST_SEPARATORS)) {
+                val partWords = part.split(Regex("""[\s.·/]+""")).map { it.replace(NON_ALPHANUMERIC, "") }.filter { it.isNotEmpty() }
+                if (partWords.isNotEmpty() && artistWords.isNotEmpty() &&
+                    (partWords.all { it in artistWords } || artistWords.all { it in partWords })) {
+                    return true
+                }
+            }
 
             if (!album.isNullOrBlank()) {
                 val albumWords = album.lowercase(Locale.ROOT).split(Regex("""[\s.·/]+"""))
                     .map { it.replace(NON_ALPHANUMERIC, "") }
                     .filter { it.isNotEmpty() }
                     .toSet()
-                if (words.all { it in albumWords }) return true
+                if (words.all { it in albumWords } || (albumWords.isNotEmpty() && albumWords.all { it in words })) return true
             }
 
             return false
@@ -1231,7 +1239,7 @@ class LosslessMusicApi @Inject constructor(
             .map { name ->
                 name.split(Regex("""[\s.·/]+"""))
                     .map { it.replace(NON_ALPHANUMERIC, "") }
-                    .filter { it.length > 1 }
+                    .filter { it.length > 1 && it !in ARTIST_NOISE_WORDS }
             }
             .filter { it.isNotEmpty() }
             .toSet()
@@ -1261,7 +1269,8 @@ class LosslessMusicApi @Inject constructor(
         if (primaryIdentities.any { it == target }) return true
 
         val targetArtists = artistNames(targetArtist)
-        val candidateArtists = (primaryIdentities + listOfNotNull(performersText).map(::cleanArtistIdentity))
+        val candidateArtists = (listOf(performer, albumArtist) + listOfNotNull(performersText))
+            .filter(String::isNotBlank)
             .flatMap { artistNames(it) }
             .toSet()
 
@@ -1282,6 +1291,6 @@ class LosslessMusicApi @Inject constructor(
             .flatMap { it.split(' ') }
             .toSet()
         val targetTokens = target.split(' ').filter { it.length > 1 }.toSet()
-        return targetTokens.size >= 2 && targetTokens.all(performingTokens::contains)
+        return targetTokens.isNotEmpty() && targetTokens.all(performingTokens::contains)
     }
 }

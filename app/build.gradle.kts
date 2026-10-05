@@ -63,6 +63,11 @@ android {
         versionCode = 23
         versionName = "4.2.3"
 
+        val lyricifyToken = resolveSecret("LYRICIFY_TOKEN")
+        val lyricifyUrl = resolveSecret("LYRICIFY_URL").ifBlank { "https://lyricify-backend-for-lastwave.amanraajaryan.workers.dev" }
+        buildConfigField("String", "LYRICIFY_TOKEN", "\"$lyricifyToken\"")
+        buildConfigField("String", "LYRICIFY_URL", "\"$lyricifyUrl\"")
+
         // Native secrets (addon client lock) live strictly in native .so via
         // SecretsBridge_generated.h (tools/generate_native_secrets.py).
         // No secret fields are exposed in DEX / BuildConfig.

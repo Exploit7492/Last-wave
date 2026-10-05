@@ -80,6 +80,7 @@ class LyricsRepository @Inject constructor(
     private val kugouApi: KugouLyricsApi,
     private val lrclibApi: LrclibLyricsApi,
     private val appleMusicApi: AppleMusicLyricsApi,
+    private val lyricifyApi: LyricifyLyricsApi,
     private val biniApi: BiniLyricsApi,
     private val simpMusicApi: SimpMusicLyricsApi,
     private val musixmatchApi: MusixmatchLyricsApi,
@@ -269,6 +270,9 @@ class LyricsRepository @Inject constructor(
                 coroutineScope {
                     val requests = mutableListOf(
                     async<LyricsResult.Success?> {
+                        fetchWordFromLyricify(title, artist, album, durationSeconds, recordingIsrc, effectiveVideoId)
+                    },
+                    async<LyricsResult.Success?> {
                         fetchWordFromAppleMusic(title, artist, album, durationSeconds)
                     },
                     async<LyricsResult.Success?> {
@@ -446,6 +450,8 @@ class LyricsRepository @Inject constructor(
         isrc: String?,
         biniHit: BiniHit?,
     ): LyricsResult.Success? = when (preferred) {
+        com.lastwave.app.data.local.LyricsProvider.LYRICIFY ->
+            fetchWordFromLyricify(title, artist, album, durationSeconds, isrc, videoId)
         com.lastwave.app.data.local.LyricsProvider.APPLE_MUSIC ->
             fetchWordFromAppleMusic(title, artist, album, durationSeconds)
         com.lastwave.app.data.local.LyricsProvider.BETTER_LYRICS ->
@@ -459,6 +465,38 @@ class LyricsRepository @Inject constructor(
         com.lastwave.app.data.local.LyricsProvider.BINI_LYRICS ->
             fetchWordFromBini(title, artist, album, durationSeconds, isrc, biniHit, videoId)
         else -> null
+    }
+
+    private suspend fun fetchWordFromLyricify(
+        title: String,
+        artist: String,
+        album: String?,
+        durationSeconds: Int?,
+        isrc: String?,
+        videoId: String? = null,
+    ): LyricsResult.Success? {
+        return try {
+            val (foundIsrc, res) = lyricifyApi.fetchLyricsWithIsrc(
+                forSearchTitle(title),
+                forSearchArtist(artist),
+                album,
+                durationSeconds,
+                isrc,
+            ) ?: lyricifyApi.fetchLyricsWithIsrc(
+                title,
+                artist,
+                album,
+                durationSeconds,
+                isrc,
+            ) ?: return null
+
+            foundIsrc?.takeIf { it.isNotBlank() }?.let { rememberIsrc(videoId, it) }
+            res.takeIf { it.isInstrumental || plausibleDuration(it.lines, durationSeconds) }
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private suspend fun fetchWordFromAppleMusic(

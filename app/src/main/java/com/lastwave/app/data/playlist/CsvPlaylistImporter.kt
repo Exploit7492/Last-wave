@@ -201,13 +201,13 @@ class CsvPlaylistImporter @Inject constructor(
                 if (baseTitle != title) {
                     add("$baseTitle $primaryArtist")
                 }
-            } else {
-                add(title)
-                if (baseTitle != title) {
-                    add(baseTitle)
-                }
+                add("$cleanArtist $title")
             }
-        }.map(String::trim).distinct().take(3)
+            add(title)
+            if (baseTitle != title) {
+                add(baseTitle)
+            }
+        }.map(String::trim).distinct()
     }
 
     private fun matchesRow(raw: CsvRawTrack, target: YouTubeMusicTrack): Boolean {
@@ -315,11 +315,7 @@ class CsvPlaylistImporter @Inject constructor(
         if (sourceList.any { s -> targetList.any { t -> sameText(s, t) } }) return true
         val normSource = normalize(primarySource).removePrefix("the ").trim()
         val normTarget = normalize(primaryTarget).removePrefix("the ").trim()
-        if (normSource.isNotBlank() && normSource == normTarget) return true
-        if (normSource.length >= 4 && normTarget.length >= 4) {
-            if (normSource.contains(normTarget) || normTarget.contains(normSource)) return true
-        }
-        return false
+        return normSource.isNotBlank() && normSource == normTarget
     }
 
     private fun stripSafeVideoLabel(title: String): String = title
@@ -423,13 +419,14 @@ class CsvPlaylistImporter @Inject constructor(
         val albumIndex = headers.indexOfFirst { it in ALBUM_HEADERS }
         val urlIndex = headers.indexOfFirst { it in URL_HEADERS }
 
-        // Only a multi-column first row is treated as a header. In a
+        // Only a multi-column first row without purely numeric index cells is treated as a header. In a
         // single-column file that guess is indistinguishable from data.
         val hasHeader = first.size >= 2 &&
+            !first.any { it.trim().all(Char::isDigit) && it.trim().isNotEmpty() } &&
             (titleIndex >= 0 || artistIndex >= 0 || albumIndex >= 0 || urlIndex >= 0)
         if (first.size == 1 && !hasHeader) return cleanedLines.map(::parseTextTrack)
 
-        val titleColumn = if (titleIndex >= 0) {
+        val titleColumn = if (hasHeader && titleIndex >= 0) {
             titleIndex
         } else if (hasHeader) {
             (0 until first.size).firstOrNull { it != artistIndex && it != albumIndex && it != urlIndex && !isExplicitIndexCol(it) } ?: 0
@@ -437,7 +434,7 @@ class CsvPlaylistImporter @Inject constructor(
             (0 until first.size).firstOrNull { !isExplicitIndexCol(it) } ?: 0
         }
 
-        val artistColumn = if (artistIndex >= 0) {
+        val artistColumn = if (hasHeader && artistIndex >= 0) {
             artistIndex
         } else if (hasHeader) {
             -1
