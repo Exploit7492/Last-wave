@@ -63,10 +63,10 @@ android {
         versionCode = 23
         versionName = "4.2.3"
 
-        val lyricifyToken = resolveSecret("LYRICIFY_TOKEN")
-        val lyricifyUrl = resolveSecret("LYRICIFY_URL")
-        buildConfigField("String", "LYRICIFY_TOKEN", "\"$lyricifyToken\"")
-        buildConfigField("String", "LYRICIFY_URL", "\"$lyricifyUrl\"")
+        val lastWaveLyricsToken = resolveSecret("LASTWAVE_LYRICS_TOKEN")
+        val lastWaveLyricsUrl = resolveSecret("LASTWAVE_LYRICS_URL")
+        buildConfigField("String", "LASTWAVE_LYRICS_TOKEN", "\"$lastWaveLyricsToken\"")
+        buildConfigField("String", "LASTWAVE_LYRICS_URL", "\"$lastWaveLyricsUrl\"")
 
         // Native secrets (addon client lock) live strictly in native .so via
         // SecretsBridge_generated.h (tools/generate_native_secrets.py).
