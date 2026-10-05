@@ -3,11 +3,16 @@
 ## [4.2.4] - 2026-10-05
 
 ### Added & Improved
+- **Resource Usage & Smooth UI:** Optimized rendering pipelines, reduced background resource contention, and smoothed UI interactions.
+- **Fast YouTube Search:** Restored instant 2-pass YouTube search resolution, eliminating multi-stage search fallback delays.
 - **Dolby Atmos Downloads:** Aligned spatial audio capability detection in `TrackDownloadManager` with `MusicPlayer`'s system `Spatializer` check, resolving Atmos download skips on Android 12L+ devices.
 - **DASH Manifest Parser Robustness:** Added resilient XML attribute matching, case-insensitive tag handling, and strict URL scheme checks to prevent malformed segment URLs during segmented downloads.
 - **Playback Warmup & Retry Gating:** Implemented first-song OPUS warmup and tap-to-retry gating to prevent premature auto-skips on transient stream hiccups.
 
 ### Changed & Fixed
+- **Bit-Perfect Audio Issues:** Resolved bit-perfect DAC routing, format lockups, and hardware sample rate mismatches.
+- **Lyrics Sync:** Stabilized lyrics synchronization, eliminated drift, and improved word-by-word timing alignment.
+- **Stretchy Cover Arts:** Fixed stretchy full-bleed cover art visual artifacts, canvas fade transitions, and fluid backdrop rendering.
 - **Version Bump:** Bumped version to 4.2.4 (versionCode 24).
 
 ## [4.2.3] - 2026-10-03

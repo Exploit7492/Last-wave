@@ -1442,18 +1442,9 @@ class InnerTubeMusicApi @Inject constructor(
     ): List<YouTubeMusicTrack> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
         val config = getWebConfig()
-        suspend fun runSearch(params: String?, forceUsGl: Boolean = false): List<YouTubeMusicTrack> {
-            val (hl, gl) = if (forceUsGl) ("en" to "US") else getEffectiveHlGl()
+        suspend fun runSearch(params: String?): List<YouTubeMusicTrack> {
             val body = buildJsonObject {
-                put("context", buildJsonObject {
-                    put("client", buildJsonObject {
-                        put("clientName", "WEB_REMIX")
-                        put("clientVersion", config.clientVersion)
-                        put("hl", hl)
-                        put("gl", gl)
-                        if (!config.visitorData.isNullOrBlank()) put("visitorData", config.visitorData)
-                    })
-                })
+                put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
                 put("query", query.trim())
                 if (params != null) put("params", params)
             }
@@ -1467,46 +1458,12 @@ class InnerTubeMusicApi @Inject constructor(
             )
             return parseSongRenderers(root)
         }
-
-        // 1. Try filtered "Songs" search on YouTube Music
-        var results = runCatching { runSearch("EgWKAQIIAWoKEAkQBRAKEAMQBA==") }.getOrDefault(emptyList())
-
-        // 2. Unfiltered search on YouTube Music when filtered came back empty
-        if (results.isEmpty()) {
-            results = runCatching { runSearch(null) }.getOrDefault(emptyList())
-        }
-
-        // 3. Fallback to US region if local region was restricted or failed
-        if (results.isEmpty()) {
-            results = runCatching { runSearch(null, forceUsGl = true) }.getOrDefault(emptyList())
-        }
-
-        // 4. Fallback to standard YouTube API when YouTube Music fails
-        if (results.isEmpty()) {
-            results = runCatching {
-                val body = buildJsonObject {
-                    put("context", buildJsonObject {
-                        put("client", buildJsonObject {
-                            put("clientName", "WEB")
-                            put("clientVersion", "2.20240101.00.00")
-                            put("hl", "en")
-                            put("gl", "US")
-                        })
-                    })
-                    put("query", query.trim())
-                }
-                val root = post(
-                    url = "$YOUTUBE_API/search?key=${config.apiKey}&prettyPrint=false",
-                    body = body,
-                    clientName = "WEB",
-                    clientVersion = "2.20240101.00.00",
-                    userAgent = WEB_USER_AGENT,
-                    origin = YOUTUBE_ORIGIN,
-                    referer = "$YOUTUBE_ORIGIN/",
-                    callTimeoutMs = SEARCH_REQUEST_TIMEOUT_MS,
-                )
-                parseSongRenderers(root)
-            }.getOrDefault(emptyList())
+        val filtered = runCatching { runSearch("EgWKAQIIAWoKEAkQBRAKEAMQBA==") }.getOrDefault(emptyList())
+        // Unfiltered POST only when the filtered search came back empty (rare miss).
+        val results = if (filtered.isEmpty()) {
+            runCatching { runSearch(null) }.getOrDefault(emptyList())
+        } else {
+            filtered
         }
 
         val finalResults = results
