@@ -413,7 +413,7 @@ class CsvPlaylistImporter @Inject constructor(
 
         val titleIndex = headers.indexOfFirst { it in PRIMARY_TITLE_HEADERS }.takeIf { it >= 0 }
             ?: headers.indexOfFirst { it in SECONDARY_TITLE_HEADERS }.takeIf { it >= 0 }
-            ?: headers.indexOfFirst { it == "track" && !isExplicitIndexCol(it) }.takeIf { it >= 0 }
+            ?: headers.indexOfFirst { it == "track" }.takeIf { it >= 0 && !isExplicitIndexCol(it) }
             ?: -1
 
         val artistIndex = headers.indexOfFirst { it in PRIMARY_ARTIST_HEADERS }.takeIf { it >= 0 }
