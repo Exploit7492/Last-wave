@@ -606,13 +606,20 @@ private fun ModernWordByWordLine(
                             if (textLength == 0) return@drawWithContent
                             val pos = currentPositionMs()
                             var fill = 0f
+                            var sylIdx = -1
+                            var sylP = 0f
                             for (i in line.syllables.indices) {
                                 val syl = line.syllables[i]
                                 if (pos < syl.timeMs) break
                                 val (cs, ce) = charRanges[i]
-                                val p = if (syl.durationMs <= 0L) 1f
+                                val linear = if (syl.durationMs <= 0L) 1f
                                 else ((pos - syl.timeMs).toFloat() / syl.durationMs).coerceIn(0f, 1f)
+                                // Mild ease-out: a sung syllable attacks fast and
+                                // sustains, so a linear wipe reads as lagging.
+                                val p = 1f - Math.pow((1f - linear).toDouble(), 1.4).toFloat()
                                 fill = cs + (ce - cs) * p
+                                sylIdx = i
+                                sylP = p
                                 if (p < 1f) break
                             }
                             if (fill <= 0f) return@drawWithContent
@@ -620,14 +627,37 @@ private fun ModernWordByWordLine(
                                 drawContent()
                                 return@drawWithContent
                             }
-                            val charIdx = fill.toInt().coerceIn(0, textLength - 1)
-                            val frac = fill - charIdx
-                            val lineIdx = l.getLineForOffset(charIdx)
-                            val x0 = l.getHorizontalPosition(charIdx, true)
-                            val x1 = if (charIdx + 1 < textLength && l.getLineForOffset(charIdx + 1) == lineIdx) {
-                                l.getHorizontalPosition(charIdx + 1, true)
-                            } else if (isRtl) l.getLineLeft(lineIdx) else l.getLineRight(lineIdx)
-                            val x = x0 + (x1 - x0) * frac
+                            // Interpolate across the syllable's pixel extent, not
+                            // per char: in Indic/complex scripts offsets inside a
+                            // grapheme cluster (matras, conjuncts) report stalled
+                            // or backward x, which froze/jumped the wipe.
+                            val (sCs, sCe) = charRanges[sylIdx]
+                            val startIdx = sCs.coerceIn(0, textLength - 1)
+                            val lastIdx = (sCe - 1).coerceIn(startIdx, textLength - 1)
+                            val sameLine = l.getLineForOffset(startIdx) == l.getLineForOffset(lastIdx)
+                            val lineIdx: Int
+                            val x: Float
+                            var feather = 12f
+                            if (sameLine) {
+                                lineIdx = l.getLineForOffset(startIdx)
+                                val xs = l.getHorizontalPosition(startIdx, true)
+                                val xe = if (sCe < textLength && l.getLineForOffset(sCe) == lineIdx) {
+                                    l.getHorizontalPosition(sCe, true)
+                                } else if (isRtl) l.getLineLeft(lineIdx) else l.getLineRight(lineIdx)
+                                x = xs + (xe - xs) * sylP
+                                // Soft edge proportional to the syllable: short
+                                // syllables stay crisp, long held notes glide.
+                                feather = (kotlin.math.abs(xe - xs) * 0.3f).coerceIn(5f, 18f)
+                            } else {
+                                val charIdx = fill.toInt().coerceIn(0, textLength - 1)
+                                val frac = fill - charIdx
+                                lineIdx = l.getLineForOffset(charIdx)
+                                val x0 = l.getHorizontalPosition(charIdx, true)
+                                val x1 = if (charIdx + 1 < textLength && l.getLineForOffset(charIdx + 1) == lineIdx) {
+                                    l.getHorizontalPosition(charIdx + 1, true)
+                                } else if (isRtl) l.getLineLeft(lineIdx) else l.getLineRight(lineIdx)
+                                x = x0 + (x1 - x0) * frac
+                            }
                             val top = l.getLineTop(lineIdx)
                             val bottom = l.getLineBottom(lineIdx)
 
@@ -635,9 +665,8 @@ private fun ModernWordByWordLine(
                             val checkpoint = canvas.saveLayer(0f, 0f, size.width, size.height, null)
                             drawContent()
 
-                            val feather = 24f
                             if (isRtl) {
-                                val xStart = (x - 8f).coerceAtLeast(0f)
+                                val xStart = (x - feather).coerceAtLeast(0f)
                                 val xEnd = (x + feather).coerceAtMost(size.width)
                                 if (xStart > 0f) {
                                     canvas.drawRect(0f, top, xStart, bottom, clearPaint)
@@ -653,7 +682,7 @@ private fun ModernWordByWordLine(
                                 }
                             } else {
                                 val xStart = (x - feather).coerceAtLeast(0f)
-                                val xEnd = (x + 8f).coerceAtMost(size.width)
+                                val xEnd = (x + feather).coerceAtMost(size.width)
                                 if (xEnd < size.width) {
                                     canvas.drawRect(xEnd, top, size.width, bottom, clearPaint)
                                 }

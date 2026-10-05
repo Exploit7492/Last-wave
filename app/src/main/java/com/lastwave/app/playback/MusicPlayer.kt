@@ -2438,9 +2438,13 @@ class MusicPlayer @Inject constructor(
             if (progress >= 1f || outgoing.playbackState == Player.STATE_ENDED || outgoing.playerError != null) {
                 cancelCrossfade()
             } else {
-                val angle = progress * (Math.PI / 2.0)
-                player.volume = kotlin.math.sin(angle).toFloat()
-                outgoing.volume = kotlin.math.cos(angle).toFloat()
+                // Perceptual fade: outgoing ramps down, incoming ramps up.
+                // Equal-power sin/cos kept both near full level for most of
+                // the window, which sounded like two songs mixed together.
+                val outGain = (1f - progress) * (1f - progress)
+                val inGain = progress * progress
+                player.volume = inGain
+                outgoing.volume = outGain
                 outgoing.playWhenReady = player.isPlaying
             }
             return false
@@ -2757,11 +2761,12 @@ class MusicPlayer @Inject constructor(
      *  "Playback interrupted") instead of dropping to stereo. */
     private val isAtmosDecoderAvailable: Boolean by lazy {
         val platform = runCatching {
-            val codecList = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+            val codecList = MediaCodecList(MediaCodecList.ALL_CODECS)
             codecList.codecInfos.any { info ->
                 !info.isEncoder && info.supportedTypes.any { type ->
                     type.equals("audio/eac3-joc", ignoreCase = true) ||
-                        type.equals("audio/eac3", ignoreCase = true)
+                        type.equals("audio/eac3", ignoreCase = true) ||
+                        type.equals("audio/ac3", ignoreCase = true)
                 }
             }
         }.getOrDefault(false)
@@ -2775,14 +2780,15 @@ class MusicPlayer @Inject constructor(
     }
 
     fun isSpatialAudioSupportedOnDevice(): Boolean {
+        if (isAtmosDecoderAvailable) return true
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S_V2) {
-            val am = audioManager ?: return isAtmosDecoderAvailable
+            val am = audioManager ?: return false
             val spatializer = am.spatializer
             if (spatializer.isAvailable || spatializer.isEnabled) {
                 return true
             }
         }
-        return isAtmosDecoderAvailable
+        return false
     }
 
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.S_V2)
