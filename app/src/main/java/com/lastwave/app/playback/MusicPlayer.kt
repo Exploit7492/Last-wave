@@ -474,20 +474,15 @@ class MusicPlayer @Inject constructor(
      * depth straight back, so the pill is correct from the first frame
      * regardless of cache-key bookkeeping.
      */
-    private var pendingQualityMediaId: String? = null
-    private var pendingQualityStream: ResolvedStream? = null
+    private val pendingQualities = ConcurrentHashMap<String, ResolvedStream>()
 
     private fun stagePendingQuality(mediaId: String, stream: ResolvedStream) {
-        pendingQualityMediaId = mediaId
-        pendingQualityStream = stream
+        pendingQualities[mediaId] = stream
     }
 
     /** Stashed stream for [mediaId], clearing the stash so it is used once. */
     private fun consumePendingQuality(mediaId: String): ResolvedStream? {
-        val staged = pendingQualityStream?.takeIf { pendingQualityMediaId == mediaId }
-        pendingQualityMediaId = null
-        pendingQualityStream = null
-        return staged
+        return pendingQualities.remove(mediaId)
     }
 
     /**
@@ -635,7 +630,8 @@ class MusicPlayer @Inject constructor(
             // song at the same position from a better source. It reports as
             // a playlist change but is not the queue moving on: skip history,
             // scrobble and re-resolve bookkeeping for it.
-            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED &&
+            if ((reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED ||
+                 reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) &&
                 mediaItem?.mediaId != null &&
                 mediaItem.mediaId == swappingMediaId
             ) {
@@ -672,6 +668,12 @@ class MusicPlayer @Inject constructor(
                 // The stream we staged for this exact mediaId, if any. Taken
                 // before the reset so the badge survives it.
                 val stagedQuality = consumePendingQuality(mediaItem.mediaId)
+                    ?: currentTrack.mediaIdKey().let(::consumePendingQuality)
+                    ?: currentTrack.videoId?.let(::consumePendingQuality)
+                val stream = stagedQuality
+                    ?: mediaItem.localConfiguration?.customCacheKey?.let(preparedStreams::get)
+                    ?: preparedStreams.values.firstOrNull { it.url == mediaItem.localConfiguration?.uri?.toString() }
+                    ?: findPreparedStreamFor(currentTrack, currentTrack.videoId, currentTrack.mediaIdKey() in losslessBypassMediaIds)
                 _state.update {
                     it.copy(
                         current = currentTrack,
@@ -682,42 +684,36 @@ class MusicPlayer @Inject constructor(
                         queue = if (currentQueue.isNotEmpty()) currentQueue else it.queue,
                         isBuffering = true,
                         error = null,
-                        // New item owns its badge (same reason as the
-                        // resolveAndPlayQueueItem reset above). Only the
-                        // resolved stream can restore it: the decoder is no
-                        // longer allowed to invent a depth.
-                        audioCodec = null,
-                        bitrateKbps = null,
-                        isLossless = false,
-                        bitDepth = null,
-                        samplingRateKHz = null,
+                        audioCodec = stream?.audioCodec,
+                        bitrateKbps = stream?.bitrateKbps,
+                        isLossless = stream?.isLossless == true,
+                        bitDepth = stream?.bitDepth,
+                        samplingRateKHz = if (isSpatialAudioCodec(stream?.audioCodec)) 48.0 else stream?.samplingRateKHz,
                     )
                 }
                 decodedSampleRateHz = 0
-                (stagedQuality ?: mediaItem.localConfiguration
-                    ?.customCacheKey
-                    ?.let(preparedStreams::get))
-                    ?.let { stream ->
-                        publishResolvedQuality(stream, expectedMediaId = mediaItem.mediaId)
-                        applyDacRoutingFor(dacRateFor(stream), stream.audioCodec)
-                        if (!stream.isLossless && stream.audioCodec != "DOLBY ATMOS") {
-                            scheduleQualityUpgrade(
-                                track = currentTrack,
-                                expectedMediaId = mediaItem.mediaId,
-                                generation = playRequestGeneration.get(),
-                                currentStream = stream,
-                            )
-                        }
-                    } ?: run {
-                        applyDacRoutingFor(currentSourceRateHz())
+                stream?.let { s ->
+                    publishResolvedQuality(s, expectedMediaId = mediaItem.mediaId)
+                    applyDacRoutingFor(dacRateFor(s), s.audioCodec)
+                    if (!s.isLossless && s.audioCodec != "DOLBY ATMOS") {
+                        scheduleQualityUpgrade(
+                            track = currentTrack,
+                            expectedMediaId = mediaItem.mediaId,
+                            generation = playRequestGeneration.get(),
+                            currentStream = s,
+                        )
                     }
+                } ?: run {
+                    applyDacRoutingFor(currentSourceRateHz())
+                }
                 if (outgoingPlayer == null) cancelCrossfade()
                 // Queue placeholders are intentionally non-playable until
                 // their signed stream has been resolved. Resolve an item
                 // before Media3 can attempt to open its lastwave:// URI.
-                val prepared = mediaItem.localConfiguration
-                    ?.customCacheKey
-                    ?.let(preparedStreams::get)
+                val prepared = stream
+                    ?: mediaItem.localConfiguration?.customCacheKey?.let(preparedStreams::get)
+                    ?: preparedStreams.values.firstOrNull { it.url == mediaItem.localConfiguration?.uri?.toString() }
+                    ?: findPreparedStreamFor(currentTrack, currentTrack.videoId, currentTrack.mediaIdKey() in losslessBypassMediaIds)
                 if (mediaItem.localConfiguration?.uri?.scheme == "lastwave" || prepared?.isExpired() == true) {
                     // During lazy-player construction a restored queue is
                     // installed before the lazy value is published. Defer
@@ -937,6 +933,10 @@ class MusicPlayer @Inject constructor(
                 val preparedHit = findPreparedStreamFor(track, videoId, bypassLossless)
                 if (preparedHit != null) {
                     android.util.Log.i("MusicPlayer", "[MEDIA3] loader prepared-hit '${track.title}' key=${preparedHit.cacheKey}")
+                    applicationScope.launch(Dispatchers.Main.immediate) {
+                        stagePendingQuality(track.mediaIdKey(), preparedHit)
+                        track.videoId?.let { stagePendingQuality(it, preparedHit) }
+                    }
                     preparedHit
                 } else {
                     runCatching {
@@ -946,6 +946,8 @@ class MusicPlayer @Inject constructor(
                                 android.util.Log.i("MusicPlayer", "[MEDIA3] loader resolved '${track.title}' key=${resolved.cacheKey} codec=${resolved.audioCodec}")
                                 applicationScope.launch(Dispatchers.Main.immediate) {
                                     registerPreparedStream(resolved)
+                                    stagePendingQuality(track.mediaIdKey(), resolved)
+                                    track.videoId?.let { stagePendingQuality(it, resolved) }
                                     val isCurrentlyPlaying = track.mediaIdKey() == _state.value.current?.mediaIdKey()
                                     if (isCurrentlyPlaying) {
                                         publishResolvedQuality(resolved, expectedMediaId = track.mediaIdKey())
@@ -3383,7 +3385,10 @@ class MusicPlayer @Inject constructor(
         unavailableSkipJob?.cancel()
         unavailableSkipJob = null
         val mediaItem = player.getMediaItemAt(index)
+        val track = mediaItem.toPlayableTrack()
         val prepared = mediaItem.localConfiguration?.customCacheKey?.let(preparedStreams::get)
+            ?: preparedStreams.values.firstOrNull { it.url == mediaItem.localConfiguration?.uri?.toString() }
+            ?: findPreparedStreamFor(track, track.videoId, track.mediaIdKey() in losslessBypassMediaIds)
         if (mediaItem.localConfiguration?.uri?.scheme != "lastwave" && prepared?.isExpired() != true) {
             // Already resolved: publish quality synchronously so the badge is
             // correct from the first frame (no transition may fire for a
@@ -3392,6 +3397,8 @@ class MusicPlayer @Inject constructor(
             // clears these very fields.
             prepared?.let { stream ->
                 stagePendingQuality(mediaItem.mediaId, stream)
+                stagePendingQuality(track.mediaIdKey(), stream)
+                track.videoId?.let { stagePendingQuality(it, stream) }
                 publishResolvedQuality(stream, expectedMediaId = mediaItem.mediaId)
             }
             takeOverPlayback(index, mediaItem.mediaId)
@@ -3399,7 +3406,6 @@ class MusicPlayer @Inject constructor(
             return
         }
 
-        val track = mediaItem.toPlayableTrack()
         val expectedMediaId = mediaItem.mediaId
         resetPlayhead(0L, expectedMediaId)
         resolvingMediaIds[expectedMediaId] = generation
@@ -3453,6 +3459,8 @@ class MusicPlayer @Inject constructor(
                     // seek hands the resolved depth straight back instead of
                     // blanking the pill.
                     stagePendingQuality(expectedMediaId, resolved)
+                    stagePendingQuality(track.mediaIdKey(), resolved)
+                    track.videoId?.let { stagePendingQuality(it, resolved) }
                     publishResolvedQuality(resolved, expectedMediaId = expectedMediaId)
                     applyDacRoutingFor(dacRateFor(resolved))
                     logStreamEvent("queue-prepare", resolved, retry = 0)
@@ -3494,6 +3502,8 @@ class MusicPlayer @Inject constructor(
                             }
                             registerPreparedStream(ytFallback)
                             stagePendingQuality(expectedMediaId, ytFallback)
+                            stagePendingQuality(track.mediaIdKey(), ytFallback)
+                            track.videoId?.let { stagePendingQuality(it, ytFallback) }
                             publishResolvedQuality(ytFallback, expectedMediaId = expectedMediaId)
                             applyDacRoutingFor(dacRateFor(ytFallback))
                             logStreamEvent("queue-prepare-yt-fallback", ytFallback, retry = 0)
@@ -3923,6 +3933,8 @@ class MusicPlayer @Inject constructor(
                     return@withContext false
                 }
                 registerPreparedStream(resolved)
+                stagePendingQuality(queuedTrack.mediaIdKey(), resolved)
+                queuedTrack.videoId?.let { stagePendingQuality(it, resolved) }
                 replaceMediaItemPreservingShuffle(nextIndex, queuedTrack.toMediaItem(resolved))
                 logStreamEvent("next-prepared", resolved, retry = 0)
                 true
@@ -5730,8 +5742,12 @@ class MusicPlayer @Inject constructor(
 
     private fun publishResolvedQuality(resolved: ResolvedStream, expectedMediaId: String? = null) {
         if (expectedMediaId != null) {
-            val currentMediaId = _state.value.current?.mediaIdKey()
-            if (currentMediaId != null && currentMediaId != expectedMediaId) {
+            val current = _state.value.current
+            val currentMediaId = current?.mediaIdKey()
+            val matches = currentMediaId == expectedMediaId ||
+                current?.videoId == expectedMediaId ||
+                (playerDelegate.isInitialized() && player.currentMediaItem?.mediaId == expectedMediaId)
+            if (current != null && !matches) {
                 android.util.Log.d(
                     "MusicPlayer",
                     "Quality Pill: ignoring publishResolvedQuality for non-current track (expected=$expectedMediaId, current=$currentMediaId)",
@@ -5997,6 +6013,10 @@ class MusicPlayer @Inject constructor(
                     // Same song, same position, better source: mark so the
                     // transition callback doesn't treat it as a new track.
                     swappingMediaId = updatedMediaItem.mediaId
+                    registerPreparedStream(swapCandidate)
+                    stagePendingQuality(updatedMediaItem.mediaId, swapCandidate)
+                    stagePendingQuality(track.mediaIdKey(), swapCandidate)
+                    track.videoId?.let { stagePendingQuality(it, swapCandidate) }
                     replaceMediaItemPreservingShuffle(currentIndex, updatedMediaItem)
                     lastSeekTargetMs = swapPos
                     lastSeekAtElapsedMs = SystemClock.elapsedRealtime()
@@ -6846,6 +6866,13 @@ class MusicPlayer @Inject constructor(
         } else {
             previous.positionMs
         }
+        val hasExplicitPrevious = sameTrack && isExplicitQuality(previous.audioCodec, previous.bitDepth, previous.samplingRateKHz)
+        val streamForCurrent = if (!hasExplicitPrevious) {
+            player.currentMediaItem?.localConfiguration?.customCacheKey?.let(preparedStreams::get)
+                ?: preparedStreams.values.firstOrNull { it.url == player.currentMediaItem?.localConfiguration?.uri?.toString() }
+                ?: current?.let { findPreparedStreamFor(it, it.videoId, it.mediaIdKey() in losslessBypassMediaIds) }
+        } else null
+
         _state.value = MusicPlayerState(
             current = current,
             queue = queue,
@@ -6860,11 +6887,11 @@ class MusicPlayer @Inject constructor(
             shuffleEnabled = player.shuffleModeEnabled,
             repeatMode = player.repeatMode,
             speed = player.playbackParameters.speed,
-            bitrateKbps = previous.bitrateKbps.takeIf { sameTrack },
-            audioCodec = previous.audioCodec.takeIf { sameTrack },
-            isLossless = previous.isLossless && sameTrack,
-            bitDepth = previous.bitDepth.takeIf { sameTrack },
-            samplingRateKHz = previous.samplingRateKHz.takeIf { sameTrack },
+            bitrateKbps = previous.bitrateKbps.takeIf { hasExplicitPrevious } ?: streamForCurrent?.bitrateKbps,
+            audioCodec = previous.audioCodec.takeIf { hasExplicitPrevious } ?: streamForCurrent?.audioCodec,
+            isLossless = (previous.isLossless && sameTrack) || (streamForCurrent?.isLossless == true),
+            bitDepth = previous.bitDepth.takeIf { hasExplicitPrevious } ?: streamForCurrent?.bitDepth,
+            samplingRateKHz = previous.samplingRateKHz.takeIf { hasExplicitPrevious } ?: streamForCurrent?.samplingRateKHz,
             sleepTimerRemainingMs = sleepTimerDeadlineMs?.minus(SystemClock.elapsedRealtime())?.coerceAtLeast(0),
             error = if (isPlayingState) null else previous.error,
         )
