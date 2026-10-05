@@ -57,20 +57,34 @@ class YouTubeLoginViewModel @Inject constructor(
             val previous = ytAuthManager.connection.value
             try {
                 ytAuthManager.connect(rawCookieHeader ?: return@launch, "", null, null)
+                // Slow devices: the DataStore collector can re-emit the old
+                // (disconnected) value after the optimistic update, making
+                // fetchAccountInfo() bail instantly. Wait until memory matches
+                // what was just persisted.
+                kotlinx.coroutines.withTimeoutOrNull(4_000L) { ytAuthManager.awaitLoadedConnection() }
                 // A successful YouTube Music login ends guest mode: the
                 // LaunchGate then routes on the YT connection itself.
                 runCatching { sessionPreferences.exitGuestMode() }
                 // Verify the session is really authenticated before reporting
-                // success (desktop `verifyConnection()` parity: an
-                // authenticated browse, not just cookie presence). Retried
-                // once: a single guest-shaped 200 (stale visitor data,
-                // transient bot-check) or a network blip must not fail a
-                // good sign-in, which is what some devices kept hitting.
-                val info = runCatching { innerTube.fetchAccountInfo() }.getOrNull()
-                    ?: runCatching { innerTube.fetchAccountInfo() }.getOrNull()
-                    ?: throw java.io.IOException("YouTube rejected the session — sign in again.")
-                val displayName = info.accountName.ifBlank { "Google account" }
-                ytAuthManager.updateAccountIdentity(info.accountName, info.channelHandle, info.photoUrl)
+                // success. Retried with backoff: right after sign-in Google is
+                // still finishing its cookie redirect chain and the WebView may
+                // not have flushed the final SAPISID/LOGIN_INFO yet, so re-read
+                // cookies between attempts instead of hammering instantly.
+                var info: com.lastwave.app.data.music.YtAccountInfo? = null
+                for ((attempt, waitMs) in longArrayOf(0L, 1_200L, 2_500L, 4_000L).withIndex()) {
+                    if (waitMs > 0L) kotlinx.coroutines.delay(waitMs)
+                    if (attempt > 0) {
+                        runCatching { android.webkit.CookieManager.getInstance().flush() }
+                        if (ytAuthManager.refreshCookiesFromCookieManager()) {
+                            kotlinx.coroutines.withTimeoutOrNull(2_000L) { ytAuthManager.awaitLoadedConnection() }
+                        }
+                    }
+                    info = runCatching { innerTube.fetchAccountInfo() }.getOrNull()
+                    if (info != null) break
+                }
+                val verified = info ?: throw java.io.IOException("YouTube rejected the session — sign in again.")
+                val displayName = verified.accountName.ifBlank { "Google account" }
+                ytAuthManager.updateAccountIdentity(verified.accountName, verified.channelHandle, verified.photoUrl)
                 _uiState.update { it.copy(verifying = false, connectedName = displayName) }
                 viewModelScope.launch {
                     runCatching { syncManager.syncNow("connected") }
