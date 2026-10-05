@@ -405,6 +405,14 @@ class LosslessMusicApi @Inject constructor(
         private val DIACRITICS = Regex("\\p{M}+")
         private val NON_ALPHANUMERIC = Regex("[^a-z0-9]+")
         private val MULTI_SPACE = Regex("\\s+")
+
+        fun normalizeText(raw: String): String = Normalizer.normalize(raw, Normalizer.Form.NFD)
+            .replace(DIACRITICS, "")
+            .lowercase(Locale.ROOT)
+            .replace("$", "s")
+            .replace(NON_ALPHANUMERIC, " ")
+            .replace(MULTI_SPACE, " ")
+            .trim()
         private val TOPIC_CHANNEL_SUFFIX = Regex("""(?i)\s*[-–—]\s*topic\s*$|\s+topic\s*$""")
         private val PIPE_NOISE = Regex("""\s*\|.*$""")
         private val SOUNDTRACK_SUFFIX = Regex(
@@ -800,7 +808,7 @@ class LosslessMusicApi @Inject constructor(
                     ?: continue
 
                 if (rawUrl in excludedUrls) continue
-                if (isDecoyStream(rawUrl) || isDecoyStream(stream.url)) {
+                if (isDecoyStream(rawUrl) || (stream?.url?.let(::isDecoyStream) == true)) {
                     Log.w(TAG, "resolveFromAddon: candidate $trackId returned decoy prank stream ($rawUrl); skipping")
                     continue
                 }
@@ -809,9 +817,9 @@ class LosslessMusicApi @Inject constructor(
                 // Atmos is a property of the STREAM (audioMode flag or spatial
                 // URL), never of the request: a stereo fallback for an Atmos
                 // preference must be labeled (and badged) as what it is.
-                val isStreamAtmos = stream.isDolbyAtmos ||
-                    (stream.audioMode?.contains("ATMOS", ignoreCase = true) == true) ||
-                    isAtmosCodec(stream.codec) ||
+                val isStreamAtmos = stream?.isDolbyAtmos == true ||
+                    (stream?.audioMode?.contains("ATMOS", ignoreCase = true) == true) ||
+                    isAtmosCodec(stream?.codec) ||
                     isAtmosStreamUrl(rawUrl)
 
                 // Atmos isolation: a hi-res/CD/320 request must never come home
@@ -824,17 +832,18 @@ class LosslessMusicApi @Inject constructor(
                 }
                 val manifestSampleRate = manifestSampleRateOf(rawUrl)
                 val manifestDepth = manifestBitDepthOf(rawUrl)
-                val rawSampleRate = if (stream.sampleRate > 1000) stream.sampleRate else stream.sampleRate * 1000.0
+                val streamSampleRate = stream?.sampleRate ?: 0.0
+                val rawSampleRate = if (streamSampleRate > 1000.0) streamSampleRate else if (streamSampleRate > 0.0) streamSampleRate * 1000.0 else 44100.0
                 val effectiveSampleRate = manifestSampleRate?.toDouble() ?: rawSampleRate
                 val isHiResFlagged = candidate.isHiResFlagged() ||
-                    stream.quality.contains("HI_RES", ignoreCase = true) ||
-                    stream.quality.contains("HI-RES", ignoreCase = true) ||
-                    stream.audioQuality.contains("HI_RES", ignoreCase = true) ||
-                    stream.audioQuality.contains("HI-RES", ignoreCase = true) ||
-                    stream.quality.contains("24-BIT", ignoreCase = true) ||
-                    stream.quality.contains("24BIT", ignoreCase = true) ||
-                    stream.quality.contains("24/") ||
-                    stream.bitDepth == 24 ||
+                    stream?.quality?.contains("HI_RES", ignoreCase = true) == true ||
+                    stream?.quality?.contains("HI-RES", ignoreCase = true) == true ||
+                    stream?.audioQuality?.contains("HI_RES", ignoreCase = true) == true ||
+                    stream?.audioQuality?.contains("HI-RES", ignoreCase = true) == true ||
+                    stream?.quality?.contains("24-BIT", ignoreCase = true) == true ||
+                    stream?.quality?.contains("24BIT", ignoreCase = true) == true ||
+                    stream?.quality?.contains("24/") == true ||
+                    stream?.bitDepth == 24 ||
                     (manifestDepth ?: 0) >= 24 ||
                     (wantsHiRes && q == "hi_res") ||
                     effectiveSampleRate > 48000.0
@@ -842,7 +851,7 @@ class LosslessMusicApi @Inject constructor(
                 // these bytes) > addon numbers > hi-res inference. 0 stays
                 // unknown — never fabricate 16 for an unmeasured depth.
                 val reportedDepth = manifestDepth
-                    ?: stream.bitDepth?.takeIf { it > 0 }
+                    ?: stream?.bitDepth?.takeIf { it > 0 }
                     ?: candidate.bitDepth?.takeIf { it > 0 }
                 val effectiveBitDepth = when {
                     (reportedDepth ?: 0) > 0 -> reportedDepth
@@ -850,13 +859,14 @@ class LosslessMusicApi @Inject constructor(
                     isHiResFlagged -> 24
                     else -> null
                 }
+                val streamCodec = stream?.codec.orEmpty()
                 val formatId = when {
                     isStreamAtmos -> QUALITY_DOLBY_ATMOS
                     (effectiveBitDepth ?: 0) > 16 || effectiveSampleRate > 48000.0 || isHiResFlagged -> {
                         if (effectiveSampleRate > 96000.0) QUALITY_MAX_HI_RES else QUALITY_HI_RES_96
                     }
-                    stream.codec.equals("flac", ignoreCase = true) || effectiveBitDepth == 16 -> QUALITY_CD_LOSSLESS
-                    stream.quality.equals("high", ignoreCase = true) -> QUALITY_MP3_320
+                    streamCodec.equals("flac", ignoreCase = true) || effectiveBitDepth == 16 -> QUALITY_CD_LOSSLESS
+                    stream?.quality?.equals("high", ignoreCase = true) == true -> QUALITY_MP3_320
                     else -> QUALITY_CD_LOSSLESS
                 }
 
@@ -872,7 +882,7 @@ class LosslessMusicApi @Inject constructor(
                     continue
                 }
 
-                Log.i(TAG, "resolveFromAddon: Acquired stream for track $trackId: formatId=$formatId, bitDepth=${effectiveBitDepth ?: "unknown"}, sampleRate=${effectiveSampleRate}Hz, codec=${stream.codec}")
+                Log.i(TAG, "resolveFromAddon: Acquired stream for track $trackId: formatId=$formatId, bitDepth=${effectiveBitDepth ?: "unknown"}, sampleRate=${effectiveSampleRate}Hz, codec=$streamCodec")
                 consecutiveFailures = 0
                 failureCooldownUntilMs = 0L
 
@@ -894,12 +904,12 @@ class LosslessMusicApi @Inject constructor(
                     bitDepth = effectiveBitDepth ?: (if (isHiResFlagged || effectiveSampleRate > 48000.0) 24 else 0),
                     samplingRate = effectiveSampleRate / 1000.0,
                     formatId = formatId,
-                    bitrateKbps = stream.bitrate?.let { if (it > 10_000) it / 1000 else it },
+                    bitrateKbps = stream?.bitrate?.let { if (it > 10_000) it / 1000 else it },
                     trackId = candidate.id,
                     durationSeconds = candidate.duration,
                     audioCodecOverride = when {
                         isStreamAtmos -> "DOLBY ATMOS"
-                        stream.codec.equals("mp3", ignoreCase = true) -> "MP3 320k"
+                        streamCodec.equals("mp3", ignoreCase = true) -> "MP3 320k"
                         else -> null
                     },
                 )
@@ -1154,14 +1164,6 @@ class LosslessMusicApi @Inject constructor(
         }
         return previous[b.length]
     }
-
-    private fun normalizeText(raw: String): String = Normalizer.normalize(raw, Normalizer.Form.NFD)
-        .replace(DIACRITICS, "")
-        .lowercase(Locale.ROOT)
-        .replace("$", "s")
-        .replace(NON_ALPHANUMERIC, " ")
-        .replace(MULTI_SPACE, " ")
-        .trim()
 
     private fun identityVariants(raw: String, artist: String): Set<String> {
         val withoutArtistPrefix = if (artist.isBlank()) raw else raw.replaceFirst(
