@@ -353,7 +353,8 @@ private fun SyncedLyricsList(
         }
     }
 
-    if (listState.isScrollInProgress) {
+    val isDragged by listState.interactionSource.collectIsDraggedAsState()
+    if (isDragged) {
         userScrolledTime = System.currentTimeMillis()
     }
 
@@ -1256,6 +1257,10 @@ private suspend fun LazyListState.animateScrollBy(pixels: Float) {
             pixels * eased
         }
         val delta = target - consumed
-        consumed += delta - scrollBy(delta)
+        val scrolled = scrollBy(delta)
+        consumed += scrolled
+        if (scrolled == 0f && delta != 0f) {
+            break
+        }
     }
 }
