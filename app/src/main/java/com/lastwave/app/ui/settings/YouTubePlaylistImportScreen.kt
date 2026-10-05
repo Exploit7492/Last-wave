@@ -873,14 +873,15 @@ private fun PlaylistPreviewModal(
 
 private fun queryFileName(context: Context, uri: Uri): String? {
     var name: String? = null
-    val returnCursor = context.contentResolver.query(uri, null, null, null, null)
-    if (returnCursor != null) {
-        val nameIndex = returnCursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-        returnCursor.moveToFirst()
-        if (nameIndex != -1) {
-            name = returnCursor.getString(nameIndex)
+    runCatching {
+        context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (nameIndex != -1) {
+                    name = cursor.getString(nameIndex)
+                }
+            }
         }
-        returnCursor.close()
     }
-    return name
+    return name ?: uri.lastPathSegment?.substringAfterLast('/')
 }

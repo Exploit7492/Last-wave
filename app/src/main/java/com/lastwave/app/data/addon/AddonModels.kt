@@ -126,7 +126,12 @@ data class AddonTrack(
     @SerialName("streamInfo") val rawStreamInfo: JsonElement? = null,
     @SerialName("stream_info") val rawStreamInfoSnake: JsonElement? = null,
     @SerialName("info") val rawInfo: JsonElement? = null,
+    @SerialName("streamURL") val streamURL: String? = null,
+    @SerialName("streamUrl") val streamUrlCamel: String? = null,
 ) {
+    val directStreamUrl: String?
+        get() = streamURL?.takeIf { it.isNotBlank() } ?: streamUrlCamel?.takeIf { it.isNotBlank() }
+
     val bitDepth: Int?
         get() = extractBitDepthFromElement(rawMetadata)
             ?: extractBitDepthFromElement(rawMeta)

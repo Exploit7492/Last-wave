@@ -77,7 +77,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.text.TextLayoutResult
 import com.lastwave.app.ui.theme.LocalLiquidGlass
 import com.lastwave.app.ui.theme.LiquidGlassPreset
 import com.lastwave.app.ui.theme.LiquidGlassSurface
@@ -500,40 +504,85 @@ private fun ModernWordByWordLine(
             return@CompositionLocalProvider
         }
 
-        val positionMs = currentPositionMs()
         val displayTexts = remember(line) { resolveSyllableDisplayTexts(line) }
-        val annotatedText = buildAnnotatedString {
-            line.syllables.forEachIndexed { sIndex, syllable ->
-                val elapsed = positionMs - syllable.timeMs
-                val duration = syllable.durationMs.coerceAtLeast(1L)
-                val completed = elapsed >= duration
-                val activeWord = elapsed in 0 until duration
-                val nextWordTime = line.syllables.getOrNull(sIndex + 1)?.timeMs
-                val reachedWithoutDuration = syllable.durationMs <= 0L &&
-                    positionMs >= syllable.timeMs && (nextWordTime == null || positionMs < nextWordTime)
-
-                val wordColor = when {
-                    completed || reachedWithoutDuration -> activeColor
-                    activeWord -> activeColor.copy(alpha = 0.85f)
-                    else -> inactiveColor.copy(alpha = 0.44f)
-                }
-
-                pushStyle(SpanStyle(color = wordColor))
-                append(displayTexts.getOrElse(sIndex) { syllable.text })
-                pop()
+        val fullText = remember(line, displayTexts) {
+            line.syllables.indices.joinToString("") { displayTexts.getOrElse(it) { line.syllables[it].text } }
+        }
+        // Char range of each syllable inside [fullText].
+        val charRanges = remember(line, displayTexts) {
+            var offset = 0
+            line.syllables.indices.map { i ->
+                val start = offset
+                offset += displayTexts.getOrElse(i) { line.syllables[i].text }.length
+                start to offset
             }
         }
+        var layout by remember(fullText) { mutableStateOf<TextLayoutResult?>(null) }
 
         Column(
             modifier = modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.Start,
         ) {
-            Text(
-                text = annotatedText,
-                style = fontStyle,
-                textAlign = TextAlign.Start,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            // Karaoke fill: dim base text + bright copy clipped to the sung
+            // extent. Position is read ONLY in the draw phase, so the fill
+            // advances every display frame with zero recomposition/relayout.
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = fullText,
+                    style = fontStyle,
+                    color = inactiveColor.copy(alpha = 0.44f),
+                    textAlign = TextAlign.Start,
+                    onTextLayout = { layout = it },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    text = fullText,
+                    style = fontStyle,
+                    color = activeColor,
+                    textAlign = TextAlign.Start,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .drawWithContent {
+                            val l = layout ?: return@drawWithContent
+                            val textLength = fullText.length
+                            if (textLength == 0) return@drawWithContent
+                            val pos = currentPositionMs()
+                            var fill = 0f
+                            for (i in line.syllables.indices) {
+                                val syl = line.syllables[i]
+                                if (pos < syl.timeMs) break
+                                val (cs, ce) = charRanges[i]
+                                val p = if (syl.durationMs <= 0L) 1f
+                                else ((pos - syl.timeMs).toFloat() / syl.durationMs).coerceIn(0f, 1f)
+                                fill = cs + (ce - cs) * p
+                                if (p < 1f) break
+                            }
+                            if (fill <= 0f) return@drawWithContent
+                            if (fill >= textLength) {
+                                drawContent()
+                                return@drawWithContent
+                            }
+                            val charIdx = fill.toInt().coerceIn(0, textLength - 1)
+                            val frac = fill - charIdx
+                            val lineIdx = l.getLineForOffset(charIdx)
+                            val x0 = l.getHorizontalPosition(charIdx, true)
+                            val x1 = if (charIdx + 1 < textLength && l.getLineForOffset(charIdx + 1) == lineIdx) {
+                                l.getHorizontalPosition(charIdx + 1, true)
+                            } else if (isRtl) l.getLineLeft(lineIdx) else l.getLineRight(lineIdx)
+                            val x = x0 + (x1 - x0) * frac
+                            val top = l.getLineTop(lineIdx)
+                            val bottom = l.getLineBottom(lineIdx)
+                            if (top > 0f) {
+                                clipRect(0f, 0f, size.width, top) { this@drawWithContent.drawContent() }
+                            }
+                            if (isRtl) {
+                                clipRect(x, top, size.width, bottom) { this@drawWithContent.drawContent() }
+                            } else {
+                                clipRect(0f, top, x, bottom) { this@drawWithContent.drawContent() }
+                            }
+                        },
+                )
+            }
 
             if (!line.transliteration.isNullOrBlank()) {
                 Text(
@@ -675,12 +724,44 @@ private fun SyncedLyricsProgressHost(
     modifier: Modifier = Modifier,
 ) {
     val progress by progressFlow.collectAsStateWithLifecycle(initialValue = progressInitial)
-    // Raw position, no quantization: reference clients sample per frame
-    // (delay 8ms / withFrameNanos). The 60ms ticker below that is already
-    // the coarsest step word fills can tolerate.
-    val effectivePositionMs = progress.positionMs + lyricsOffsetMs
-    val currentPosition = remember(effectivePositionMs) {
-        { effectivePositionMs }
+    val latestSampleMs by rememberUpdatedState(progress.positionMs)
+    val offsetState by rememberUpdatedState(lyricsOffsetMs)
+    val framePositionMs = remember { mutableLongStateOf(progress.positionMs) }
+    // Vsync clock (90/120Hz): advances by real frame time and is steered
+    // toward the ExoPlayer playhead (sampled every ~60ms). Never runs
+    // backwards on normal drift; snaps instantly on seeks/track changes.
+    LaunchedEffect(state.isPlaying) {
+        if (!state.isPlaying) {
+            snapshotFlow { latestSampleMs }.collect { framePositionMs.longValue = it }
+            return@LaunchedEffect
+        }
+        var lastSample = latestSampleMs
+        var sampleFrameNanos = -1L
+        var lastFrameNanos = -1L
+        var display = latestSampleMs.toDouble()
+        while (true) {
+            withFrameNanos { now ->
+                val sample = latestSampleMs
+                if (sample != lastSample || sampleFrameNanos < 0L) {
+                    lastSample = sample
+                    sampleFrameNanos = now
+                }
+                val target = sample + ((now - sampleFrameNanos) / 1_000_000.0).coerceAtMost(250.0)
+                val frameDt = if (lastFrameNanos < 0L) 0.0 else (now - lastFrameNanos) / 1_000_000.0
+                lastFrameNanos = now
+                val predicted = display + frameDt
+                val err = target - predicted
+                display = if (kotlin.math.abs(err) > 300.0) {
+                    target
+                } else {
+                    maxOf(display, predicted + err * 0.2)
+                }
+                framePositionMs.longValue = display.toLong()
+            }
+        }
+    }
+    val currentPosition: () -> Long = remember {
+        { framePositionMs.longValue + offsetState }
     }
     ModernSyncedLyricsList(
         lines = lines,
