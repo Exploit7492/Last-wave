@@ -57,9 +57,7 @@ class LyricifyLyricsApi @Inject constructor(
     }
 
     private val baseUrl: String
-        get() = BuildConfig.LYRICIFY_URL.ifBlank {
-            DEFAULT_BASE_URL
-        }.trimEnd('/')
+        get() = BuildConfig.LYRICIFY_URL.trimEnd('/')
 
     private val token: String
         get() = BuildConfig.LYRICIFY_TOKEN
@@ -81,7 +79,7 @@ class LyricifyLyricsApi @Inject constructor(
         durationSeconds: Int? = null,
         isrc: String? = null,
     ): Pair<String?, LyricsResult.Success>? = withContext(Dispatchers.IO) {
-        if (title.isBlank() || token.isBlank()) return@withContext null
+        if (title.isBlank() || token.isBlank() || baseUrl.isBlank()) return@withContext null
 
         val item = searchBest(title, artist, durationSeconds, isrc)
             ?: run {
@@ -108,7 +106,7 @@ class LyricifyLyricsApi @Inject constructor(
         title: String? = null,
         artist: String? = null,
     ): LyricsResult.Success? = withContext(Dispatchers.IO) {
-        if (id.isBlank() || token.isBlank()) return@withContext null
+        if (id.isBlank() || token.isBlank() || baseUrl.isBlank()) return@withContext null
         val urlBuilder = "$baseUrl/lyrics".toHttpUrlOrNull()?.newBuilder() ?: return@withContext null
         urlBuilder.addQueryParameter("id", id)
         if (!isrc.isNullOrBlank()) {
@@ -326,7 +324,6 @@ class LyricifyLyricsApi @Inject constructor(
     }
 
     companion object {
-        private const val DEFAULT_BASE_URL = "https://lyricify-backend-for-lastwave.amanraajaryan.workers.dev"
         private const val USER_AGENT = "LastWave-Android/1.0"
         private const val DURATION_TOLERANCE_MS = 6_000L
         private const val MIN_MATCH_SCORE = 3

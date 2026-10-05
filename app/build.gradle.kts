@@ -64,7 +64,7 @@ android {
         versionName = "4.2.3"
 
         val lyricifyToken = resolveSecret("LYRICIFY_TOKEN")
-        val lyricifyUrl = resolveSecret("LYRICIFY_URL").ifBlank { "https://lyricify-backend-for-lastwave.amanraajaryan.workers.dev" }
+        val lyricifyUrl = resolveSecret("LYRICIFY_URL")
         buildConfigField("String", "LYRICIFY_TOKEN", "\"$lyricifyToken\"")
         buildConfigField("String", "LYRICIFY_URL", "\"$lyricifyUrl\"")
 
