@@ -647,7 +647,7 @@ private fun SyncedLyricsList(
                             if (animationStyle == LyricsAnimation.APPLE_ZOOM) FontWeight.Black else FontWeight.ExtraBold
                         } else FontWeight.SemiBold,
                         letterSpacing = (-0.2).sp,
-                        lineHeight = ((if (isBgRow) 30f else 40f) * lyricsFontScale).sp,
+                        lineHeight = ((if (isBgRow) 32f else 42f) * lyricsFontScale).sp,
                     )
 
                     WordByWordLyricLine(
