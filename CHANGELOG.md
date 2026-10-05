@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.2.4] - 2026-10-05
+
+### Added & Improved
+- **Dolby Atmos Downloads:** Aligned spatial audio capability detection in `TrackDownloadManager` with `MusicPlayer`'s system `Spatializer` check, resolving Atmos download skips on Android 12L+ devices.
+- **DASH Manifest Parser Robustness:** Added resilient XML attribute matching, case-insensitive tag handling, and strict URL scheme checks to prevent malformed segment URLs during segmented downloads.
+- **Playback Warmup & Retry Gating:** Implemented first-song OPUS warmup and tap-to-retry gating to prevent premature auto-skips on transient stream hiccups.
+
+### Changed & Fixed
+- **Version Bump:** Bumped version to 4.2.4 (versionCode 24).
+
 ## [4.2.3] - 2026-10-03
 
 ### Added

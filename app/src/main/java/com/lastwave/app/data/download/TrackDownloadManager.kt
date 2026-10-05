@@ -849,15 +849,23 @@ class TrackDownloadManager @Inject constructor(
                                     durationMs = (losslessStream.durationSeconds * 1000L).takeIf { it > 0 } ?: 0L
                                 }
                             } else {
+                                val isAtmosStream = losslessStream.formatId == LosslessMusicApi.QUALITY_DOLBY_ATMOS ||
+                                    losslessStream.audioCodecOverride == "DOLBY ATMOS"
                                 resolvedUrl = losslessStream.url
-                                mimeType = losslessStream.mimeType.ifBlank { "audio/flac" }
-                                extension = if (mimeType.contains("mp3")) "mp3" else "flac"
+                                mimeType = losslessStream.mimeType.ifBlank { if (isAtmosStream) "audio/mp4" else "audio/flac" }
+                                extension = when {
+                                    mimeType.contains("mp3", ignoreCase = true) -> "mp3"
+                                    isAtmosStream || mimeType.contains("mp4", ignoreCase = true) || mimeType.contains("m4a", ignoreCase = true) -> "m4a"
+                                    else -> "flac"
+                                }
                                 isLossless = !extension.equals("mp3", ignoreCase = true)
                                 val rateKHz = if (losslessStream.samplingRate > 1000.0) losslessStream.samplingRate / 1000.0 else losslessStream.samplingRate
                                 val depth = losslessStream.bitDepth.takeIf { it > 0 }
-                                formatBadge = if (isLossless) {
-                                    formatDetailedQualityBadge(depth, rateKHz)
-                                } else "MP3"
+                                formatBadge = when {
+                                    isAtmosStream -> "DOLBY ATMOS"
+                                    isLossless -> formatDetailedQualityBadge(depth, rateKHz)
+                                    else -> "MP3"
+                                }
                                 durationMs = (losslessStream.durationSeconds * 1000L).takeIf { it > 0 } ?: 0L
                             }
                         }
@@ -2152,7 +2160,7 @@ class TrackDownloadManager @Inject constructor(
             }
             trimmed.startsWith("<?xml") || trimmed.startsWith("<MPD") -> trimmed
             trimmed.startsWith("http://") || trimmed.startsWith("https://") -> {
-                if (trimmed.contains(".mpd") || trimmed.contains("dash")) {
+                if (trimmed.contains(".mpd", ignoreCase = true) || trimmed.contains("dash", ignoreCase = true)) {
                     val req = Request.Builder().url(trimmed).get().build()
                     downloadClient.newCall(req).execute().use { resp ->
                         if (resp.isSuccessful) resp.body?.string().orEmpty() else ""
@@ -2163,32 +2171,32 @@ class TrackDownloadManager @Inject constructor(
         }
         if (xmlStr.isBlank()) return@runCatching null
 
-        val initMatch = Regex("""initialization="([^"]+)"""").find(xmlStr)
-            ?: Regex("""<Initialization\s+sourceURL="([^"]+)"""").find(xmlStr)
-            ?: Regex("""sourceURL="([^"]+)"""").find(xmlStr)
+        val initMatch = Regex("""initialization=["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(xmlStr)
+            ?: Regex("""<Initialization\s+[^>]*sourceURL=["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(xmlStr)
+            ?: Regex("""sourceURL=["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(xmlStr)
             ?: return@runCatching null
         var initUrl = initMatch.groupValues[1].replace("&amp;", "&")
 
-        val mediaMatch = Regex("""media="([^"]+)"""").find(xmlStr)
-            ?: Regex("""<SegmentTemplate\s+[^>]*media="([^"]+)"""").find(xmlStr)
-            ?: Regex("""<SegmentURL\s+media="([^"]+)"""").find(xmlStr)
+        val mediaMatch = Regex("""media=["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(xmlStr)
+            ?: Regex("""<SegmentTemplate\s+[^>]*media=["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(xmlStr)
+            ?: Regex("""<SegmentURL\s+[^>]*media=["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(xmlStr)
             ?: return@runCatching null
         var mediaTemplate = mediaMatch.groupValues[1].replace("&amp;", "&")
 
-        val baseMatch = Regex("""<BaseURL>([^<]+)</BaseURL>""").find(xmlStr)
+        val baseMatch = Regex("""<BaseURL[^>]*>([^<]+)</BaseURL>""", RegexOption.IGNORE_CASE).find(xmlStr)
         val baseUrlPrefix = baseMatch?.groupValues?.get(1)?.trim()?.replace("&amp;", "&")
             ?: if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
                 trimmed.substringBeforeLast('/') + "/"
             } else null
         if (!baseUrlPrefix.isNullOrBlank()) {
-            if (!initUrl.startsWith("http://") && !initUrl.startsWith("https://")) {
+            if (!initUrl.startsWith("http://", ignoreCase = true) && !initUrl.startsWith("https://", ignoreCase = true)) {
                 initUrl = if (baseUrlPrefix.endsWith("/") || initUrl.startsWith("/")) {
                     "${baseUrlPrefix.trimEnd('/')}/${initUrl.trimStart('/')}"
                 } else {
                     "$baseUrlPrefix$initUrl"
                 }
             }
-            if (!mediaTemplate.startsWith("http://") && !mediaTemplate.startsWith("https://")) {
+            if (!mediaTemplate.startsWith("http://", ignoreCase = true) && !mediaTemplate.startsWith("https://", ignoreCase = true)) {
                 mediaTemplate = if (baseUrlPrefix.endsWith("/") || mediaTemplate.startsWith("/")) {
                     "${baseUrlPrefix.trimEnd('/')}/${mediaTemplate.trimStart('/')}"
                 } else {
@@ -2196,8 +2204,14 @@ class TrackDownloadManager @Inject constructor(
                 }
             }
         }
+        if (!initUrl.startsWith("http://", ignoreCase = true) && !initUrl.startsWith("https://", ignoreCase = true)) {
+            return@runCatching null
+        }
+        if (!mediaTemplate.startsWith("http://", ignoreCase = true) && !mediaTemplate.startsWith("https://", ignoreCase = true)) {
+            return@runCatching null
+        }
 
-        val codec = Regex("""codecs="([^"]+)"""").find(xmlStr)
+        val codec = Regex("""codecs=["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(xmlStr)
             ?.groupValues
             ?.get(1)
             ?.trim()
@@ -2205,22 +2219,23 @@ class TrackDownloadManager @Inject constructor(
             .orEmpty()
 
         var count = 0
-        val sRegex = Regex("""<S\s+[^>]*>""")
+        val sRegex = Regex("""<S\s+[^>]*>""", RegexOption.IGNORE_CASE)
         for (match in sRegex.findAll(xmlStr)) {
             val sTag = match.value
-            val rMatch = Regex("""r="(\d+)"""").find(sTag)
+            val rMatch = Regex("""r=["']?(\d+)["']?""", RegexOption.IGNORE_CASE).find(sTag)
             val r = rMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
             count += 1 + r
         }
         if (count <= 0) {
-            val durationMatch = Regex("""mediaPresentationDuration="PT(?:(\d+)M)?(?:([\d.]+)S)?""").find(xmlStr)
-            val segDurationMatch = Regex("""<SegmentTemplate[^>]*duration="(\d+)"[^>]*timescale="(\d+)"""").find(xmlStr)
-            if (durationMatch != null && segDurationMatch != null) {
-                val min = durationMatch.groupValues[1].toDoubleOrNull() ?: 0.0
-                val sec = durationMatch.groupValues[2].toDoubleOrNull() ?: 0.0
-                val totalSec = min * 60.0 + sec
-                val segDuration = segDurationMatch.groupValues[1].toDoubleOrNull() ?: 1.0
-                val timescale = segDurationMatch.groupValues[2].toDoubleOrNull() ?: 1.0
+            val durationMatch = Regex("""mediaPresentationDuration=["']PT(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?["']""", RegexOption.IGNORE_CASE).find(xmlStr)
+            val segTemplateMatch = Regex("""<SegmentTemplate\b[^>]*>""", RegexOption.IGNORE_CASE).find(xmlStr)?.value
+            val segDuration = segTemplateMatch?.let { Regex("""\bduration=["'](\d+)["']""", RegexOption.IGNORE_CASE).find(it)?.groupValues?.get(1)?.toDoubleOrNull() } ?: 1.0
+            val timescale = segTemplateMatch?.let { Regex("""\btimescale=["'](\d+)["']""", RegexOption.IGNORE_CASE).find(it)?.groupValues?.get(1)?.toDoubleOrNull() } ?: 1.0
+            if (durationMatch != null) {
+                val hours = durationMatch.groupValues.getOrNull(1)?.toDoubleOrNull() ?: 0.0
+                val min = durationMatch.groupValues.getOrNull(2)?.toDoubleOrNull() ?: 0.0
+                val sec = durationMatch.groupValues.getOrNull(3)?.toDoubleOrNull() ?: 0.0
+                val totalSec = hours * 3600.0 + min * 60.0 + sec
                 val segSec = segDuration / timescale
                 if (segSec > 0) {
                     count = Math.ceil(totalSec / segSec).toInt()
@@ -2228,7 +2243,7 @@ class TrackDownloadManager @Inject constructor(
             }
         }
         if (count <= 0) count = 50
-        val startNumberMatch = Regex("""startNumber="(\d+)"""").find(xmlStr)
+        val startNumberMatch = Regex("""startNumber=["'](\d+)["']""", RegexOption.IGNORE_CASE).find(xmlStr)
         val startNumber = startNumberMatch?.groupValues?.get(1)?.toIntOrNull() ?: 1
 
         ParsedDashManifest(
@@ -2484,7 +2499,7 @@ class TrackDownloadManager @Inject constructor(
         return trimmed.startsWith("data:application/dash+xml") ||
             trimmed.startsWith("<?xml") ||
             trimmed.startsWith("<MPD") ||
-            url.contains(".mpd") ||
+            url.contains(".mpd", ignoreCase = true) ||
             mime.contains("dash", ignoreCase = true)
     }
 
@@ -2521,9 +2536,8 @@ class TrackDownloadManager @Inject constructor(
     }.getOrDefault(false)
 
     /**
-     * Mirrors playback's spatial check (`MusicPlayer.isSpatialAudioSupportedOnDevice`
-     * + genuine E-AC-3 JOC decoder requirement): a plain `audio/eac3` decoder
-     * (video-passthrough silicon) cannot render an Atmos music stream.
+     * Mirrors playback's spatial check (`MusicPlayer.isSpatialAudioSupportedOnDevice`):
+     * hardware decoder, bundled FFmpeg decoder, or Android S_V2+ Spatializer.
      */
     private fun isAtmosCapableDevice(): Boolean = runCatching {
         val decoder = MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos.any { info ->
@@ -2533,9 +2547,19 @@ class TrackDownloadManager @Inject constructor(
                     type.equals("audio/ac3", ignoreCase = true)
             }
         }
-        val ffmpeg = androidx.media3.decoder.ffmpeg.FfmpegLibrary.isAvailable() &&
-            androidx.media3.decoder.ffmpeg.FfmpegLibrary.supportsFormat(androidx.media3.common.MimeTypes.AUDIO_E_AC3)
-        decoder || ffmpeg
+        val ffmpeg = runCatching {
+            androidx.media3.decoder.ffmpeg.FfmpegLibrary.isAvailable() &&
+                androidx.media3.decoder.ffmpeg.FfmpegLibrary.supportsFormat(androidx.media3.common.MimeTypes.AUDIO_E_AC3)
+        }.getOrDefault(false)
+        if (decoder || ffmpeg) return@runCatching true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S_V2) {
+            val am = context.getSystemService(AudioManager::class.java)
+            val spatializer = am?.spatializer
+            if (spatializer != null && (spatializer.isAvailable || spatializer.isEnabled)) {
+                return@runCatching true
+            }
+        }
+        false
     }.getOrDefault(false)
 
     private fun updateProgress(progress: DownloadProgress) {
