@@ -672,11 +672,11 @@ class SettingsViewModel @Inject constructor(
     fun handleCsvPicked(uri: android.net.Uri) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                // Extract filename
-                val cursor = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
-                val displayName = cursor?.use {
-                    if (it.moveToFirst()) it.getString(0) else null
-                } ?: "Imported Playlist"
+                val displayName = runCatching {
+                    context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                        if (it.moveToFirst()) it.getString(0) else null
+                    }
+                }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/') ?: "Imported Playlist.csv"
 
                 val fileType = displayName.substringAfterLast('.', "File").uppercase()
                 _uiState.update { it.copy(toastMessage = "Matching and importing $fileType songs...") }

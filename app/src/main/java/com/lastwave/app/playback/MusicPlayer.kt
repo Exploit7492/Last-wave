@@ -2754,14 +2754,22 @@ class MusicPlayer @Inject constructor(
      *  spatial manifests that ExoPlayer then choked on (3003 → retry loop →
      *  "Playback interrupted") instead of dropping to stereo. */
     private val isAtmosDecoderAvailable: Boolean by lazy {
-        runCatching {
+        val platform = runCatching {
             val codecList = MediaCodecList(MediaCodecList.REGULAR_CODECS)
             codecList.codecInfos.any { info ->
                 !info.isEncoder && info.supportedTypes.any { type ->
-                    type.equals("audio/eac3-joc", ignoreCase = true)
+                    type.equals("audio/eac3-joc", ignoreCase = true) ||
+                        type.equals("audio/eac3", ignoreCase = true)
                 }
             }
         }.getOrDefault(false)
+        // Bundled FFmpeg decodes the E-AC-3 core of JOC streams on any device.
+        val ffmpeg = runCatching {
+            androidx.media3.decoder.ffmpeg.FfmpegLibrary.isAvailable() &&
+                androidx.media3.decoder.ffmpeg.FfmpegLibrary.supportsFormat(MimeTypes.AUDIO_E_AC3)
+        }.getOrDefault(false)
+        android.util.Log.i("MusicPlayer", "[ATMOS] decoder availability platform=$platform ffmpeg=$ffmpeg")
+        platform || ffmpeg
     }
 
     fun isSpatialAudioSupportedOnDevice(): Boolean {
@@ -5417,7 +5425,9 @@ class MusicPlayer @Inject constructor(
                 } else if (losslessBudget == LosslessBudget.Unbounded) {
                     runCatching { losslessDeferred.await() }.getOrNull()
                 } else {
-                    null
+                    withTimeoutOrNull(2000L) {
+                        runCatching { losslessDeferred.await() }.getOrNull()
+                    }
                 }
 
                 if (losslessStream != null) {
@@ -5864,7 +5874,7 @@ class MusicPlayer @Inject constructor(
                 val expectedSec = (track.durationMs?.takeIf { it > 0 } ?: currentStream.durationMs)?.div(1000)?.toInt()
                 val upgradedSec = upgraded.durationMs?.div(1000)?.toInt()
                 if (expectedSec != null && upgradedSec != null && expectedSec > 0 && upgradedSec > 0) {
-                    if (kotlin.math.abs(expectedSec - upgradedSec) > 12) {
+                    if (kotlin.math.abs(expectedSec - upgradedSec) > 35) {
                         android.util.Log.w("MusicPlayer", "[STREAM UPGRADE] Severe duration mismatch for '${track.title}': expected ${expectedSec}s vs candidate ${upgradedSec}s")
                         return@launch
                     }
@@ -6145,7 +6155,7 @@ class MusicPlayer @Inject constructor(
                 if (auditionPlayer.playbackState == Player.STATE_READY) {
                     val candidateDur = auditionPlayer.duration
                     if (expectedDurationMs != null && expectedDurationMs > 0L && candidateDur > 0L) {
-                        if (kotlin.math.abs(candidateDur - expectedDurationMs) > 12_000L) {
+                        if (kotlin.math.abs(candidateDur - expectedDurationMs) > 35_000L) {
                             android.util.Log.w(
                                 "MusicPlayer",
                                 "[STREAM AUDITION] Duration mismatch: expected ${expectedDurationMs}ms vs candidate ${candidateDur}ms",
