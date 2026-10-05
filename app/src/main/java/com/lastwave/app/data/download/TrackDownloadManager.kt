@@ -1359,18 +1359,17 @@ class TrackDownloadManager @Inject constructor(
                                 }
                             }
                         }
-                        suspend fun runYtTransfer(): DownloadTransfer = downloadToTempFile(
-                            downloadKey = key,
-                            url = checkNotNull(resolvedUrl),
-                            target = rawFile,
-                            requestHeaders = downloadHeaders,
-                            expectedContentLength = expectedContentLength,
-                            useParallelRanges = useParallelDownload,
-                            onConnectionStateChanged = ytConnectionCallback,
-                            onProgress = ytProgressCallback,
-                        )
                         val transfer = try {
-                            runYtTransfer()
+                            downloadToTempFile(
+                                downloadKey = key,
+                                url = checkNotNull(resolvedUrl),
+                                target = rawFile,
+                                requestHeaders = downloadHeaders,
+                                expectedContentLength = expectedContentLength,
+                                useParallelRanges = useParallelDownload,
+                                onConnectionStateChanged = ytConnectionCallback,
+                                onProgress = ytProgressCallback,
+                            )
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (firstError: Exception) {
@@ -1386,7 +1385,16 @@ class TrackDownloadManager @Inject constructor(
                                 lastProgress = 0
                                 lastUnknownProgressBytes = 0L
                             }
-                            runYtTransfer()
+                            downloadToTempFile(
+                                downloadKey = key,
+                                url = checkNotNull(resolvedUrl),
+                                target = rawFile,
+                                requestHeaders = downloadHeaders,
+                                expectedContentLength = expectedContentLength,
+                                useParallelRanges = useParallelDownload,
+                                onConnectionStateChanged = ytConnectionCallback,
+                                onProgress = ytProgressCallback,
+                            )
                         }
                         val contentType = transfer.contentType.lowercase()
                         if (contentType.contains("webm")) {
