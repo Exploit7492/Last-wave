@@ -3,10 +3,16 @@ package com.lastwave.app.ui.player
 import kotlinx.coroutines.delay
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -218,15 +224,19 @@ fun ModernLyricsPanel(
                         // Shared style instances drawn by every row below.
                         val currentTextStyle = LocalTextStyle.current
                         val karaokeNormalStyle = remember(currentTextStyle, isAppleMusic, isWordSynced, lyricsFontScale) {
+                            val baseSize = (if (isAppleMusic) 28f else if (isWordSynced) 32f else 30f) * lyricsFontScale
                             currentTextStyle.copy(
-                                fontSize = ((if (isAppleMusic) 28f else if (isWordSynced) 32f else 30f) * lyricsFontScale).sp,
+                                fontSize = baseSize.sp,
+                                lineHeight = (baseSize * 1.38f).sp,
                                 fontWeight = FontWeight.Bold,
                                 textMotion = TextMotion.Animated,
                             )
                         }
                         val karaokeAccompanimentStyle = remember(currentTextStyle, isAppleMusic, isWordSynced, lyricsFontScale) {
+                            val baseSize = (if (isAppleMusic) 22f else if (isWordSynced) 24f else 22f) * lyricsFontScale
                             currentTextStyle.copy(
-                                fontSize = ((if (isAppleMusic) 22f else if (isWordSynced) 24f else 22f) * lyricsFontScale).sp,
+                                fontSize = baseSize.sp,
+                                lineHeight = (baseSize * 1.35f).sp,
                                 fontWeight = FontWeight.Bold,
                                 textMotion = TextMotion.Animated,
                             )
@@ -412,17 +422,38 @@ private fun ModernSyncedLyricsList(
                 line.isRtl || (isOverallRtl && (line.text.isBlank() || line.text == "♪"))
             }
 
-            val scaleTarget = if (isActive) 1.06f else if (distance == 1) 0.99f else 0.97f
+            val scaleTarget = if (isActive) 1.085f else if (distance == 1) 0.99f else 0.965f
             val scale by animateFloatAsState(
                 targetValue = scaleTarget,
-                animationSpec = spring(dampingRatio = 0.74f, stiffness = Spring.StiffnessMediumLow),
+                animationSpec = spring(dampingRatio = 0.70f, stiffness = Spring.StiffnessMediumLow),
                 label = "modernLyricScale_$index",
             )
-            val alphaTarget = if (isActive) 1f else if (distance == 1) 0.64f else if (isPast) 0.50f else 0.43f
+            val alphaTarget = if (isActive) 1f else if (distance == 1) 0.58f else if (isPast) 0.38f else 0.30f
             val alpha by animateFloatAsState(
                 targetValue = alphaTarget,
-                animationSpec = tween(160),
+                animationSpec = tween(220, easing = FastOutSlowInEasing),
                 label = "modernLyricAlpha_$index",
+            )
+
+            val onsetProgress = remember { Animatable(0f) }
+            LaunchedEffect(isActive, isPlaying) {
+                if (isActive && isPlaying) {
+                    onsetProgress.snapTo(0f)
+                    onsetProgress.animateTo(1f, tween(480, easing = FastOutSlowInEasing))
+                } else {
+                    onsetProgress.snapTo(0f)
+                }
+            }
+            val onsetWave = if (isActive && isPlaying && onsetProgress.value in 0.001f..0.999f) {
+                kotlin.math.sin(Math.PI.toFloat() * onsetProgress.value)
+            } else 0f
+            val totalScale = scale * (1f + 0.020f * onsetWave)
+
+            val translationYTarget = if (isActive) -3.5f else if (isPast) -1.5f else 3.5f
+            val translationY by animateFloatAsState(
+                targetValue = translationYTarget,
+                animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow),
+                label = "modernLyricTransY_$index",
             )
 
             val lineLayoutDirection = if (isLineRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
@@ -431,8 +462,9 @@ private fun ModernSyncedLyricsList(
                     modifier = Modifier
                         .fillMaxWidth()
                         .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
+                            scaleX = totalScale
+                            scaleY = totalScale
+                            this.translationY = translationY * density
                             this.alpha = alpha * if (isBgRow) (if (isActive) 0.85f else 0.55f) else 1f
                         }
                         .clickable(
@@ -473,15 +505,31 @@ private fun ModernWordByWordLine(
 ) {
     val lineLayoutDirection = if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
     CompositionLocalProvider(LocalLayoutDirection provides lineLayoutDirection) {
+        val activeShadow = remember {
+            Shadow(
+                color = Color.White.copy(alpha = 0.50f),
+                blurRadius = 22f,
+                offset = Offset.Zero,
+            )
+        }
+        val activeStyle = remember(fontStyle, isActive) {
+            if (isActive) fontStyle.copy(shadow = activeShadow) else fontStyle
+        }
+
         if (!line.hasSyllables || !isActive) {
+            val animatedColor by animateColorAsState(
+                targetValue = if (isActive) activeColor else inactiveColor.copy(alpha = 0.44f),
+                animationSpec = tween(240, easing = FastOutSlowInEasing),
+                label = "lineColor",
+            )
             Column(
                 modifier = modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.Start,
             ) {
                 Text(
                     text = line.text.ifBlank { "♪" },
-                    style = fontStyle,
-                    color = if (isActive) activeColor else inactiveColor,
+                    style = activeStyle,
+                    color = animatedColor,
                     textAlign = TextAlign.Start,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -519,26 +567,35 @@ private fun ModernWordByWordLine(
             }
         }
         var layout by remember(fullText) { mutableStateOf<TextLayoutResult?>(null) }
+        val maskPaint = remember {
+            android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN)
+            }
+        }
+        val clearPaint = remember {
+            android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
+            }
+        }
 
         Column(
             modifier = modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.Start,
         ) {
             // Karaoke fill: dim base text + bright copy clipped to the sung
-            // extent. Position is read ONLY in the draw phase, so the fill
-            // advances every display frame with zero recomposition/relayout.
+            // extent with a smooth feathered gradient wipe.
             Box(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = fullText,
                     style = fontStyle,
-                    color = inactiveColor.copy(alpha = 0.44f),
+                    color = inactiveColor.copy(alpha = 0.40f),
                     textAlign = TextAlign.Start,
                     onTextLayout = { layout = it },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
                     text = fullText,
-                    style = fontStyle,
+                    style = activeStyle,
                     color = activeColor,
                     textAlign = TextAlign.Start,
                     modifier = Modifier
@@ -573,14 +630,47 @@ private fun ModernWordByWordLine(
                             val x = x0 + (x1 - x0) * frac
                             val top = l.getLineTop(lineIdx)
                             val bottom = l.getLineBottom(lineIdx)
-                            if (top > 0f) {
-                                clipRect(0f, 0f, size.width, top) { this@drawWithContent.drawContent() }
-                            }
+
+                            val canvas = drawContext.canvas.nativeCanvas
+                            val checkpoint = canvas.saveLayer(0f, 0f, size.width, size.height, null)
+                            drawContent()
+
+                            val feather = 24f
                             if (isRtl) {
-                                clipRect(x, top, size.width, bottom) { this@drawWithContent.drawContent() }
+                                val xStart = (x - 8f).coerceAtLeast(0f)
+                                val xEnd = (x + feather).coerceAtMost(size.width)
+                                if (xStart > 0f) {
+                                    canvas.drawRect(0f, top, xStart, bottom, clearPaint)
+                                }
+                                if (xEnd > xStart) {
+                                    maskPaint.shader = android.graphics.LinearGradient(
+                                        xStart, 0f, xEnd, 0f,
+                                        android.graphics.Color.TRANSPARENT,
+                                        android.graphics.Color.WHITE,
+                                        android.graphics.Shader.TileMode.CLAMP,
+                                    )
+                                    canvas.drawRect(xStart, top, xEnd, bottom, maskPaint)
+                                }
                             } else {
-                                clipRect(0f, top, x, bottom) { this@drawWithContent.drawContent() }
+                                val xStart = (x - feather).coerceAtLeast(0f)
+                                val xEnd = (x + 8f).coerceAtMost(size.width)
+                                if (xEnd < size.width) {
+                                    canvas.drawRect(xEnd, top, size.width, bottom, clearPaint)
+                                }
+                                if (xEnd > xStart) {
+                                    maskPaint.shader = android.graphics.LinearGradient(
+                                        xStart, 0f, xEnd, 0f,
+                                        android.graphics.Color.WHITE,
+                                        android.graphics.Color.TRANSPARENT,
+                                        android.graphics.Shader.TileMode.CLAMP,
+                                    )
+                                    canvas.drawRect(xStart, top, xEnd, bottom, maskPaint)
+                                }
                             }
+                            if (bottom < size.height) {
+                                canvas.drawRect(0f, bottom, size.width, size.height, clearPaint)
+                            }
+                            canvas.restoreToCount(checkpoint)
                         },
                 )
             }
