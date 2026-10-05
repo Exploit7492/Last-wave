@@ -2438,9 +2438,13 @@ class MusicPlayer @Inject constructor(
             if (progress >= 1f || outgoing.playbackState == Player.STATE_ENDED || outgoing.playerError != null) {
                 cancelCrossfade()
             } else {
-                val angle = progress * (Math.PI / 2.0)
-                player.volume = kotlin.math.sin(angle).toFloat()
-                outgoing.volume = kotlin.math.cos(angle).toFloat()
+                // Perceptual fade: outgoing ramps down, incoming ramps up.
+                // Equal-power sin/cos kept both near full level for most of
+                // the window, which sounded like two songs mixed together.
+                val outGain = (1f - progress) * (1f - progress)
+                val inGain = progress * progress
+                player.volume = inGain
+                outgoing.volume = outGain
                 outgoing.playWhenReady = player.isPlaying
             }
             return false
