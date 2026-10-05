@@ -98,6 +98,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.SpanStyle
@@ -425,15 +428,37 @@ private fun ModernSyncedLyricsList(
             val scaleTarget = if (isActive) 1.085f else if (distance == 1) 0.99f else 0.965f
             val scale by animateFloatAsState(
                 targetValue = scaleTarget,
-                animationSpec = spring(dampingRatio = 0.70f, stiffness = Spring.StiffnessMediumLow),
+                animationSpec = spring(dampingRatio = 0.62f, stiffness = 260f),
                 label = "modernLyricScale_$index",
             )
             val alphaTarget = if (isActive) 1f else if (distance == 1) 0.58f else if (isPast) 0.38f else 0.30f
             val alpha by animateFloatAsState(
                 targetValue = alphaTarget,
-                animationSpec = tween(220, easing = FastOutSlowInEasing),
+                animationSpec = tween(320, easing = FastOutSlowInEasing),
                 label = "modernLyricAlpha_$index",
             )
+            // Depth of field: lines away from the sung one soften, but snap
+            // back to crisp while the user is browsing.
+            val blurTarget = if (isActive || isDragged || activeIndex < 0) 0f
+            else (distance.coerceAtMost(4) * 1.6f)
+            val blurRadius by animateFloatAsState(
+                targetValue = blurTarget,
+                animationSpec = tween(380, easing = FastOutSlowInEasing),
+                label = "modernLyricBlur_$index",
+            )
+            // Elastic trail: when the active line advances, the lines below
+            // lag behind the scroll and spring into place one after another.
+            val trail = remember { Animatable(0f) }
+            LaunchedEffect(activeIndex) {
+                val rel = index - activeIndex
+                if (isPlaying && !isDragged && activeIndex > 0 && rel in 0..6) {
+                    trail.snapTo(10f + rel * 4f)
+                    delay(rel * 38L)
+                    trail.animateTo(0f, spring(dampingRatio = 0.72f, stiffness = 180f))
+                } else if (trail.value != 0f) {
+                    trail.snapTo(0f)
+                }
+            }
 
             val onsetProgress = remember { Animatable(0f) }
             LaunchedEffect(isActive, isPlaying) {
@@ -462,9 +487,14 @@ private fun ModernSyncedLyricsList(
                     modifier = Modifier
                         .fillMaxWidth()
                         .graphicsLayer {
+                            transformOrigin = TransformOrigin(if (isLineRtl) 1f else 0f, 0.5f)
                             scaleX = totalScale
                             scaleY = totalScale
-                            this.translationY = translationY * density
+                            this.translationY = (translationY + trail.value) * density
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                                val r = blurRadius * density
+                                renderEffect = if (r > 0.3f) BlurEffect(r, r) else null
+                            }
                             this.alpha = alpha * if (isBgRow) (if (isActive) 0.85f else 0.55f) else 1f
                         }
                         .clickable(
@@ -591,7 +621,13 @@ private fun ModernWordByWordLine(
                     color = inactiveColor.copy(alpha = 0.40f),
                     textAlign = TextAlign.Start,
                     onTextLayout = { layout = it },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .drawWithContent {
+                            val l = layout
+                            if (l == null) drawContent()
+                            else drawWithSyllableLift(l, line, charRanges, currentPositionMs(), 3.dp.toPx(), isRtl)
+                        },
                 )
                 Text(
                     text = fullText,
@@ -623,8 +659,9 @@ private fun ModernWordByWordLine(
                                 if (p < 1f) break
                             }
                             if (fill <= 0f) return@drawWithContent
+                            val liftPx = 3.dp.toPx()
                             if (fill >= textLength) {
-                                drawContent()
+                                drawWithSyllableLift(l, line, charRanges, pos, liftPx, isRtl)
                                 return@drawWithContent
                             }
                             // Interpolate across the syllable's pixel extent, not
@@ -658,12 +695,14 @@ private fun ModernWordByWordLine(
                                 } else if (isRtl) l.getLineLeft(lineIdx) else l.getLineRight(lineIdx)
                                 x = x0 + (x1 - x0) * frac
                             }
-                            val top = l.getLineTop(lineIdx)
+                            // Lifted glyphs rise above the row; widen the mask so
+                            // the unsung part of a rising syllable stays masked.
+                            val top = l.getLineTop(lineIdx) - liftPx * 1.5f
                             val bottom = l.getLineBottom(lineIdx)
 
                             val canvas = drawContext.canvas.nativeCanvas
                             val checkpoint = canvas.saveLayer(0f, 0f, size.width, size.height, null)
-                            drawContent()
+                            drawWithSyllableLift(l, line, charRanges, pos, liftPx, isRtl)
 
                             if (isRtl) {
                                 val xStart = (x - feather).coerceAtLeast(0f)
@@ -1277,6 +1316,72 @@ private fun ModernLyricsControls(
 }
 
 /**
+ * Lift envelope (0..1) for a syllable: rises as it starts being sung, holds
+ * while sung, then settles back after it ends, so a soft wave travels across
+ * the line. Purely visual; derived from the same timestamps as the wipe.
+ */
+private fun syllableLift(syl: LyricSyllable, pos: Long): Float {
+    if (pos < syl.timeMs) return 0f
+    val dur = syl.durationMs.coerceAtLeast(1L)
+    val rise = ((pos - syl.timeMs).toFloat() / dur.coerceIn(140L, 420L)).coerceIn(0f, 1f)
+    val riseInv = 1f - rise
+    val riseE = 1f - riseInv * riseInv * riseInv
+    val after = pos - (syl.timeMs + dur)
+    val settle = if (after <= 0L) 1f else (1f - after / 520f).coerceIn(0f, 1f)
+    val settleE = settle * settle * (3f - 2f * settle)
+    return riseE * settleE
+}
+
+/**
+ * Draws the text content with each currently-lifting syllable translated up
+ * by up to [liftPx]. Syllables wrapping across visual lines are not lifted.
+ */
+private fun ContentDrawScope.drawWithSyllableLift(
+    l: TextLayoutResult,
+    line: LyricLine,
+    charRanges: List<Pair<Int, Int>>,
+    pos: Long,
+    liftPx: Float,
+    isRtl: Boolean,
+) {
+    val textLength = l.layoutInput.text.length
+    var rects: ArrayList<FloatArray>? = null
+    for (i in line.syllables.indices) {
+        val lift = syllableLift(line.syllables[i], pos)
+        if (lift <= 0.001f) continue
+        val (cs, ce) = charRanges.getOrNull(i) ?: continue
+        if (ce <= cs || cs >= textLength) continue
+        val last = (ce - 1).coerceAtMost(textLength - 1)
+        val li = l.getLineForOffset(cs)
+        if (li != l.getLineForOffset(last)) continue
+        val xs = l.getHorizontalPosition(cs, true)
+        val xe = if (ce < textLength && l.getLineForOffset(ce) == li) {
+            l.getHorizontalPosition(ce, true)
+        } else if (isRtl) l.getLineLeft(li) else l.getLineRight(li)
+        if (rects == null) rects = ArrayList(4)
+        rects += floatArrayOf(
+            minOf(xs, xe), l.getLineTop(li), maxOf(xs, xe), l.getLineBottom(li), -lift * liftPx,
+        )
+    }
+    if (rects == null) {
+        drawContent()
+        return
+    }
+    val canvas = drawContext.canvas.nativeCanvas
+    canvas.save()
+    for (r in rects) canvas.clipOutRect(r[0], r[1], r[2], r[3])
+    drawContent()
+    canvas.restore()
+    for (r in rects) {
+        canvas.save()
+        canvas.translate(0f, r[4])
+        canvas.clipRect(r[0], r[1], r[2], r[3])
+        drawContent()
+        canvas.restore()
+    }
+}
+
+/**
  * Animated pixel scroll for [LazyListState], which only ships instant
  * [LazyListState.scrollBy] and indexed [LazyListState.animateScrollToItem].
  * Ease-out-cubic frame loop so the active-line follow stays smooth instead
@@ -1291,9 +1396,11 @@ private suspend fun LazyListState.animateScrollBy(pixels: Float) {
     while (!done) {
         val target = withFrameNanos { now ->
             if (startNanos < 0L) startNanos = now
-            val t = ((now - startNanos) / 350_000_000f).coerceIn(0f, 1f)
+            val t = ((now - startNanos) / 560_000_000f).coerceIn(0f, 1f)
             done = t >= 1f
-            val eased = 1f - (1f - t) * (1f - t) * (1f - t)
+            // Quartic ease-out: quick departure, long soft landing.
+            val inv = 1f - t
+            val eased = 1f - inv * inv * inv * inv
             pixels * eased
         }
         val delta = target - consumed

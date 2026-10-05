@@ -119,7 +119,7 @@ fun YouTubeLoginScreen(
                                 val hasSession = listOf("__Secure-3PAPISID=", "SAPISID=").any { token ->
                                     cookies?.contains(token) == true
                                 } && cookies?.contains("LOGIN_INFO=") == true
-                                if (hasSession) {
+                                if (hasSession && url?.startsWith("https://music.youtube.com") == true) {
                                     viewModel.attemptConnect(cookies)
                                 }
                             }
