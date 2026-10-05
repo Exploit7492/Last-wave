@@ -80,7 +80,7 @@ class LyricsRepository @Inject constructor(
     private val kugouApi: KugouLyricsApi,
     private val lrclibApi: LrclibLyricsApi,
     private val appleMusicApi: AppleMusicLyricsApi,
-    private val lyricifyApi: LyricifyLyricsApi,
+    private val lastWaveLyricsApi: LastWaveLyricsApi,
     private val biniApi: BiniLyricsApi,
     private val simpMusicApi: SimpMusicLyricsApi,
     private val musixmatchApi: MusixmatchLyricsApi,
@@ -270,7 +270,7 @@ class LyricsRepository @Inject constructor(
                 coroutineScope {
                     val requests = mutableListOf(
                     async<LyricsResult.Success?> {
-                        fetchWordFromLyricify(title, artist, album, durationSeconds, recordingIsrc, effectiveVideoId)
+                        fetchWordFromLastWave(title, artist, album, durationSeconds, recordingIsrc, effectiveVideoId)
                     },
                     async<LyricsResult.Success?> {
                         fetchWordFromAppleMusic(title, artist, album, durationSeconds)
@@ -450,8 +450,8 @@ class LyricsRepository @Inject constructor(
         isrc: String?,
         biniHit: BiniHit?,
     ): LyricsResult.Success? = when (preferred) {
-        com.lastwave.app.data.local.LyricsProvider.LYRICIFY ->
-            fetchWordFromLyricify(title, artist, album, durationSeconds, isrc, videoId)
+        com.lastwave.app.data.local.LyricsProvider.LASTWAVE ->
+            fetchWordFromLastWave(title, artist, album, durationSeconds, isrc, videoId)
         com.lastwave.app.data.local.LyricsProvider.APPLE_MUSIC ->
             fetchWordFromAppleMusic(title, artist, album, durationSeconds)
         com.lastwave.app.data.local.LyricsProvider.BETTER_LYRICS ->
@@ -467,7 +467,7 @@ class LyricsRepository @Inject constructor(
         else -> null
     }
 
-    private suspend fun fetchWordFromLyricify(
+    private suspend fun fetchWordFromLastWave(
         title: String,
         artist: String,
         album: String?,
@@ -476,13 +476,13 @@ class LyricsRepository @Inject constructor(
         videoId: String? = null,
     ): LyricsResult.Success? {
         return try {
-            val (foundIsrc, res) = lyricifyApi.fetchLyricsWithIsrc(
+            val (foundIsrc, res) = lastWaveLyricsApi.fetchLyricsWithIsrc(
                 forSearchTitle(title),
                 forSearchArtist(artist),
                 album,
                 durationSeconds,
                 isrc,
-            ) ?: lyricifyApi.fetchLyricsWithIsrc(
+            ) ?: lastWaveLyricsApi.fetchLyricsWithIsrc(
                 title,
                 artist,
                 album,
