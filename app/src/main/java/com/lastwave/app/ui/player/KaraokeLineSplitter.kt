@@ -279,6 +279,7 @@ private fun alignFragmentsToWords(
     // slicing its timing proportionally across the words it covers.
     val atoms = mutableListOf<LyricSyllable>()
     for (piece in pieces) {
+        if (piece.text.isBlank()) continue
         val parts = piece.text.split(Regex("""\s+""")).filter { it.isNotEmpty() }
         if (parts.size <= 1) {
             atoms += piece

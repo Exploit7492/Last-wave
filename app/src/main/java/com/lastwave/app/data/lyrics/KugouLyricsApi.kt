@@ -69,8 +69,20 @@ class KugouLyricsApi @Inject constructor(
         0xce.toByte(), 0xd2.toByte(), 0x6e.toByte(), 0x69.toByte()
     )
 
+    private val krcOffsetRegex = Regex("""^\[offset:\s*([+-]?\d+)\s*]""", RegexOption.IGNORE_CASE)
     private val krcLineRegex = Regex("""^\[(\d+),(\d+)](.*)$""")
     private val krcSyllableRegex = Regex("""<(\d+),(\d+),\d+>([^<]*)""")
+    private val creditLineRegex = Regex(
+        """(?i)^\s*(?:lyrics\s*by|written\s*by|composed\s*by|produced\s*by|arranged\s*by|recorded\s*(?:at|by)|mixed\s*by|remixed\s*by|mixing\s*(?:assistant|engineer)?|mastered\s*by|mastering|drums|guitar|bass|keyboards|strings|vocals?|作\s*词|作\s*曲|编\s*曲|制\s*作(?:人)?|演\s*唱|录\s*音|混\s*音|母\s*带|吉\s*他|贝\s*斯|鼓)\s*[:：]"""
+    )
+
+    private fun isCreditLine(text: String, isFirstLine: Boolean): Boolean {
+        if (creditLineRegex.containsMatchIn(text)) return true
+        if (isFirstLine && (text.contains(" - ") || text.contains(" – ") || text.contains(" — "))) {
+            return true
+        }
+        return false
+    }
 
     suspend fun fetchWordLyrics(
         title: String,
@@ -80,6 +92,10 @@ class KugouLyricsApi @Inject constructor(
         if (title.isBlank() || artist.isBlank()) return@withContext null
 
         try {
+            val cleanedTitle = LrclibLyricsApi.cleanTrackTitle(title)
+            val cleanedArtist = LrclibLyricsApi.cleanArtistName(artist)
+            val searchTitle = LrclibLyricsApi.stripLeadingArtistPrefix(cleanedTitle).ifBlank { cleanedTitle }
+
             // HTTPS only: AndroidManifest enforces android:usesCleartextTraffic="false",
             // so cleartext http:// is blocked by the OS on API 28+. HTTPS serves
             // identical responses (verified 200 on search + download).
@@ -88,7 +104,7 @@ class KugouLyricsApi @Inject constructor(
                 ?.addQueryParameter("ver", "1")
                 ?.addQueryParameter("man", "yes")
                 ?.addQueryParameter("client", "pc")
-                ?.addQueryParameter("keyword", "$artist - $title")
+                ?.addQueryParameter("keyword", "$cleanedArtist - $searchTitle")
                 ?.addQueryParameter("duration", if (durationSeconds != null && durationSeconds > 0) "${durationSeconds * 1000}" else "")
                 ?.addQueryParameter("hash", "")
                 ?.build() ?: return@withContext null
@@ -104,9 +120,6 @@ class KugouLyricsApi @Inject constructor(
 
             val searchResult = json.decodeFromString<KugouSearchResponse>(searchJsonString)
             if (searchResult.candidates.isEmpty()) return@withContext null
-
-            val cleanedTitle = LrclibLyricsApi.cleanTrackTitle(title)
-            val cleanedArtist = LrclibLyricsApi.cleanArtistName(artist)
 
             // Select best candidate based on artist similarity, title similarity, and duration delta.
             // Duration is tiered, not a reject gate: music-video lengths differ
@@ -128,7 +141,8 @@ class KugouLyricsApi @Inject constructor(
 
                 if (!LrclibLyricsApi.artistMatches(candSinger, cleanedArtist)) return false
 
-                return LrclibLyricsApi.titlesMatch(candSong, cleanedTitle)
+                return LrclibLyricsApi.titlesMatch(candSong, cleanedTitle) ||
+                    LrclibLyricsApi.titlesMatch(candSong, searchTitle)
             }
 
             val textMatched = searchResult.candidates.filter(::textMatches)
@@ -204,15 +218,25 @@ class KugouLyricsApi @Inject constructor(
 
     private fun parseKrc(krcText: String): List<LyricLine> {
         val lines = mutableListOf<LyricLine>()
+        var globalOffsetMs = 0L
+        var isFirstRawLine = true
 
         for (rawLine in krcText.lines()) {
             val trimmed = rawLine.trim()
             if (trimmed.isEmpty() || !trimmed.startsWith("[")) continue
 
+            val offsetMatch = krcOffsetRegex.matchEntire(trimmed)
+            if (offsetMatch != null) {
+                globalOffsetMs = offsetMatch.groupValues[1].toLongOrNull() ?: 0L
+                continue
+            }
+
             val match = krcLineRegex.matchEntire(trimmed) ?: continue
-            val lineStartMs = match.groupValues[1].toLongOrNull() ?: continue
+            val rawLineStartMs = match.groupValues[1].toLongOrNull() ?: continue
             val lineDurationMs = match.groupValues[2].toLongOrNull() ?: 0L
             val syllablesContent = match.groupValues[3]
+
+            val lineStartMs = (rawLineStartMs + globalOffsetMs).coerceAtLeast(0L)
 
             val syllables = mutableListOf<LyricSyllable>()
             val syllableMatches = krcSyllableRegex.findAll(syllablesContent)
@@ -223,9 +247,23 @@ class KugouLyricsApi @Inject constructor(
                 val durMs = sylMatch.groupValues[2].toLongOrNull() ?: 0L
                 val sylText = sylMatch.groupValues[3]
 
+                if (sylText.isBlank()) {
+                    if (syllables.isNotEmpty()) {
+                        val last = syllables.last()
+                        if (!last.text.endsWith(" ")) {
+                            syllables[syllables.lastIndex] = last.copy(
+                                text = last.text + " "
+                            )
+                        }
+                    }
+                    lineTextBuilder.append(sylText)
+                    continue
+                }
+
+                val sylTimeMs = (lineStartMs + offsetMs).coerceAtLeast(0L)
                 syllables.add(
                     LyricSyllable(
-                        timeMs = lineStartMs + offsetMs,
+                        timeMs = sylTimeMs,
                         durationMs = durMs,
                         text = sylText,
                         isBackground = false
@@ -236,6 +274,10 @@ class KugouLyricsApi @Inject constructor(
 
             val fullLineText = lineTextBuilder.toString().trim()
             if (fullLineText.isNotEmpty() && syllables.isNotEmpty()) {
+                val isCredit = isCreditLine(fullLineText, isFirstRawLine)
+                isFirstRawLine = false
+                if (isCredit) continue
+
                 lines.add(
                     LyricLine(
                         timeMs = lineStartMs,
