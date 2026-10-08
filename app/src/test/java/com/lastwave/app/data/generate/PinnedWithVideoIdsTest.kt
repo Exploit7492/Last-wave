@@ -14,10 +14,13 @@ class PinnedWithVideoIdsTest {
 
     @Test
     fun keepsPinnedTracksWithoutNetwork() = runBlocking {
+        // Bare id: youtubeVideoIdOrNull matches the 11-char regex directly
+        // without touching android.net.Uri, which throws on plain JVM unit
+        // tests (android.jar stubs). A full watch URL would need Robolectric.
         val pinned = GeneratedTrack(
             name = "Song",
             artist = "Artist",
-            url = "https://music.youtube.com/watch?v=abcdefghijk",
+            url = "abcdefghijk",
         )
         assertEquals(listOf(pinned), listOf(pinned).pinnedWithVideoIds(api))
         coVerify(exactly = 0) { api.findBestMatchOrNull(any(), any(), any()) }

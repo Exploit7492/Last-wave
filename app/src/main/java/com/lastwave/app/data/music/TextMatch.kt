@@ -11,12 +11,14 @@ import java.util.Locale
  * Latin-only word pattern (`[^a-z0-9]+`), which reduced every non-Latin
  * query — Cyrillic, CJK, Arabic, … — to blank and broke matching for
  * those scripts (issue #102). The word pattern is now Unicode-aware
- * (`\p{L}` letters + `\p{N}` numbers from any script) and case folding
- * uses [Locale.ROOT] so devices in locales like Turkish (where `I`
- * lowercases to `ı`) match identically everywhere.
+ * (`\p{L}` letters + `\p{N}` numbers + `\p{M}` marks from any script) and
+ * case folding uses [Locale.ROOT] so devices in locales like Turkish (where
+ * `I` lowercases to `ı`) match identically everywhere. Marks ride along with
+ * words because [normalize] strips diacritics only off Latin bases — Hindi
+ * matras, Thai vowels and the like are integral letters, not noise.
  */
 internal object TextMatch {
-    private val NON_WORD = Regex("[^\\p{L}\\p{N}]+")
+    private val NON_WORD = Regex("[^\\p{L}\\p{N}\\p{M}]+")
     private val MULTI_SPACE = Regex("\\s+")
     val VARIANT_WORDS = setOf(
         "live", "remix", "karaoke", "cover", "instrumental", "slowed", "sped", "nightcore",
