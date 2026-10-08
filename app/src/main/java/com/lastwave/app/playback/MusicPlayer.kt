@@ -95,6 +95,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import kotlinx.coroutines.withContext
@@ -995,7 +996,10 @@ class MusicPlayer @Inject constructor(
             .setBufferDurationsMs(
                 /* minBufferMs = */ if (handleAudioFocus) 45_000 else 15_000,
                 /* maxBufferMs = */ if (handleAudioFocus) 120_000 else 30_000,
-                /* bufferForPlaybackMs = */ 1_500,
+                // Instant start: first frame after ~500ms buffered instead of
+                // 1500ms. Min/max buffers unchanged, so steady-state stability
+                // and rebuffer behavior are untouched.
+                /* bufferForPlaybackMs = */ 500,
                 /* bufferForPlaybackAfterRebufferMs = */ 2_500,
             )
             .setPrioritizeTimeOverSizeThresholds(true)
@@ -5485,7 +5489,11 @@ class MusicPlayer @Inject constructor(
                     android.util.Log.i("MusicPlayer", "[PLAYBACK] local-download hit for '${track.title}' key=${it.cacheKey}")
                 } ?: (youtubeDeferred.await()
                     ?: runCatching { resolveYoutubeTrackAudioStream(track, videoId) }.getOrNull()
-                    ?: resolveYoutubeTrackAudioStream(track, null))
+                    // Title search only when no videoId was ever known. A known
+                    // videoId that failed direct resolve must fail loud, never
+                    // substitute a different videoId by text search.
+                    ?: if (videoId.isNullOrBlank()) resolveYoutubeTrackAudioStream(track, null)
+                    else throw java.io.IOException("Unable to resolve audio stream for $videoId"))
             } finally {
                 youtubeDeferred.cancel()
                 localDeferred.cancel()
@@ -5498,13 +5506,21 @@ class MusicPlayer @Inject constructor(
                 android.util.Log.i("MusicPlayer", "[PLAYBACK] local-download hit for '${track.title}' key=${localStream.cacheKey}")
                 localStream
             } else {
+                // Instant parallel race with lossless head start: the addon plays
+                // directly when it wins inside LOSSLESS_HEAD_START_MS (no swap
+                // glitch); otherwise limusic-fast YouTube starts now and the
+                // in-flight lossless promotes via background upgrade below.
                 val losslessStream: ResolvedStream? = if (losslessDeferred.isCompleted) {
                     runCatching { losslessDeferred.await() }.getOrNull()
                 } else if (losslessBudget == LosslessBudget.Unbounded) {
                     runCatching { losslessDeferred.await() }.getOrNull()
                 } else {
-                    withTimeoutOrNull(2000L) {
+                    withTimeoutOrNull(LOSSLESS_HEAD_START_MS) {
                         runCatching { losslessDeferred.await() }.getOrNull()
+                    } ?: select<ResolvedStream?> {
+                        losslessDeferred.onAwait { runCatching { it }.getOrNull() }
+                        // YouTube won the race: play it now, upgrade later.
+                        youtubeDeferred.onAwait { null }
                     }
                 }
 
@@ -5522,7 +5538,8 @@ class MusicPlayer @Inject constructor(
                     }
                     val ytStream = youtubeDeferred.await()
                         ?: runCatching { resolveYoutubeTrackAudioStream(track, videoId) }.getOrNull()
-                        ?: resolveYoutubeTrackAudioStream(track, null)
+                        ?: if (videoId.isNullOrBlank()) resolveYoutubeTrackAudioStream(track, null)
+                        else throw java.io.IOException("Unable to resolve audio stream for $videoId")
                     android.util.Log.i(
                         "MusicPlayer",
                         "[PLAYBACK] YouTube stream resolved for '${track.title}' (${SystemClock.elapsedRealtime() - forkStart}ms); playing ${ytStream.audioCodec}, background lossless upgrade pending",
@@ -5749,12 +5766,16 @@ class MusicPlayer @Inject constructor(
                 }
             }
         }
-        // Search-only attempts (the direct attempt above already ran). Two, not
-        // three: each extra attempt re-ran the whole waterfall and multiplied a
-        // slow network into a 60-90s wait before playback. Attempt 0 keeps the
-        // artist for match quality; attempt 1 broadens the query by dropping it.
+        // Search-only attempts when NO videoId was ever known (radio, typed
+        // query, unresolvable import). When a videoId was known and its direct
+        // resolve failed, never substitute a different videoId by text search:
+        // that is the wrong-track bug (title-only attempt 1 matches anyone's
+        // same-named song). Fail loud so the caller skips instead.
+        if (!videoId.isNullOrBlank() && resolved == null && lastFailure != null) {
+            throw lastFailure
+        }
         var attempt = 0
-        while (resolved == null && canSearch && attempt < 2) {
+        while (resolved == null && canSearch && attempt < 2 && videoId.isNullOrBlank()) {
             try {
                 val searchArtist = if (attempt == 0) track.artist else ""
                 val targetVideoId = innerTube.findBestMatch(
@@ -5956,7 +5977,10 @@ class MusicPlayer @Inject constructor(
                 val expectedSec = (track.durationMs?.takeIf { it > 0 } ?: currentStream.durationMs)?.div(1000)?.toInt()
                 val upgradedSec = upgraded.durationMs?.div(1000)?.toInt()
                 if (expectedSec != null && upgradedSec != null && expectedSec > 0 && upgradedSec > 0) {
-                    if (kotlin.math.abs(expectedSec - upgradedSec) > 35) {
+                    // ±10s: same song across sources drifts a few seconds
+                    // (approx durations, intros); ±35s admitted different
+                    // edits/recordings sharing a name.
+                    if (kotlin.math.abs(expectedSec - upgradedSec) > 10) {
                         android.util.Log.w("MusicPlayer", "[STREAM UPGRADE] Severe duration mismatch for '${track.title}': expected ${expectedSec}s vs candidate ${upgradedSec}s")
                         return@launch
                     }
@@ -6241,7 +6265,7 @@ class MusicPlayer @Inject constructor(
                 if (auditionPlayer.playbackState == Player.STATE_READY) {
                     val candidateDur = auditionPlayer.duration
                     if (expectedDurationMs != null && expectedDurationMs > 0L && candidateDur > 0L) {
-                        if (kotlin.math.abs(candidateDur - expectedDurationMs) > 35_000L) {
+                        if (kotlin.math.abs(candidateDur - expectedDurationMs) > 10_000L) {
                             android.util.Log.w(
                                 "MusicPlayer",
                                 "[STREAM AUDITION] Duration mismatch: expected ${expectedDurationMs}ms vs candidate ${candidateDur}ms",
@@ -7017,6 +7041,12 @@ class MusicPlayer @Inject constructor(
 
         const val YOUTUBE_PROMOTE_BUDGET_MS = 12_000L
         const val MISSING_ARTIST_METADATA_TIMEOUT_MS = 1_200L
+        /** Lossless head start on interactive playback: when the addon wins
+         *  inside this window it plays directly (no mid-track swap glitch).
+         *  Past it, limusic-fast YouTube starts instantly and lossless
+         *  promotes via the background auditioned hot-swap. Lossless keeps
+         *  first priority; YouTube is the instant parallel fallback. */
+        const val LOSSLESS_HEAD_START_MS = 800L
         /** Total cap for one YouTube fallback chain from fork, covering the
          *  promote wait plus every stacked re-resolve. Normal resolves take
          *  seconds; past this the track fails fast instead of spinning. */

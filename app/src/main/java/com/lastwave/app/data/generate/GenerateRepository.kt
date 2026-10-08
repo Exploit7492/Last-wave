@@ -151,9 +151,11 @@ class GenerateRepository @Inject constructor(
         }
     }
 
-    /** Instant non-blocking pass-through matching web app.js generation speed.
-     *  Audio resolution is performed on-demand when playing tracks. */
-    suspend fun filterPlayable(tracks: List<GeneratedTrack>): List<GeneratedTrack> = tracks
+    /** List-time videoId pinning: every reco/queue emission leaves here carrying
+     *  its YouTube id (resolved once, strictly), so playback never searches.
+     *  Already-pinned rows pass through with zero network; strict misses drop. */
+    suspend fun filterPlayable(tracks: List<GeneratedTrack>): List<GeneratedTrack> =
+        tracks.pinnedWithVideoIds(innerTube)
 
     private fun YouTubeMusicTrack.toGeneratedTrack() = GeneratedTrack(
         name = title,
@@ -1423,7 +1425,7 @@ class GenerateRepository @Inject constructor(
                 emptyList()
             }
         }
-        blendSources(youtube.await(), lastFm.await()).take(15)
+        blendSources(youtube.await(), lastFm.await()).let { filterPlayable(it).take(15) }
     }
 
     suspend fun searchArtists(artist: String): List<String> = kotlinx.coroutines.supervisorScope {

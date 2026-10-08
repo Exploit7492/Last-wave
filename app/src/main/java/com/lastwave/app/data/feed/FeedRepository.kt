@@ -405,25 +405,33 @@ class FeedRepository @Inject constructor(
         // Heavy rotation: connected blends long-term taste + liked signals;
         // guest/disconnected builds it from local Room listening history
         // (liked + saved) so "Heavy Rotation" never empties.
+        // Taste-weighted rotation: affinity dominates (40/35-point arms), but a
+        // ±20 jitter reorders within taste bands and last load's picks sink 20,
+        // so Heavy Rotation feels fresh every load without going generic.
+        // Mirrors quickPicks' trackScore jitter/previous-penalty pattern.
+        val previousHeavyKeys = previous?.heavyRotation.orEmpty().mapTo(mutableSetOf()) { it.key }
+        fun rotationJitter(t: GeneratedTrack): Double =
+            random.nextDouble() * 20.0 - (if (t.key in previousHeavyKeys) 20.0 else 0.0)
         val heavyCandidates = buildList {
             tasteProfile?.topTracksRaw?.forEachIndexed { i, t ->
                 val aff = ArtistHelper.splitArtists(t.artist).maxOfOrNull { affinity[it.trim().lowercase()] ?: 0.0 } ?: 0.0
-                add(t to (aff * 40 + 20.0 / (1 + i / 6.0)))
+                add(t to (aff * 40 + 20.0 / (1 + i / 6.0) + rotationJitter(t)))
             }
             blend(ytRecentSongs, ytLikedSongs)
                 .distinctBy { it.artist.trim().lowercase() to it.title.trim().lowercase() }
                 .forEachIndexed { i, it ->
+                    val generated = GeneratedTrack(
+                        it.title, it.artist, it.artworkUrl,
+                        url = "https://www.youtube.com/watch?v=${it.videoId}", album = it.album,
+                    )
                     add(
-                        GeneratedTrack(
-                            it.title, it.artist, it.artworkUrl,
-                            url = "https://www.youtube.com/watch?v=${it.videoId}", album = it.album,
-                        ) to (12.0 / (1 + i / 6.0) + (affinity[ArtistHelper.primaryArtist(it.artist).trim().lowercase()] ?: 0.0) * 30),
+                        generated to (12.0 / (1 + i / 6.0) + (affinity[ArtistHelper.primaryArtist(it.artist).trim().lowercase()] ?: 0.0) * 30 + rotationJitter(generated)),
                     )
                 }
             // Local-first: Room liked + saved rank by affinity like taste.
             localLibrary.forEachIndexed { i, t ->
                 val aff = ArtistHelper.splitArtists(t.artist).maxOfOrNull { affinity[it.trim().lowercase()] ?: 0.0 } ?: 0.0
-                add(t to (aff * 35 + 16.0 / (1 + i / 6.0)))
+                add(t to (aff * 35 + 16.0 / (1 + i / 6.0) + rotationJitter(t)))
             }
         }.distinctBy { (t, _) -> t.key }
             .sortedByDescending { it.second }

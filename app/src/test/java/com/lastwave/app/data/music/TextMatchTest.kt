@@ -70,4 +70,48 @@ class TextMatchTest {
         assertEquals(100, TextMatch.similarity("Hello", "hello"))
         assertEquals(setOf("hello", "world"), TextMatch.tokens("Hello World (Official Video)"))
     }
+
+    @Test
+    fun arabicHamzaFoldsToBareAlef() {
+        // U+0623 has no NFD decomposition, so mark-stripping alone never folds
+        // it: searching أم must match ام.
+        assertEquals("ام كلثوم", TextMatch.normalize("أم كلثوم"))
+    }
+
+    @Test
+    fun hindiVowelSignsAreNotStripped() {
+        // Matras are integral letters: तुम and तम are different words.
+        assertEquals("तुम ही हो", TextMatch.normalize("तुम ही हो"))
+        assertTrue(TextMatch.normalize("तुम ही हो") != TextMatch.normalize("तम ही हो"))
+    }
+
+    @Test
+    fun koreanStaysComposed() {
+        // NFD explodes 5 syllables into ~14 jamo, distorting every ratio and
+        // token measure built on the normalized form.
+        assertEquals(5, TextMatch.normalize("방탄소년단").length)
+    }
+
+    @Test
+    fun thaiVowelsAreNotStripped() {
+        assertEquals("คอนเสิร์ต", TextMatch.normalize("คอนเสิร์ต"))
+    }
+
+    @Test
+    fun cjkContainmentMeetsNonLatinBar() {
+        // Spaceless overlap at ratio 60: accepted for CJK (4.0.0 bar 45)…
+        assertTrue(TextMatch.similarity("夜に駆ける", "に駆ける") >= 72)
+        // …while Latin prefix confusion at ratio 66 stays rejected (4.2.4 bar 75).
+        assertTrue(TextMatch.similarity("Belonging", "Belong") < 72)
+    }
+
+    @Test
+    fun spanishLiveCountsAsVariant() {
+        val exact = YouTubeMusicTrack("vid1", "Cancion", "Artista")
+        val live = YouTubeMusicTrack("vid2", "Cancion En Vivo", "Artista")
+        assertTrue(
+            TextMatch.matchScore(exact, "Cancion", "Artista") >
+                TextMatch.matchScore(live, "Cancion", "Artista"),
+        )
+    }
 }

@@ -90,7 +90,20 @@ class HomeRepository @Inject constructor(
         val checks = tracks.map { track ->
             async(Dispatchers.IO) {
                 playableCheckSemaphore.withPermit {
-                    if (innerTube.isPlayable(track.name, track.artist)) track else null
+                    // Same searches the old isPlayable gate paid — but the found
+                    // videoId is kept on the row instead of discarded, so home
+                    // taps resolve directly with zero play-time search. Default
+                    // prefetch retained: it warms the top-2 stream cache per
+                    // row, exactly as before.
+                    try {
+                        innerTube.findBestMatchOrNull(track.name, track.artist)?.let {
+                            track.copy(videoId = it.videoId)
+                        }
+                    } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                        throw cancellation
+                    } catch (_: Exception) {
+                        null
+                    }
                 }
             }
         }

@@ -16,6 +16,9 @@ data class HomeTrack(
     val timestampMillis: Long?,
     val playCount: Int,
     val isNowPlaying: Boolean = false,
+    /** YouTube id pinned at list time by [HomeRepository.filterPlayable], so
+     *  home taps resolve directly instead of searching at play time. */
+    val videoId: String? = null,
 ) {
     val key: String get() = "${name.lowercase()}|${artist.lowercase()}"
 }

@@ -2129,10 +2129,13 @@ class InnerTubeMusicApi @Inject constructor(
         val channel = kotlinx.coroutines.channels.Channel<YouTubeAudioStream>(ordered.size)
         val jobs = ordered.mapIndexed { index, client ->
             launch(Dispatchers.IO) {
-                // Hedged stagger: each client gets a short head start over the
-                // next, but a slow client never serializes a full timeout
-                // onto the ones behind it.
-                if (index > 0) {
+                // Pure parallel race (limusic-style): all three clients fire at
+                // T=0, first direct URL wins. No stagger — staggering only ever
+                // delays clients 2..n with zero burst benefit at this fan-out
+                // (importers already burst 4 concurrent searches). A slow client
+                // still never blocks the winner: jobs are cancelled on first
+                // success below. (Stage 2 keeps its stagger: ~8-way fan-out.)
+                if (index > 0 && DIRECT_FAST_STAGGER_MS > 0L) {
                     delay(DIRECT_FAST_STAGGER_MS * index)
                     if (!isActive) return@launch
                 }
@@ -2782,12 +2785,18 @@ class InnerTubeMusicApi @Inject constructor(
         }
         val best = validCandidates.asSequence()
             .filter { candidate ->
-                val titleMatch = TextMatch.isSafeTitleMatch(candidate.title, title, cleanArtist)
-                val artistMatch = cleanArtist.isBlank() ||
-                    similarity(candidate.artist, cleanArtist) >= 30 ||
-                    normalize(candidate.artist).contains(normalize(cleanArtist)) ||
-                    normalize(candidate.title).contains(normalize(cleanArtist))
-                titleMatch && artistMatch
+                // Hybrid gate: 4.2.3's recall numbers (title >= 60, artist >= 35
+                // with its contains clauses) minus its title-blind second chance
+                // and minus 4.2.4's loosening (>= 30 + fuzzy subset matcher),
+                // which substituted wrong tracks. Strict misses throw below.
+                maxOf(
+                    similarity(candidate.title, title),
+                    similarity(baseTitle(candidate.title), baseTitle(title)),
+                ) >= 60 &&
+                    (cleanArtist.isBlank() ||
+                        similarity(candidate.artist, cleanArtist) >= 35 ||
+                        normalize(candidate.artist).contains(normalize(cleanArtist)) ||
+                        normalize(candidate.title).contains(normalize(cleanArtist)))
             }
             .maxByOrNull { candidate -> matchScore(candidate, title, cleanArtist) }
             ?: throw IOException("No reliable YouTube Music match found for $title by $artist")
@@ -3660,8 +3669,9 @@ class InnerTubeMusicApi @Inject constructor(
         const val HEDGED_CLIENT_STAGGER_DELAY_MS = 300L
         /** Per-client bound for the direct-URL fast path (single POST, no extras). */
         const val DIRECT_FAST_CLIENT_TIMEOUT_MS = 2_500L
-        /** Stagger between hedged fast-path clients; first success wins. */
-        const val DIRECT_FAST_STAGGER_MS = 250L
+        /** Stagger between hedged fast-path clients; first success wins. Zero:
+         *  pure parallel race, strictly faster-or-equal (see call site). */
+        const val DIRECT_FAST_STAGGER_MS = 0L
         /** Whole fast path must settle inside this budget before heavier stages run. */
         const val DIRECT_FAST_PATH_BUDGET_MS = 4_000L
         /** Whole-call cap for one player-API POST (connect + read + body). */
