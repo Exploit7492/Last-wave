@@ -5918,19 +5918,42 @@ class MusicPlayer @Inject constructor(
         )
         activeUpgradeJob = applicationScope.launch(Dispatchers.IO) {
             try {
-                var upgraded: ResolvedStream? = null
-                // 1. Give the in-flight resolution a chance to finish first
-                if (inFlightLossless != null) {
-                    upgraded = runCatching { inFlightLossless.await() }.getOrNull()
+                val expectedSec = (track.durationMs?.takeIf { it > 0 } ?: currentStream.durationMs)
+                    ?.div(1_000)
+                    ?.toInt()
+                var seed = if (inFlightLossless != null) {
+                    runCatching { inFlightLossless.await() }.getOrNull()
+                } else {
+                    null
                 }
-
-                // 2. YouTube is already playing. Look up the lossless stream
-                // without waiting, so a short listen can still promote.
-                if (upgraded == null) {
+                // A duration miss must not end the search. The addon drops
+                // candidates outside its own ceiling when expected duration
+                // is set, and a stream that still fails the 35s check is
+                // excluded so the next candidate can be resolved.
+                val upgraded = selectDurationCompatibleUpgrade(
+                    expectedSec = expectedSec,
+                    urlOf = { it.url },
+                    durationSecOf = { it.durationMs?.div(1_000)?.toInt() },
+                    onRejected = { rejected ->
+                        val candidateSec = rejected.durationMs?.div(1_000)?.toInt()
+                        android.util.Log.w(
+                            "MusicPlayer",
+                            "[STREAM UPGRADE] Severe duration mismatch for '${track.title}': " +
+                                "expected ${expectedSec}s vs candidate ${candidateSec}s",
+                        )
+                    },
+                ) { excluded ->
                     currentCoroutineContext().ensureActive()
-                    if (generation != playRequestGeneration.get()) return@launch
-                    upgraded = runCatching {
-                        resolveLosslessTrackAudioStream(track, misc, excludedLosslessUrls = emptySet())
+                    if (generation != playRequestGeneration.get()) return@selectDurationCompatibleUpgrade null
+                    val pending = seed?.takeIf { it.url !in excluded }
+                    seed = null
+                    pending ?: runCatching {
+                        resolveLosslessTrackAudioStream(
+                            track = track,
+                            misc = misc,
+                            excludedLosslessUrls = excluded,
+                            expectedDurationSeconds = expectedSec,
+                        )
                     }.getOrNull()
                 }
 
@@ -5939,20 +5962,10 @@ class MusicPlayer @Inject constructor(
                     return@launch
                 }
 
-                // 3. Verify the upgraded stream is genuinely better than what is currently playing
+                // Verify the upgraded stream is genuinely better than what is currently playing
                 if (!isWorthSwapping(currentStream, upgraded)) {
                     android.util.Log.i("MusicPlayer", "[STREAM UPGRADE] Stream for '${track.title}' not worth swapping (codec=${upgraded.audioCodec})")
                     return@launch
-                }
-
-                // 4. Verify duration match to guard against different edits/recordings
-                val expectedSec = (track.durationMs?.takeIf { it > 0 } ?: currentStream.durationMs)?.div(1000)?.toInt()
-                val upgradedSec = upgraded.durationMs?.div(1000)?.toInt()
-                if (expectedSec != null && upgradedSec != null && expectedSec > 0 && upgradedSec > 0) {
-                    if (kotlin.math.abs(expectedSec - upgradedSec) > 35) {
-                        android.util.Log.w("MusicPlayer", "[STREAM UPGRADE] Severe duration mismatch for '${track.title}': expected ${expectedSec}s vs candidate ${upgradedSec}s")
-                        return@launch
-                    }
                 }
 
                 currentCoroutineContext().ensureActive()
@@ -6015,7 +6028,12 @@ class MusicPlayer @Inject constructor(
                         },
                     )
                     val stereoCandidate = runCatching {
-                        resolveLosslessTrackAudioStream(track, stereoMisc, excludedLosslessUrls = emptySet())
+                        resolveLosslessTrackAudioStream(
+                            track,
+                            stereoMisc,
+                            excludedLosslessUrls = emptySet(),
+                            expectedDurationSeconds = expectedSec,
+                        )
                     }.getOrNull()
                     if (stereoCandidate != null && isWorthSwapping(currentStream, stereoCandidate)) {
                         val stereoKnownDur = stereoCandidate.durationMs ?: knownDur
@@ -6322,14 +6340,22 @@ class MusicPlayer @Inject constructor(
             repeat(2) { attempt ->
                 try {
                     return resolveTrackAudioStream(track, videoId, allowLossless, losslessBudget = losslessBudget)
-                } catch (cancellation: CancellationException) {
-                    throw cancellation
                 } catch (error: Throwable) {
-                    lastFailure = error
-                    if (attempt == 0 && error is java.io.IOException) {
+                    if (error is CancellationException &&
+                        error !is kotlinx.coroutines.TimeoutCancellationException
+                    ) {
+                        throw error
+                    }
+                    val failure = if (error is kotlinx.coroutines.TimeoutCancellationException) {
+                        java.io.IOException("Timed out resolving audio", error)
+                    } else {
+                        error
+                    }
+                    lastFailure = failure
+                    if (attempt == 0 && failure is java.io.IOException) {
                         delay(PLAYBACK_RETRY_BASE_DELAY_MS + Random.nextLong(PLAYBACK_RETRY_JITTER_MS + 1L))
                     } else {
-                        throw error
+                        throw failure
                     }
                 }
             }

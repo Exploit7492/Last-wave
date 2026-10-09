@@ -34,7 +34,6 @@ object CrashRecorder {
     private const val PREFIX = "crash-"
     private const val SUFFIX = ".txt"
     private const val RULE = "================================================================"
-    private const val STACK_FRAMES = 48
 
     private val stampFormat = ThreadLocal.withInitial {
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
@@ -109,7 +108,7 @@ object CrashRecorder {
             appendLine("Recorded at  : ${stamp(now)}")
             appendLine("App version  : ${appVersion(context)}")
             appendLine("Process      : pid=${Process.myPid()}")
-            appendLine("Thread       : ${thread?.name ?: "n/a"}")
+            appendLine("Thread       : ${thread?.let(::formatThreadContext) ?: "n/a"}")
             appendLine("Device       : ${Build.MANUFACTURER} ${Build.MODEL}  sdk=${Build.VERSION.SDK_INT}  release=${Build.VERSION.RELEASE}  abi=${Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"}")
             appendLine("Memory       : ${memory(context)}")
             appendLine("Storage      : ${storage(context)}")
@@ -122,11 +121,15 @@ object CrashRecorder {
 
             if (throwable != null) {
                 appendLine()
-                appendLine("--- message ---")
-                appendLine(throwable.toString())
+                appendLine("--- exception ---")
+                appendLine(formatThrowable(throwable))
                 appendLine()
-                appendLine("--- stack trace ---")
-                appendAll(throwable.stackTrace.take(STACK_FRAMES), "at ")
+                appendLine("--- other threads ---")
+                appendLine(
+                    runCatching {
+                        formatOtherThreads(Thread.getAllStackTraces(), thread)
+                    }.getOrElse { "(thread dump unavailable)" },
+                )
             }
 
             appendLine()

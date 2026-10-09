@@ -72,11 +72,33 @@ object ExitReasonReader {
     private fun describe(exit: ApplicationExitInfo): String = buildString {
         appendLine("Reason      : ${exit.reason} (${reasonName(exit.reason)})")
         appendLine("Timestamp   : ${exit.timestamp}")
+        appendLine("Pid         : ${exit.pid}")
+        appendLine("Process     : ${exit.processName}")
+        appendLine("Status      : ${exit.status}")
+        appendLine("Importance  : ${exit.importance}")
         appendLine("PSS         : ${exit.pss / (1024 * 1024)}MB")
         appendLine("RSS         : ${exit.rss / (1024 * 1024)}MB")
         exit.description?.takeIf { it.isNotBlank() }?.let { appendLine("System says : $it") }
-        exit.importance?.let { appendLine("Importance  : $it") }
+        appendLine()
+        appendLine("--- system trace ---")
+        val trace = readSystemTrace(exit)
+        append(if (trace.isNullOrBlank()) "(no trace attached to this exit record)" else trace)
     }.trimEnd()
+
+    /**
+     * Android attaches a tombstone for a native crash and an ANR trace for
+     * [ApplicationExitInfo.REASON_ANR]. A Java [ApplicationExitInfo.REASON_CRASH]
+     * sometimes carries the same text and sometimes carries nothing; either
+     * way the report says which one happened.
+     */
+    private fun readSystemTrace(exit: ApplicationExitInfo): String? = runCatching {
+        exit.traceInputStream?.use { input ->
+            input.bufferedReader().use { reader ->
+                val text = reader.readText().trim()
+                if (text.length <= CRASH_TRACE_MAX_CHARS) text else text.take(CRASH_TRACE_MAX_CHARS) + "\n… trace truncated"
+            }
+        }
+    }.getOrNull()
 
     private fun reasonName(reason: Int): String = when (reason) {
         ApplicationExitInfo.REASON_ANR -> "ANR"

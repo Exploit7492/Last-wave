@@ -52,10 +52,16 @@ class YouTubeStreamExtractor @Inject constructor(
                 .thenByDescending { maxOf(it.averageBitrate, it.bitrate) },
         )
         if (ordered.isEmpty()) throw IOException("YouTube returned no playable audio stream for $videoId")
-        for (stream in ordered.take(MAX_PROBED_AUDIO_STREAMS)) {
-            val candidate = stream.toYouTubeAudioStream(videoId, info.duration, now)
-            if (probePlayable(candidate)) return@withContext candidate
+        val candidates = ordered.map { stream ->
+            stream.toYouTubeAudioStream(videoId, info.duration, now)
         }
+        val playable = selectProbedCandidate(
+            candidates = candidates,
+            urlOf = { it.url },
+            probe = ::probePlayable,
+            limit = MAX_PROBED_AUDIO_STREAMS,
+        )
+        if (playable != null) return@withContext playable
         invalidatePlayerState(videoId)
         throw IOException("YouTube audio URLs were rejected for $videoId")
     }
@@ -112,26 +118,21 @@ class YouTubeStreamExtractor @Inject constructor(
         }
     }
 
-    /** A googlevideo URL that answers 403 must never be handed to the player. */
+    /**
+     * Opens the URL the way ExoPlayer does: no two-byte range. A 206 for
+     * `bytes=0-1` is not evidence the player can read the stream. The body
+     * is closed as soon as the status line is known.
+     */
     private fun probePlayable(stream: YouTubeAudioStream): Boolean {
-        val request = okhttp3.Request.Builder()
-            .url(stream.url)
-            .header("Accept-Encoding", "identity")
-            .header("Range", "bytes=0-1")
-            .apply {
-                stream.requestHeaders.forEach { (name, value) -> header(name, value) }
-            }
-            .build()
+        val request = playbackProbeRequest(stream.url, stream.requestHeaders)
         val call = http.newCall(request)
         call.timeout().timeout(PROBE_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
         return try {
             call.execute().use { response ->
-                val type = response.header("Content-Type").orEmpty().lowercase()
-                val playableType = !type.contains("text/html") &&
-                    !type.contains("application/json") &&
-                    !type.contains("text/plain")
-                (response.code == 200 || response.code == 206) && playableType
+                acceptsPlaybackProbe(response.code, response.header("Content-Type").orEmpty())
             }
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+            throw cancellation
         } catch (_: Exception) {
             false
         }
@@ -219,6 +220,49 @@ class YouTubeStreamExtractor @Inject constructor(
 }
 
 internal const val YOUTUBE_ORIGIN = "https://www.youtube.com"
+
+/** Same Accept headers as the player's [androidx.media3.datasource.DefaultHttpDataSource]. No two-byte Range. */
+internal fun playbackProbeRequest(url: String, headers: Map<String, String>): okhttp3.Request =
+    okhttp3.Request.Builder()
+        .url(url)
+        .header("Accept", "audio/*,*/*;q=0.8")
+        .header("Accept-Encoding", "identity")
+        .apply {
+            headers.forEach { (name, value) -> header(name, value) }
+        }
+        .build()
+
+/** HTTP 403 and 410 are not playable. A tiny 206 is only accepted when the open itself succeeded. */
+internal fun acceptsPlaybackProbe(code: Int, contentType: String): Boolean {
+    if (code == 403 || code == 410) return false
+    val type = contentType.lowercase()
+    val playableType = !type.contains("text/html") &&
+        !type.contains("application/json") &&
+        !type.contains("text/plain")
+    return (code == 200 || code == 206) && playableType
+}
+
+/**
+ * Probes at most [limit] distinct URLs. A failed candidate is not retried.
+ * [probe] may throw [kotlinx.coroutines.CancellationException].
+ */
+internal fun <T> selectProbedCandidate(
+    candidates: List<T>,
+    urlOf: (T) -> String,
+    probe: (T) -> Boolean,
+    limit: Int,
+): T? {
+    val seen = HashSet<String>()
+    var probed = 0
+    for (candidate in candidates) {
+        if (probed >= limit) break
+        val url = urlOf(candidate)
+        if (url.isBlank() || !seen.add(url)) continue
+        probed++
+        if (probe(candidate)) return candidate
+    }
+    return null
+}
 
 private class OkHttpNewPipeDownloader(
     private val http: OkHttpClient,

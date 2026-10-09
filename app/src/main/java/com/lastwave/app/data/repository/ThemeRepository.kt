@@ -7,6 +7,7 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import com.lastwave.app.data.artwork.ArtworkNormalizer
 import com.lastwave.app.data.artwork.ArtworkRepository
+import com.lastwave.app.data.artwork.DeferredArtworkLookup
 import com.lastwave.app.data.local.AccentMode
 import com.lastwave.app.data.local.MiscSettings
 import com.lastwave.app.data.local.SettingsPreferences
@@ -82,6 +83,23 @@ class ThemeRepository @Inject constructor(
      *  no artwork could be resolved from any provider, or extraction
      *  failed — see the init block below. */
     private val nowPlayingHex = MutableStateFlow<String?>(null)
+
+    private val deferredArtwork = DeferredArtworkLookup(
+        scope = applicationScope,
+        source = "theme",
+        hasMemoryHit = { key -> !artworkRepository.resolved.value[key].isNullOrBlank() },
+        resolve = { name, artist ->
+            try {
+                artworkRepository.resolve(name, artist)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                android.util.Log.w("ThemeRepository", "Artwork resolution unavailable", error)
+            } catch (error: LinkageError) {
+                android.util.Log.w("ThemeRepository", "Artwork resolution unsupported on this ROM", error)
+            }
+        },
+    )
 
     init {
         // Bug fix: this used to read RecentTrack.artworkUrl straight off the
@@ -311,22 +329,13 @@ class ThemeRepository @Inject constructor(
     fun updateNowPlayingArtwork(trackName: String?, artistName: String?) {
         if (trackName.isNullOrBlank() || artistName.isNullOrBlank()) {
             nowPlayingTrackKey.value = null
+            deferredArtwork.cancel()
             return
         }
         val key = ArtworkNormalizer.cacheKey(trackName, artistName)
         if (key == nowPlayingTrackKey.value) return
         nowPlayingTrackKey.value = key
-        applicationScope.launch {
-            try {
-                artworkRepository.resolve(trackName, artistName)
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (error: Exception) {
-                android.util.Log.w("ThemeRepository", "Artwork resolution unavailable", error)
-            } catch (error: LinkageError) {
-                android.util.Log.w("ThemeRepository", "Artwork resolution unsupported on this ROM", error)
-            }
-        }
+        deferredArtwork.request(trackName, artistName)
     }
 
     private fun Color.toHex(): String = "#%02X%02X%02X".format(

@@ -2,6 +2,7 @@ package com.lastwave.app.playback.resolve
 
 import android.util.Log
 import com.lastwave.app.data.music.YouTubeAudioStream
+import com.lastwave.app.data.music.containedAudioResolutionFailure
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -23,7 +24,9 @@ class StreamExtraction(
     // Independent of the caller's job. Cancelling prefetch or playback
     // must not cancel an extract that is about to write the URL.
     // The scope ends when the player scope ends.
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO + containedAudioResolutionFailure(TAG),
+    )
 
     init {
         parent.coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion {

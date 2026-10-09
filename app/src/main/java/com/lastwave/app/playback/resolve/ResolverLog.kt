@@ -8,6 +8,7 @@ enum class ResolveEvent {
     CACHE_HIT,
     CACHE_MISS,
     SUCCESS,
+    FAILED,
     IGNORED_STALE,
 }
 
@@ -35,6 +36,7 @@ object AndroidResolverLogger : ResolverLogger {
             ResolveEvent.CACHE_HIT -> "RESOLVE_CACHE_HIT"
             ResolveEvent.CACHE_MISS -> "RESOLVE_CACHE_MISS"
             ResolveEvent.SUCCESS -> "RESOLVE_SUCCESS"
+            ResolveEvent.FAILED -> "RESOLVE_FAILED"
             ResolveEvent.IGNORED_STALE -> "RESOLVE_IGNORED_STALE"
         }
         Log.i(

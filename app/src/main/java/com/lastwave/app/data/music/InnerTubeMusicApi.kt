@@ -195,7 +195,9 @@ class InnerTubeMusicApi @Inject constructor(
     private val matchCache = ConcurrentHashMap<String, YouTubeMusicTrack>()
     private val streamCache = ConcurrentHashMap<StreamCacheKey, CachedStream>()
     private val activeStreamRequests = ConcurrentHashMap<String, SharedStreamRequest>()
-    private val apiScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val apiScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO + containedAudioResolutionFailure(STREAM_LOG_TAG),
+    )
     private val failedClientsUntil = ConcurrentHashMap<String, Long>()
     private val lastResolvedStreams = ConcurrentHashMap<String, YouTubeAudioStream>()
     @Volatile private var lastSuccessfulClientName: String? = null
@@ -2125,12 +2127,19 @@ class InnerTubeMusicApi @Inject constructor(
             .mapNotNull { name -> PLAYER_CLIENTS.firstOrNull { it.name == name } }
             .filter { nowMs >= (failedClientsUntil[clientFailureKey(videoId, it.key, authScope)] ?: 0L) }
             .sortedByDescending { it.name == lastSuccessfulClientName }
-        if (ordered.isEmpty()) return null
+        if (ordered.isEmpty()) {
+            noteAttempt("direct-fast=no-clients")
+            return null
+        }
 
         val deadline = SystemClock.elapsedRealtime() + DIRECT_FAST_PATH_BUDGET_MS
         for (client in ordered) {
             val remaining = deadline - SystemClock.elapsedRealtime()
-            if (remaining <= 0L) return null
+            if (remaining <= 0L) {
+                noteAttempt("direct-fast=budget-exhausted")
+                return null
+            }
+            var failed = false
             val stream = try {
                 kotlinx.coroutines.withTimeoutOrNull(minOf(DIRECT_FAST_CLIENT_TIMEOUT_MS, remaining)) {
                     resolveDirectClientStream(
@@ -2148,14 +2157,19 @@ class InnerTubeMusicApi @Inject constructor(
                 }
             } catch (cancellation: kotlinx.coroutines.CancellationException) {
                 throw cancellation
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                failed = true
+                noteAttempt("client=${client.name} outcome=error ${resolutionFailureDetail(error)}")
                 null
             }
             if (stream != null) {
+                noteAttempt("client=${client.name} outcome=direct-url itag=${stream.itag ?: -1}")
                 lastSuccessfulClientName = client.name
                 return stream
             }
+            if (!failed) noteAttempt("client=${client.name} outcome=timeout")
         }
+        noteAttempt("direct-fast=exhausted")
         return null
     }
 
@@ -2163,7 +2177,8 @@ class InnerTubeMusicApi @Inject constructor(
         videoId: String,
         authScope: String,
         startedAt: Long,
-    ): YouTubeAudioStream = kotlinx.coroutines.coroutineScope {
+    ): YouTubeAudioStream = kotlinx.coroutines.withContext(ResolutionAttemptLog()) {
+        kotlinx.coroutines.coroutineScope {
         val now = System.currentTimeMillis()
 
         // Direct clients and the NewPipe/InnerTubeX race start together.
@@ -2178,9 +2193,26 @@ class InnerTubeMusicApi @Inject constructor(
             lastResolvedStreams[resolutionKey(videoId, authScope)] = fast
             logStreamEvent("direct-fast-resolved", fast)
             logStage(videoId, "direct-fast", startedAt)
+            noteAttempt("fallback=cancelled-after-direct")
+            logResolveAttempts(videoId, failed = false)
             return@coroutineScope fast
         }
-        fallback.await() ?: throw IOException("Unable to resolve a playable audio stream for $videoId")
+        val resolved = try {
+            fallback.await()
+        } catch (error: Throwable) {
+            if (error.isCooperativeCancellation()) throw error
+            noteAttempt("fallback=failed ${resolutionFailureDetail(error)}")
+            logResolveAttempts(videoId, failed = true)
+            throw error
+        }
+        if (resolved == null) {
+            noteAttempt("fallback=exhausted")
+            logResolveAttempts(videoId, failed = true)
+            throw IOException("Unable to resolve a playable audio stream for $videoId")
+        }
+        logResolveAttempts(videoId, failed = false)
+        resolved
+        }
     }
 
     private suspend fun racePlayableFallback(
@@ -2192,6 +2224,7 @@ class InnerTubeMusicApi @Inject constructor(
         val channel = kotlinx.coroutines.channels.Channel<YouTubeAudioStream>(2)
         val jobs = listOf(
             launch(Dispatchers.IO) {
+                var failed = false
                 val candidate = try {
                     kotlinx.coroutines.withTimeoutOrNull(INNERTUBEX_STAGE_TIMEOUT_MS) {
                         val visitorData = try {
@@ -2206,12 +2239,18 @@ class InnerTubeMusicApi @Inject constructor(
                 } catch (cancellation: kotlinx.coroutines.CancellationException) {
                     throw cancellation
                 } catch (failure: Throwable) {
+                    failed = true
                     logClientFailure(videoId, "INNERTUBEX", failure)
+                    noteAttempt("client=INNERTUBEX outcome=error ${resolutionFailureDetail(failure)}")
                     null
                 }
-                if (candidate == null) return@launch
+                if (candidate == null) {
+                    if (!failed) noteAttempt("client=INNERTUBEX outcome=empty")
+                    return@launch
+                }
                 val compatible = candidate.isAdaptive || isCompatibleAudioCandidate(candidate)
                 if (!compatible) {
+                    noteAttempt("client=INNERTUBEX outcome=incompatible itag=${candidate.itag ?: -1}")
                     logStreamEvent("innertubex-rejected", candidate, detail = "compatible=false")
                     innerTubeXExtractor.reportPlaybackFailure(
                         videoId = videoId,
@@ -2223,6 +2262,7 @@ class InnerTubeMusicApi @Inject constructor(
                 if (probeStream(candidate, "innertubex-probe")) channel.trySend(candidate)
             },
             launch(Dispatchers.IO) {
+                var failed = false
                 val stream = try {
                     kotlinx.coroutines.withTimeoutOrNull(NEWPIPE_FALLBACK_TIMEOUT_MS) {
                         streamExtractor.resolveAudioStream(videoId)
@@ -2230,11 +2270,18 @@ class InnerTubeMusicApi @Inject constructor(
                 } catch (cancellation: kotlinx.coroutines.CancellationException) {
                     throw cancellation
                 } catch (failure: Throwable) {
+                    failed = true
                     logClientFailure(videoId, "NEWPIPE", failure)
+                    noteAttempt("client=NEWPIPE outcome=error ${resolutionFailureDetail(failure)}")
                     null
                 }
                 // resolveAudioStream already rejected URLs that answer 403.
-                if (stream != null) channel.trySend(stream)
+                if (stream != null) {
+                    noteAttempt("client=NEWPIPE outcome=accepted itag=${stream.itag ?: -1} mime=${stream.mimeType.orEmpty()}")
+                    channel.trySend(stream)
+                } else if (!failed) {
+                    noteAttempt("client=NEWPIPE outcome=empty")
+                }
             },
         )
         val remaining = AtomicInteger(jobs.size)
@@ -2411,6 +2458,7 @@ class InnerTubeMusicApi @Inject constructor(
         val now = System.currentTimeMillis()
         if (stream.expiresAtEpochMs != null && stream.expiresAtEpochMs - now <= URL_EXPIRY_MARGIN_MS) {
             logStreamEvent(stage, stream, retry = retry, detail = "expired=true")
+            noteAttempt("probe stage=$stage client=${stream.clientProfile} itag=${stream.itag ?: -1} outcome=expired")
             return false
         }
         val isHls = stream.mimeType?.contains("mpegurl", true) == true ||
@@ -2445,12 +2493,20 @@ class InnerTubeMusicApi @Inject constructor(
                     retry = retry,
                     detail = "valid=$valid type=${contentType.substringBefore(';').take(40)}",
                 )
+                noteAttempt(
+                    "probe stage=$stage client=${stream.clientProfile} itag=${stream.itag ?: -1} " +
+                        "http=${response.code} valid=$valid",
+                )
                 valid
             }
         } catch (cancellation: kotlinx.coroutines.CancellationException) {
             throw cancellation
         } catch (error: Exception) {
             logStreamEvent(stage, stream, retry = retry, detail = "error=${error::class.java.simpleName}")
+            noteAttempt(
+                "probe stage=$stage client=${stream.clientProfile} itag=${stream.itag ?: -1} " +
+                    resolutionFailureDetail(error),
+            )
             false
         } finally {
             cancellationHandle?.dispose()
@@ -2540,6 +2596,18 @@ class InnerTubeMusicApi @Inject constructor(
             "stage=$stage videoId=${stream.videoId} client=${stream.clientProfile} " +
                 "itag=${stream.itag ?: -1} mime=${stream.mimeType.orEmpty()} " +
                 "expiry=$expiryState retry=$retry http=${httpStatus ?: 0} ${detail?.take(80).orEmpty()}",
+        )
+    }
+
+    private suspend fun noteAttempt(entry: String) {
+        currentCoroutineContext()[ResolutionAttemptLog]?.record(entry)
+    }
+
+    private suspend fun logResolveAttempts(videoId: String, failed: Boolean) {
+        val summary = currentCoroutineContext()[ResolutionAttemptLog]?.summary() ?: "none"
+        android.util.Log.i(
+            STREAM_LOG_TAG,
+            "[YOUTUBE] id=$videoId resolve=${if (failed) "failed" else "ok"} $summary",
         )
     }
 

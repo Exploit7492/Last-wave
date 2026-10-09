@@ -1,8 +1,12 @@
 package com.lastwave.app.playback.resolve
 
 import com.lastwave.app.data.music.YouTubeAudioStream
+import com.lastwave.app.data.music.isCooperativeCancellation
+import com.lastwave.app.data.music.resolutionFailureDetail
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import java.io.IOException
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicLong
 
 class StaleResolveException(val identity: TrackIdentity) : CancellationException(
@@ -98,9 +102,22 @@ class PlaybackResolver(
                 } finally {
                     PlaybackStartupLog.extractEnd()
                 }
-            } catch (cancellation: CancellationException) {
-                logger.event(ResolveEvent.CANCELLED, identity, elapsedSince(started), durationMs, "playback")
-                throw cancellation
+            } catch (error: Throwable) {
+                if (error.isCooperativeCancellation()) {
+                    logger.event(ResolveEvent.CANCELLED, identity, elapsedSince(started), durationMs, "playback")
+                    throw error
+                }
+                logger.event(
+                    ResolveEvent.FAILED,
+                    identity,
+                    elapsedSince(started),
+                    durationMs,
+                    resolutionFailureDetail(error),
+                )
+                if (error is TimeoutCancellationException || error is TimeoutException) {
+                    throw IOException("Timed out resolving ${identity.youtubeVideoId}", error)
+                }
+                throw error
             }
             if (extracted.videoId != identity.youtubeVideoId) {
                 cache.invalidate(identity)
