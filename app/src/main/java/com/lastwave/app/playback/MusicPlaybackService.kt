@@ -41,6 +41,7 @@ import com.lastwave.app.data.local.ScrobblerPreferences
 import com.lastwave.app.data.local.ScrobblerSettings
 import com.lastwave.app.data.repository.ScrobbleRepository
 import com.lastwave.app.data.repository.ThemeRepository
+import com.lastwave.app.playback.resolve.MetadataLog
 
 import com.lastwave.app.widget.ActiveMediaSessionHolder
 import com.lastwave.app.widget.WidgetUpdater
@@ -55,6 +56,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -1000,8 +1004,27 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             fetchArtwork(placeholder)
         }
 
-        // Resolve high-resolution master artwork (Spotify -> Apple Music -> Tidal -> Deezer) in background
+        // Resolve high-resolution master artwork after this track is audible.
+        // Starting Tidal/Deezer/iTunes on the tap shares connections with the
+        // stream extract and stretches the gap before the next song.
         scope.launch(Dispatchers.IO) {
+            withTimeoutOrNull(8_000L) {
+                musicPlayer.state.drop(1).first { state ->
+                    val same = track.videoId.isNullOrBlank() || state.current?.videoId == track.videoId
+                    same && state.isPlaying && !state.isBuffering && state.error == null
+                }
+            }
+            if (artworkRequestKey != requestKey) {
+                MetadataLog.skipped("artwork", track.videoId)
+                return@launch
+            }
+            MetadataLog.delayed("artwork", track.videoId)
+            delay(MetadataLog.SETTLE_MS)
+            if (artworkRequestKey != requestKey) {
+                MetadataLog.skipped("artwork", track.videoId)
+                return@launch
+            }
+            MetadataLog.started("artwork", track.videoId)
             artworkRepository.resolve(track.title, track.artist)
             val resolved = artworkRepository.resolved.value[key]?.takeIf(String::isNotBlank)
             if (resolved != null && resolved != artworkUrl) {
