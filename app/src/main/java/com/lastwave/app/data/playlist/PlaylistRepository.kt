@@ -6,6 +6,7 @@ import com.lastwave.app.data.local.db.SavedPlaylistDao
 import com.lastwave.app.data.local.db.SavedPlaylistEntity
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.generate.StoredTrack
+import com.lastwave.app.data.generate.pinnedWithVideoIds
 import com.lastwave.app.data.generate.sameSongAs
 import com.lastwave.app.data.generate.toGenerated
 import com.lastwave.app.data.generate.toStored
@@ -33,6 +34,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Port of playlist.js's `lw_playlists` model: id, title, subtitle, mode,
  *  tracks, date. [id] doubles as the creation timestamp (matches the
@@ -106,7 +108,41 @@ class PlaylistRepository @Inject constructor(
         }
     }
 
-    private suspend fun filterPlayable(tracks: List<GeneratedTrack>): List<GeneratedTrack> = tracks
+    private suspend fun filterPlayable(tracks: List<GeneratedTrack>): List<GeneratedTrack> =
+        tracks.pinnedWithVideoIds(innerTube)
+
+    private val videoIdBackfillOnce = AtomicBoolean(false)
+
+    /** One-shot per process: pins ids for rows saved before list-time pinning
+     *  existed, then persists them so the work never repeats. Fire-and-forget
+     *  on [exportScope]; playback never waits on it. */
+    private fun backfillMissingVideoIdsOnce(loaded: List<SavedPlaylist>) {
+        if (loaded.none { playlist ->
+            playlist.tracks.any { it.youtubeVideoIdOrNull() == null && it.name.isNotBlank() }
+        }) return
+        if (!videoIdBackfillOnce.compareAndSet(false, true)) return
+        exportScope.launch {
+            try {
+                var changed = false
+                for (entity in dao.getAll()) {
+                    val domain = runCatching { entity.toDomain() }.getOrNull() ?: continue
+                    if (domain.tracks.none { it.youtubeVideoIdOrNull() == null && it.name.isNotBlank() }) continue
+                    val pinned = domain.tracks.pinnedWithVideoIds(innerTube)
+                    if (pinned.size == domain.tracks.size &&
+                        pinned.zip(domain.tracks).all { (newTrack, oldTrack) -> newTrack.url == oldTrack.url }
+                    ) continue
+                    dao.upsert(entity.copy(tracksJson = json.encodeToString(pinned.map { it.toStored() })))
+                    changed = true
+                }
+                if (changed) _changes.tryEmit(Unit)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (e: Exception) {
+                Log.e(TAG, "VideoId backfill failed; will retry next launch", e)
+                videoIdBackfillOnce.set(false)
+            }
+        }
+    }
 
 
     /** Newest first — matches _plRenderSaved()'s display order (the
@@ -114,6 +150,7 @@ class PlaylistRepository @Inject constructor(
     suspend fun getAll(): List<SavedPlaylist> {
         return try {
             dao.getAll().map { it.toDomain() }.sortedByDescending { it.createdAtMillis }
+                .also { backfillMissingVideoIdsOnce(it) }
         } catch (error: CancellationException) {
             throw error
         } catch (e: Exception) {

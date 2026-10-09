@@ -153,6 +153,7 @@ class SearchRepository @Inject constructor(
                         artist = track.artist,
                         artworkUrl = track.artworkUrl,
                         album = track.album,
+                        url = "https://music.youtube.com/watch?v=${track.videoId}",
                     )
                 }
             } else {

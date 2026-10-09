@@ -219,6 +219,7 @@ class FriendProfileViewModel @Inject constructor(
                 title = track.name,
                 artist = track.artist,
                 artworkUrl = track.artworkUrl,
+                videoId = track.videoId,
             ),
             sourceLabel = "${_uiState.value.displayName}'s Profile",
         )
@@ -230,6 +231,7 @@ class FriendProfileViewModel @Inject constructor(
                 title = it.name,
                 artist = it.artist,
                 artworkUrl = it.artworkUrl,
+                videoId = it.videoId,
             )
         }
         if (playable.isNotEmpty()) {

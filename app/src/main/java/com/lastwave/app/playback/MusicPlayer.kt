@@ -5932,6 +5932,10 @@ class MusicPlayer @Inject constructor(
                 // excluded so the next candidate can be resolved.
                 val upgraded = selectDurationCompatibleUpgrade(
                     expectedSec = expectedSec,
+                    // Same ceiling as the audition gate: a few seconds of
+                    // source drift is the same recording; a larger gap is
+                    // another edit and the next candidate is tried.
+                    toleranceSec = 10,
                     urlOf = { it.url },
                     durationSecOf = { it.durationMs?.div(1_000)?.toInt() },
                     onRejected = { rejected ->
@@ -6252,7 +6256,7 @@ class MusicPlayer @Inject constructor(
                 if (auditionPlayer.playbackState == Player.STATE_READY) {
                     val candidateDur = auditionPlayer.duration
                     if (expectedDurationMs != null && expectedDurationMs > 0L && candidateDur > 0L) {
-                        if (kotlin.math.abs(candidateDur - expectedDurationMs) > 35_000L) {
+                        if (kotlin.math.abs(candidateDur - expectedDurationMs) > 10_000L) {
                             android.util.Log.w(
                                 "MusicPlayer",
                                 "[STREAM AUDITION] Duration mismatch: expected ${expectedDurationMs}ms vs candidate ${candidateDur}ms",

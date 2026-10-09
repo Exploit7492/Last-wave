@@ -77,4 +77,20 @@ class UpgradeCandidateTest {
         assertTrue(durationCompatible(183, 183 + 35))
         assertTrue(!durationCompatible(183, 183 + 36))
     }
+
+    @Test
+    fun aTenSecondCeilingRejectsANearEditAndTakesTheNext() = runBlocking {
+        val selected = selectDurationCompatibleUpgrade(
+            expectedSec = 200,
+            toleranceSec = 10,
+            urlOf = { it.url },
+            durationSecOf = { it.durationSec },
+        ) { excluded ->
+            when {
+                "near" !in excluded -> Candidate("near", 220)
+                else -> Candidate("close", 206)
+            }
+        }
+        assertEquals("close", selected?.url)
+    }
 }

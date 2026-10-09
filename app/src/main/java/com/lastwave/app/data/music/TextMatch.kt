@@ -11,31 +11,71 @@ import java.util.Locale
  * Latin-only word pattern (`[^a-z0-9]+`), which reduced every non-Latin
  * query — Cyrillic, CJK, Arabic, … — to blank and broke matching for
  * those scripts (issue #102). The word pattern is now Unicode-aware
- * (`\p{L}` letters + `\p{N}` numbers from any script) and case folding
- * uses [Locale.ROOT] so devices in locales like Turkish (where `I`
- * lowercases to `ı`) match identically everywhere.
+ * (`\p{L}` letters + `\p{N}` numbers + `\p{M}` marks from any script) and
+ * case folding uses [Locale.ROOT] so devices in locales like Turkish (where
+ * `I` lowercases to `ı`) match identically everywhere. Marks ride along with
+ * words because [normalize] strips diacritics only off Latin bases — Hindi
+ * matras, Thai vowels and the like are integral letters, not noise.
  */
 internal object TextMatch {
-    private val NON_WORD = Regex("[^\\p{L}\\p{N}]+")
-    private val DIACRITICS = Regex("\\p{M}+")
+    private val NON_WORD = Regex("[^\\p{L}\\p{N}\\p{M}]+")
     private val MULTI_SPACE = Regex("\\s+")
     val VARIANT_WORDS = setOf(
         "live", "remix", "karaoke", "cover", "instrumental", "slowed", "sped", "nightcore",
         "acoustic", "demo", "edit", "remaster", "remastered", "mono", "stereo",
         "version", "deluxe", "bonus", "mix", "extended", "radio", "clean", "explicit",
         "original", "orchestral", "unplugged", "rerecorded", "anniversary", "edition",
+        // Same rendition markers in the languages this app serves, stored
+        // normalized to match [normalize] output. They feed the subset matcher
+        // and [matchScore]'s unexpected-variant penalty like the English ones.
+        "vivo", "acustico", "direct", "acoustique", "akustik", "canli",
+        "ライブ", "カバー", "リミックス", "アコースティック",
+        "라이브", "커버", "리믹스", "어쿠스틱",
+        "مباشر", "ريمكس",
+        "लाइव", "कवर", "रीमिक्स",
+        "现场", "翻唱", "混音",
+        "лайв", "кавер", "ремикс",
     )
     val MATCH_NOISE_WORDS = setOf("official", "audio", "video", "visualizer", "lyrics", "lyric", "hd", "hq", "4k", "track", "music")
     private val FEATURING_CLAUSE = Regex("(?i)[(\\[]\\s*(feat(?:uring)?|ft)\\.?\\s+.*?[)\\]]")
     private val VERSION_OR_LABEL_CLAUSE =
         Regex("(?i)[(\\[][^)\\]]*(official|music\\s*video|audio|video|visualizer|lyrics?|hd|hq|4k|live|remix|acoustic|demo|edit|remaster(?:ed)?|mono|stereo|deluxe|bonus|version|mix)[^)\\]]*[)\\]]")
 
-    fun normalize(value: String): String =
-        Normalizer.normalize(value.lowercase(Locale.ROOT), Normalizer.Form.NFD)
-            .replace(DIACRITICS, "")
+    fun normalize(value: String): String {
+        val lower = value.lowercase(Locale.ROOT)
+        val nfd = Normalizer.normalize(lower, Normalizer.Form.NFD)
+        // Strip diacritics only off Latin bases (Café → cafe). In other scripts
+        // marks are integral letters: Hindi matras (तुम → तम), Thai vowels,
+        // Arabic vocalization, Korean jamo (which NFKC below recomposes).
+        // Stripping them merges distinct words across those languages.
+        val stripped = nfd.replace(LATIN_DIACRITICS, "")
+        val composed = Normalizer.normalize(stripped, Normalizer.Form.NFKC)
+        return foldArabic(composed)
             .replace(NON_WORD, " ")
             .trim()
             .replace(MULTI_SPACE, " ")
+    }
+
+    /** Combining marks following a Latin base character. Java supports this
+     *  bounded lookbehind; a leading stray mark falls through to NON_WORD. */
+    private val LATIN_DIACRITICS = Regex("(?<=[A-Za-z])\\p{M}+")
+
+    /** Standard Arabic search folding: hamza-alef variants have no NFD
+     *  decomposition, so mark-stripping alone never folds them (أ stays أ).
+     *  Tashkeel (optional vocalization) is stripped; base letters are kept. */
+    private fun foldArabic(value: String): String = value
+        .replace(Regex("[أإآٱ]"), "ا")
+        .replace(Regex("ؤ"), "و")
+        .replace(Regex("ئ"), "ي")
+        .replace(Regex("ة"), "ه")
+        .replace(Regex("ى"), "ي")
+        .replace(Regex("[\u064B-\u0655\u0670]"), "")
+
+    /** True when the string carries letters outside A-Z: CJK, Thai, Indic,
+     *  Arabic, Cyrillic, Hangul, … — scripts where partial overlap at modest
+     *  ratios is normal, unlike Latin prefix confusion. */
+    private fun hasNonLatinLetter(value: String): Boolean =
+        value.any { it.isLetter() && it !in 'a'..'z' && it !in 'A'..'Z' }
 
     fun tokens(value: String): Set<String> = normalize(value)
         .split(' ')
@@ -53,7 +93,12 @@ internal object TextMatch {
         if (normA.isBlank() || normB.isBlank()) return 0
         if (normA.contains(normB) || normB.contains(normA)) {
             val ratio = (minOf(normA.length, normB.length) * 100) / maxOf(normA.length, normB.length)
-            if (ratio >= 75) return maxOf(85, ratio)
+            // 4.0.0 used 45 for everything; 4.2.4 raised it to 75 to stop Latin
+            // prefix confusion (Belong/Belonging at 66). Spaceless scripts
+            // (CJK/Thai/…) legitimately overlap at modest ratios, so the 45 bar
+            // applies only to strings carrying non-Latin letters.
+            val bar = if (hasNonLatinLetter(normA) || hasNonLatinLetter(normB)) 45 else 75
+            if (ratio >= bar) return maxOf(85, ratio)
         }
         val left = tokens(a)
         val right = tokens(b)

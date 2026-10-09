@@ -386,7 +386,15 @@ class YtMusicSyncManager @Inject constructor(
                     if (videoId == null) {
                         if (track.key !in resolvedKeys) add(track)
                     } else if (videoId in finalSet && seenVideoIds.add(videoId)) {
-                        add(track)
+                        // The merge resolved this row's id: stamp it so the
+                        // persisted copy plays directly instead of searching.
+                        add(
+                            if (track.youtubeVideoIdOrNull() == null) {
+                                track.copy(url = "https://music.youtube.com/watch?v=$videoId")
+                            } else {
+                                track
+                            },
+                        )
                     }
                 }
                 val represented = resolvedVideoIds.filterNotNull().toSet()
