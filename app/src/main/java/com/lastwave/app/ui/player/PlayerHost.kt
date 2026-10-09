@@ -174,12 +174,14 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -226,6 +228,7 @@ import com.lastwave.app.playback.PlaybackProgressState
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.lastwave.app.data.artwork.ArtworkNormalizer
 import com.lastwave.app.playback.PlayableTrack
+import com.lastwave.app.playback.resolve.MetadataLog
 import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ArtworkViewModel
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -423,6 +426,14 @@ class PlayerViewModel @Inject constructor(
                     if (track != null && enabled) {
                         _canvasState.value = canvasRepository.cached(track)
                         canvasJob = viewModelScope.launch {
+                            waitUntilAudible(track)
+                            MetadataLog.delayed("canvas", track.videoId)
+                            delay(MetadataLog.SETTLE_MS)
+                            if (currentCanvasTrackKey != key) {
+                                MetadataLog.skipped("canvas", track.videoId)
+                                return@launch
+                            }
+                            MetadataLog.started("canvas", track.videoId)
                             val result = canvasRepository.canvasFor(track, cellularAllowed = cellular)
                             // A skip during the lookup cancels this job; only the
                             // winner publishes.
@@ -481,9 +492,31 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch { refreshCustomPlaylists() }
     }
 
+    /**
+     * Holds lyrics and canvas fetches until this track is actually playing.
+     * The state at subscription still describes the previous song, which is
+     * not buffering, so the first value is skipped.
+     */
+    private suspend fun waitUntilAudible(track: PlayableTrack) {
+        withTimeoutOrNull(8_000L) {
+            player.state.drop(1).first { state ->
+                val same = track.videoId.isNullOrBlank() || state.current?.videoId == track.videoId
+                same && state.isPlaying && !state.isBuffering && state.error == null
+            }
+        }
+    }
+
     fun loadLyrics(track: PlayableTrack, forceRefresh: Boolean = false) {
         lyricsJob?.cancel()
         lyricsJob = viewModelScope.launch {
+            // Lyrics hit other hosts (LRCLIB, Apple, SimpMusic). Starting
+            // them in the same moment as youtubei/player steals connections
+            // from the stream extract. Wait until this track is actually
+            // playing, then fetch.
+            waitUntilAudible(track)
+            MetadataLog.delayed("lyrics", track.videoId)
+            delay(MetadataLog.SETTLE_MS)
+            MetadataLog.started("lyrics", track.videoId)
             // Hold the previous track's lyrics instead of flashing the
             // spinner on every change: cache hits resolve in milliseconds,
             // so the indicator only appears when loading actually takes time.
@@ -1892,10 +1925,10 @@ private fun FullPlayer(
                     modifier = Modifier.fillMaxSize(),
                     // Lyrics legibility lives or dies on background
                     // suppression; the Now Playing tab keeps its light blur.
-                    // Lyrics tab uses static blur only (no fluid shader) for
-                    // smooth scrolling like 4.0.0.
+                    // When extraBlur is active, the fluid animation loop pauses
+                    // to keep 120Hz scrolling perfectly fluid without tearing down shader state.
                     extraBlur = currentTab == FullPlayerTab.LYRICS,
-                    rotatingBackgroundEnabled = rotatingBackgroundEnabled && currentTab != FullPlayerTab.LYRICS,
+                    rotatingBackgroundEnabled = rotatingBackgroundEnabled,
                     fallback = {
                         val staticBlurTransform = remember(currentTab) {
                             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
@@ -2005,38 +2038,46 @@ private fun FullPlayer(
                             ),
                         ),
                 )
-                if (showFullBleed && activeCanvas != null) {
+                if (showFullBleed) {
                     val heroHeight = if (heroBottomPx > 0f) {
                         with(LocalDensity.current) { heroBottomPx.toDp() }
                     } else {
                         with(LocalDensity.current) { (bgHeight * 0.54f).toDp() }
                     }
-                    val lyricsCanvasBlurDp by animateDpAsState(
-                        targetValue = if (currentTab == FullPlayerTab.LYRICS) 32.dp else 0.dp,
-                        animationSpec = tween(350),
-                        label = "lyricsCanvasBlur",
+                    val heroAlpha by animateFloatAsState(
+                        targetValue = if (currentTab == FullPlayerTab.NOW_PLAYING) 1f else 0f,
+                        animationSpec = tween(280, easing = FastOutSlowInEasing),
+                        label = "heroAlpha",
                     )
-                    CanvasArtworkPlayer(
-                        canvas = activeCanvas,
-                        isPlaying = state.isPlaying,
-                        contentMode = CanvasContentMode.CROP,
-                        alignPortraitTop = true,
-                        bottomFade = 0.38f,
-                        onAspectRatioChanged = { canvasAspect = it },
-                        onRenderedChanged = { canvasRendered = it },
-                        pausedForTransition = shownDismissY > 0f || currentTab != FullPlayerTab.NOW_PLAYING,
+                    StaticArtworkHero(
+                        name = track.title,
+                        artist = track.artist,
+                        embeddedUrl = track.artworkUrl,
+                        resolvedUrl = resolvedAmbientUrl,
+                        bottomFade = 0.42f,
+                        alpha = heroAlpha,
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .fillMaxWidth()
-                            .height(heroHeight)
-                            .then(
-                                if (lyricsCanvasBlurDp > 0.dp) {
-                                    Modifier.blur(lyricsCanvasBlurDp)
-                                } else {
-                                    Modifier
-                                }
-                            ),
+                            .height(heroHeight),
                     )
+                    if (activeCanvas != null) {
+                        CanvasArtworkPlayer(
+                            canvas = activeCanvas,
+                            isPlaying = state.isPlaying,
+                            contentMode = CanvasContentMode.CROP,
+                            alignPortraitTop = true,
+                            bottomFade = 0.38f,
+                            presentationAlpha = { heroAlpha },
+                            onAspectRatioChanged = { canvasAspect = it },
+                            onRenderedChanged = { canvasRendered = it },
+                            pausedForTransition = shownDismissY > 0f || currentTab != FullPlayerTab.NOW_PLAYING,
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .fillMaxWidth()
+                                .height(heroHeight),
+                        )
+                    }
                 }
 
                 // Lyrics-only readability veil: heavy blur still can't tame a
@@ -2283,8 +2324,9 @@ private fun FullPlayer(
                                     Modifier.fillMaxSize().padding(horizontal = 20.dp).padding(bottom = 18.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                 ) {
+                                    val hasArtwork = !track.artworkUrl.isNullOrBlank() || !resolvedAmbientUrl.isNullOrBlank() || activeCanvas != null
                                     val sleeveAlpha by animateFloatAsState(
-                                        targetValue = if (showFullBleed && canvasRendered) 0f else 1f,
+                                        targetValue = if (showFullBleed && hasArtwork) 0f else 1f,
                                         animationSpec = tween(350),
                                         label = "sleeveAlpha",
                                     )

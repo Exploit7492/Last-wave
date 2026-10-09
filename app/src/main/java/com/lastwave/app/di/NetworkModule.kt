@@ -21,6 +21,8 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody
 import okhttp3.logging.HttpLoggingInterceptor
+import android.util.Log
+import android.os.SystemClock
 import retrofit2.Retrofit
 import javax.inject.Singleton
 
@@ -69,6 +71,7 @@ object NetworkModule {
             .readTimeout(15, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
+            .addInterceptor(TrafficPriorityInterceptor())
             .addInterceptor { chain ->
                 val original = chain.request()
                 val isLastFm = original.url.host.endsWith("audioscrobbler.com", ignoreCase = true)
@@ -103,6 +106,51 @@ object NetworkModule {
 
     private fun Response.closeQuietly() {
         runCatching { close() }
+    }
+
+    /**
+     * One line per call so background metadata is visible next to playback.
+     * Priority is inferred from the host. Playback requests are not delayed.
+     */
+    private class TrafficPriorityInterceptor : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val request = chain.request()
+            val started = SystemClock.elapsedRealtime()
+            try {
+                val response = chain.proceed(request)
+                log(request, SystemClock.elapsedRealtime() - started, response.code)
+                return response
+            } catch (error: Exception) {
+                log(request, SystemClock.elapsedRealtime() - started, 0)
+                throw error
+            }
+        }
+
+        private fun log(request: Request, elapsedMs: Long, status: Int) {
+            val host = request.url.host
+            val priority = when {
+                host.contains("googlevideo") || host.contains("youtubei") || host.contains("youtube.com") -> "playback"
+                host.contains("ytimg") || host.contains("googleusercontent") -> "artwork"
+                host.contains("apple") || host.contains("itunes") || host.contains("mzstatic") -> "apple"
+                host.contains("tidal") -> "tidal"
+                host.contains("lrclib") || host.contains("lyrics") || host.contains("kugou") ||
+                    host.contains("boidu") || host.contains("simpmusic") || host.contains("musixmatch") ||
+                    host.contains("lrc.red") -> "lyrics"
+                else -> "other"
+            }
+            val videoId = request.url.queryParameter("v")
+                ?: request.url.queryParameter("id")
+                ?: request.url.pathSegments.lastOrNull()?.takeIf { it.length == 11 }
+                ?: ""
+            Log.i(
+                TAG,
+                "source=$host videoId=$videoId priority=$priority elapsedMs=$elapsedMs status=$status",
+            )
+        }
+
+        private companion object {
+            const val TAG = "LastWaveTraffic"
+        }
     }
 
     @Provides
