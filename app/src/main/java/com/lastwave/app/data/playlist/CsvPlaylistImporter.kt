@@ -240,8 +240,10 @@ class CsvPlaylistImporter @Inject constructor(
     private fun allowsVersion(sourceTitle: String, targetTitle: String): Boolean {
         val sNorm = normalize(sourceTitle)
         val tNorm = normalize(targetTitle)
-        val versionWords = listOf("live", "remix", "cover", "karaoke", "instrumental", "acoustic", "tribute")
-        for (word in versionWords) {
+        // Rendition markers share TextMatch.VARIANT_WORDS with the playback
+        // matcher (multilingual since the language fix); 'tribute' stays
+        // import-local — never a legitimate suffix, only a mismatch signal.
+        for (word in TextMatch.VARIANT_WORDS + "tribute") {
             if (tNorm.contains(word) && !sNorm.contains(word)) return false
         }
         return true

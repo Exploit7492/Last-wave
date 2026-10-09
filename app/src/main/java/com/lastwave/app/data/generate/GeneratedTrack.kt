@@ -3,6 +3,13 @@ package com.lastwave.app.data.generate
 import android.net.Uri
 import androidx.compose.runtime.Immutable
 import com.lastwave.app.data.artwork.ArtworkNormalizer
+import com.lastwave.app.data.music.InnerTubeMusicApi
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -66,6 +73,45 @@ fun List<GeneratedTrack>.distinctSongs(): List<GeneratedTrack> {
         if (out.none { it.sameSongAs(track) }) out.add(track)
     }
     return out
+}
+
+/**
+ * List-time videoId pinning (the limusic invariant): every track that can play
+ * must carry its YouTube videoId in [GeneratedTrack.url] BEFORE it reaches a
+ * queue or a saved playlist, so tap-to-play resolves directly with zero
+ * search. Already-pinned tracks pass through with no network. Unresolvable
+ * rows resolve to null and are dropped — a strict miss must never substitute
+ * a wrong song at play time. Bounded fan-out mirrors the importers.
+ */
+suspend fun List<GeneratedTrack>.pinnedWithVideoIds(
+    innerTube: InnerTubeMusicApi,
+    concurrency: Int = 4,
+): List<GeneratedTrack> = coroutineScope {
+    if (isEmpty()) return@coroutineScope emptyList()
+    val limiter = Semaphore(concurrency)
+    map { track ->
+        async {
+            if (track.youtubeVideoIdOrNull() != null) return@async track
+            if (track.name.isBlank()) return@async null
+            limiter.withPermit {
+                try {
+                    innerTube.findBestMatchOrNull(track.name, track.artist, prefetchStreams = false)?.let { match ->
+                        track.copy(
+                            name = track.name.ifBlank { match.title },
+                            artist = track.artist.ifBlank { match.artist },
+                            album = track.album ?: match.album,
+                            artworkUrl = track.artworkUrl ?: match.artworkUrl,
+                            url = "https://music.youtube.com/watch?v=${match.videoId}",
+                        )
+                    }
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+    }.awaitAll().filterNotNull()
 }
 
 /** Serializable form of [GeneratedTrack], used for Room-persisted playlists

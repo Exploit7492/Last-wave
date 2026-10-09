@@ -2621,12 +2621,18 @@ class InnerTubeMusicApi @Inject constructor(
         }
         val best = validCandidates.asSequence()
             .filter { candidate ->
-                val titleMatch = TextMatch.isSafeTitleMatch(candidate.title, title, cleanArtist)
-                val artistMatch = cleanArtist.isBlank() ||
-                    similarity(candidate.artist, cleanArtist) >= 30 ||
-                    normalize(candidate.artist).contains(normalize(cleanArtist)) ||
-                    normalize(candidate.title).contains(normalize(cleanArtist))
-                titleMatch && artistMatch
+                // Hybrid gate: 4.2.3's recall numbers (title >= 60, artist >= 35
+                // with its contains clauses) minus its title-blind second chance
+                // and minus 4.2.4's loosening (>= 30 + fuzzy subset matcher),
+                // which substituted wrong tracks. Strict misses throw below.
+                maxOf(
+                    similarity(candidate.title, title),
+                    similarity(baseTitle(candidate.title), baseTitle(title)),
+                ) >= 60 &&
+                    (cleanArtist.isBlank() ||
+                        similarity(candidate.artist, cleanArtist) >= 35 ||
+                        normalize(candidate.artist).contains(normalize(cleanArtist)) ||
+                        normalize(candidate.title).contains(normalize(cleanArtist)))
             }
             .maxByOrNull { candidate -> matchScore(candidate, title, cleanArtist) }
             ?: throw IOException("No reliable YouTube Music match found for $title by $artist")

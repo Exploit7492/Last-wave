@@ -5949,7 +5949,10 @@ class MusicPlayer @Inject constructor(
                 val expectedSec = (track.durationMs?.takeIf { it > 0 } ?: currentStream.durationMs)?.div(1000)?.toInt()
                 val upgradedSec = upgraded.durationMs?.div(1000)?.toInt()
                 if (expectedSec != null && upgradedSec != null && expectedSec > 0 && upgradedSec > 0) {
-                    if (kotlin.math.abs(expectedSec - upgradedSec) > 35) {
+                    // ±10s: same song across sources drifts a few seconds
+                    // (approx durations, intros); ±35s admitted different
+                    // edits/recordings sharing a name.
+                    if (kotlin.math.abs(expectedSec - upgradedSec) > 10) {
                         android.util.Log.w("MusicPlayer", "[STREAM UPGRADE] Severe duration mismatch for '${track.title}': expected ${expectedSec}s vs candidate ${upgradedSec}s")
                         return@launch
                     }
@@ -6234,7 +6237,7 @@ class MusicPlayer @Inject constructor(
                 if (auditionPlayer.playbackState == Player.STATE_READY) {
                     val candidateDur = auditionPlayer.duration
                     if (expectedDurationMs != null && expectedDurationMs > 0L && candidateDur > 0L) {
-                        if (kotlin.math.abs(candidateDur - expectedDurationMs) > 35_000L) {
+                        if (kotlin.math.abs(candidateDur - expectedDurationMs) > 10_000L) {
                             android.util.Log.w(
                                 "MusicPlayer",
                                 "[STREAM AUDITION] Duration mismatch: expected ${expectedDurationMs}ms vs candidate ${candidateDur}ms",
