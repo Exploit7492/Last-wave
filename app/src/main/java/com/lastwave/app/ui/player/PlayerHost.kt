@@ -174,12 +174,14 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -226,6 +228,7 @@ import com.lastwave.app.playback.PlaybackProgressState
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.lastwave.app.data.artwork.ArtworkNormalizer
 import com.lastwave.app.playback.PlayableTrack
+import com.lastwave.app.playback.resolve.MetadataLog
 import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ArtworkViewModel
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -423,6 +426,14 @@ class PlayerViewModel @Inject constructor(
                     if (track != null && enabled) {
                         _canvasState.value = canvasRepository.cached(track)
                         canvasJob = viewModelScope.launch {
+                            waitUntilAudible(track)
+                            MetadataLog.delayed("canvas", track.videoId)
+                            delay(MetadataLog.SETTLE_MS)
+                            if (currentCanvasTrackKey != key) {
+                                MetadataLog.skipped("canvas", track.videoId)
+                                return@launch
+                            }
+                            MetadataLog.started("canvas", track.videoId)
                             val result = canvasRepository.canvasFor(track, cellularAllowed = cellular)
                             // A skip during the lookup cancels this job; only the
                             // winner publishes.
@@ -481,9 +492,31 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch { refreshCustomPlaylists() }
     }
 
+    /**
+     * Holds lyrics and canvas fetches until this track is actually playing.
+     * The state at subscription still describes the previous song, which is
+     * not buffering, so the first value is skipped.
+     */
+    private suspend fun waitUntilAudible(track: PlayableTrack) {
+        withTimeoutOrNull(8_000L) {
+            player.state.drop(1).first { state ->
+                val same = track.videoId.isNullOrBlank() || state.current?.videoId == track.videoId
+                same && state.isPlaying && !state.isBuffering && state.error == null
+            }
+        }
+    }
+
     fun loadLyrics(track: PlayableTrack, forceRefresh: Boolean = false) {
         lyricsJob?.cancel()
         lyricsJob = viewModelScope.launch {
+            // Lyrics hit other hosts (LRCLIB, Apple, SimpMusic). Starting
+            // them in the same moment as youtubei/player steals connections
+            // from the stream extract. Wait until this track is actually
+            // playing, then fetch.
+            waitUntilAudible(track)
+            MetadataLog.delayed("lyrics", track.videoId)
+            delay(MetadataLog.SETTLE_MS)
+            MetadataLog.started("lyrics", track.videoId)
             // Hold the previous track's lyrics instead of flashing the
             // spinner on every change: cache hits resolve in milliseconds,
             // so the indicator only appears when loading actually takes time.
