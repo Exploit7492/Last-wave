@@ -330,7 +330,9 @@ fun FluidArtworkBackground(
     var previous by remember { mutableStateOf<Bitmap?>(null) }
     val crossfade = remember { Animatable(1f) }
     val appear = remember { Animatable(0f) }
-    val seed = remember { Random.nextInt() }
+    val seed = remember(track.videoId, track.title) {
+        (track.videoId.hashCode() * 31) xor track.title.hashCode()
+    }
 
     val agslRenderer = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -358,7 +360,8 @@ fun FluidArtworkBackground(
     }
 
     var seconds by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(!extraBlur) {
+        if (extraBlur) return@LaunchedEffect
         var last = 0L
         var pending = 0f
         while (true) {

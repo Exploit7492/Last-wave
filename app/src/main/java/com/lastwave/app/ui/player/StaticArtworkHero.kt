@@ -6,7 +6,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -15,8 +14,6 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.lastwave.app.data.artwork.ArtworkNormalizer
@@ -29,7 +26,7 @@ import com.lastwave.app.data.artwork.ArtworkNormalizer
  * - Anchors top-aligned and crops to fill full viewport width down to the playback controls.
  * - Applies a hardware-accelerated bottom alpha gradient fade (BlendMode.DstIn) to smoothly melt
  *   the artwork into the dark scrim and fluid background behind the player controls.
- * - Blurs smoothly when lyrics tab is active.
+ * - Hardware-accelerated alpha transition when switching between player tabs.
  * - Smooth 350ms crossfade between consecutive tracks.
  */
 @Composable
@@ -39,8 +36,8 @@ fun StaticArtworkHero(
     embeddedUrl: String?,
     resolvedUrl: String?,
     modifier: Modifier = Modifier,
+    alpha: Float = 1f,
     bottomFade: Float = 0.42f,
-    lyricsBlurDp: Dp = 0.dp,
     contentScale: ContentScale = ContentScale.Crop,
     alignment: Alignment = Alignment.TopCenter,
 ) {
@@ -67,8 +64,12 @@ fun StaticArtworkHero(
 
     Box(
         modifier = modifier
-            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .graphicsLayer {
+                this.alpha = alpha
+                compositingStrategy = CompositingStrategy.Offscreen
+            }
             .drawWithContent {
+                if (alpha <= 0.001f) return@drawWithContent
                 drawContent()
                 if (bottomFade > 0.001f) {
                     val fadeFrac = bottomFade.coerceIn(0f, 1f)
@@ -84,14 +85,7 @@ fun StaticArtworkHero(
                         blendMode = BlendMode.DstIn,
                     )
                 }
-            }
-            .then(
-                if (lyricsBlurDp > 0.dp) {
-                    Modifier.blur(lyricsBlurDp)
-                } else {
-                    Modifier
-                }
-            ),
+            },
     ) {
         AsyncImage(
             model = model,
