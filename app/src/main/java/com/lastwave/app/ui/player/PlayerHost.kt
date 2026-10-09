@@ -1925,10 +1925,10 @@ private fun FullPlayer(
                     modifier = Modifier.fillMaxSize(),
                     // Lyrics legibility lives or dies on background
                     // suppression; the Now Playing tab keeps its light blur.
-                    // Lyrics tab uses static blur only (no fluid shader) for
-                    // smooth scrolling like 4.0.0.
+                    // When extraBlur is active, the fluid animation loop pauses
+                    // to keep 120Hz scrolling perfectly fluid without tearing down shader state.
                     extraBlur = currentTab == FullPlayerTab.LYRICS,
-                    rotatingBackgroundEnabled = rotatingBackgroundEnabled && currentTab != FullPlayerTab.LYRICS,
+                    rotatingBackgroundEnabled = rotatingBackgroundEnabled,
                     fallback = {
                         val staticBlurTransform = remember(currentTab) {
                             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
@@ -2038,38 +2038,46 @@ private fun FullPlayer(
                             ),
                         ),
                 )
-                if (showFullBleed && activeCanvas != null) {
+                if (showFullBleed) {
                     val heroHeight = if (heroBottomPx > 0f) {
                         with(LocalDensity.current) { heroBottomPx.toDp() }
                     } else {
                         with(LocalDensity.current) { (bgHeight * 0.54f).toDp() }
                     }
-                    val lyricsCanvasBlurDp by animateDpAsState(
-                        targetValue = if (currentTab == FullPlayerTab.LYRICS) 32.dp else 0.dp,
-                        animationSpec = tween(350),
-                        label = "lyricsCanvasBlur",
+                    val heroAlpha by animateFloatAsState(
+                        targetValue = if (currentTab == FullPlayerTab.NOW_PLAYING) 1f else 0f,
+                        animationSpec = tween(280, easing = FastOutSlowInEasing),
+                        label = "heroAlpha",
                     )
-                    CanvasArtworkPlayer(
-                        canvas = activeCanvas,
-                        isPlaying = state.isPlaying,
-                        contentMode = CanvasContentMode.CROP,
-                        alignPortraitTop = true,
-                        bottomFade = 0.38f,
-                        onAspectRatioChanged = { canvasAspect = it },
-                        onRenderedChanged = { canvasRendered = it },
-                        pausedForTransition = shownDismissY > 0f || currentTab != FullPlayerTab.NOW_PLAYING,
+                    StaticArtworkHero(
+                        name = track.title,
+                        artist = track.artist,
+                        embeddedUrl = track.artworkUrl,
+                        resolvedUrl = resolvedAmbientUrl,
+                        bottomFade = 0.42f,
+                        alpha = heroAlpha,
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .fillMaxWidth()
-                            .height(heroHeight)
-                            .then(
-                                if (lyricsCanvasBlurDp > 0.dp) {
-                                    Modifier.blur(lyricsCanvasBlurDp)
-                                } else {
-                                    Modifier
-                                }
-                            ),
+                            .height(heroHeight),
                     )
+                    if (activeCanvas != null) {
+                        CanvasArtworkPlayer(
+                            canvas = activeCanvas,
+                            isPlaying = state.isPlaying,
+                            contentMode = CanvasContentMode.CROP,
+                            alignPortraitTop = true,
+                            bottomFade = 0.38f,
+                            presentationAlpha = { heroAlpha },
+                            onAspectRatioChanged = { canvasAspect = it },
+                            onRenderedChanged = { canvasRendered = it },
+                            pausedForTransition = shownDismissY > 0f || currentTab != FullPlayerTab.NOW_PLAYING,
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .fillMaxWidth()
+                                .height(heroHeight),
+                        )
+                    }
                 }
 
                 // Lyrics-only readability veil: heavy blur still can't tame a
@@ -2316,8 +2324,9 @@ private fun FullPlayer(
                                     Modifier.fillMaxSize().padding(horizontal = 20.dp).padding(bottom = 18.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                 ) {
+                                    val hasArtwork = !track.artworkUrl.isNullOrBlank() || !resolvedAmbientUrl.isNullOrBlank() || activeCanvas != null
                                     val sleeveAlpha by animateFloatAsState(
-                                        targetValue = if (showFullBleed && canvasRendered) 0f else 1f,
+                                        targetValue = if (showFullBleed && hasArtwork) 0f else 1f,
                                         animationSpec = tween(350),
                                         label = "sleeveAlpha",
                                     )
