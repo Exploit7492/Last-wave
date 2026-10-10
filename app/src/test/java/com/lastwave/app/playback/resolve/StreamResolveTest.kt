@@ -2,10 +2,17 @@ package com.lastwave.app.playback.resolve
 
 import com.lastwave.app.data.music.YouTubeAudioStream
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -279,6 +286,48 @@ class StreamResolveTest {
             while (coordinator.cache.get(idB) == null) delay(10)
         }
         assertEquals(1, calls.get())
+    }
+
+    @Test
+    fun prefetchExtractionFailureStaysInsideTheJob() = runBlocking {
+        val escaped = AtomicBoolean(false)
+        val threw = CompletableDeferred<Unit>()
+        val scope = CoroutineScope(
+            SupervisorJob() + Dispatchers.Unconfined + CoroutineExceptionHandler { _, _ ->
+                escaped.set(true)
+            },
+        )
+        val coordinator = StreamResolveCoordinator(
+            cacheDir = tempDir(),
+            scope = scope,
+            extract = {
+                threw.complete(Unit)
+                throw IOException("Unable to resolve a playable audio stream for video")
+            },
+            logger = noopLogger,
+        )
+        coordinator.prefetchNext(idB, 1_000L) { error("prefetch must not publish a failed extract") }
+        withTimeout(3_000) { threw.await() }
+        delay(100)
+        assertFalse(escaped.get())
+        assertNull(coordinator.cache.get(idB))
+        scope.cancel()
+    }
+
+    @Test
+    fun playbackTimeoutIsARecoverableIoFailure() = runBlocking {
+        val coordinator = StreamResolveCoordinator(
+            cacheDir = tempDir(),
+            scope = this,
+            extract = { withTimeout(1) { delay(10_000); stream(it) } },
+            logger = noopLogger,
+        )
+        try {
+            coordinator.resolvePlayback(idA, 1_000L)
+            throw AssertionError("timeout must not resolve")
+        } catch (error: IOException) {
+            assertTrue(error.message.orEmpty().contains(idA.youtubeVideoId))
+        }
     }
 
     private fun entry(

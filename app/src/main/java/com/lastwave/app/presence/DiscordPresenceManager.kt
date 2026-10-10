@@ -5,6 +5,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.lastwave.app.data.artwork.ArtworkNormalizer
 import com.lastwave.app.data.artwork.ArtworkRepository
+import com.lastwave.app.data.artwork.DeferredArtworkLookup
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.MusicPlayerState
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -61,7 +62,18 @@ class DiscordPresenceManager @Inject constructor(
     private var lastAttemptMs = 0L
     private var lastKey = ""
     private var lastPushMs = 0L
-    @Volatile private var lastArtResolveKey = ""
+    private val deferredArtwork = DeferredArtworkLookup(
+        scope = applicationScope,
+        source = "discord",
+        hasMemoryHit = { key ->
+            artworkRepository.resolved.value[key]
+                ?.startsWith("http://") == true ||
+                artworkRepository.resolved.value[key]?.startsWith("https://") == true
+        },
+        resolve = { name, artist ->
+            runCatching { artworkRepository.resolve(name, artist) }
+        },
+    )
     private var observer: Job? = null
     private var heartbeat: Job? = null
 
@@ -108,11 +120,13 @@ class DiscordPresenceManager @Inject constructor(
         lock.withLock {
             // Disabled or unconfigured: hide anything still on the profile.
             if (!enabled || !DiscordPresence.isConfigured()) {
+                deferredArtwork.cancel()
                 clearQuiet()
                 return
             }
             val track = state.current
             if (track == null || track.title.isBlank()) {
+                deferredArtwork.cancel()
                 clearQuiet()
                 return
             }
@@ -125,16 +139,10 @@ class DiscordPresenceManager @Inject constructor(
             val pipelineArt = resolvedArt[ArtworkNormalizer.cacheKey(track.title, track.artist)]
                 ?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
             if (ownArt == null && pipelineArt == null) {
-                // Nothing to show yet: fire the pipeline once per track. Its
-                // publish re-emits `resolved`, which re-runs this evaluation
-                // with art and repushes the card (artwork is in the signature).
-                val artKey = ArtworkNormalizer.cacheKey(track.title, track.artist)
-                if (artKey != lastArtResolveKey) {
-                    lastArtResolveKey = artKey
-                    applicationScope.launch {
-                        runCatching { artworkRepository.resolve(track.title, track.artist) }
-                    }
-                }
+                // Nothing cached yet. Wait before Deezer/iTunes/Tidal so a
+                // skip does not search. The publish re-emits `resolved`,
+                // which re-runs this evaluation with art.
+                deferredArtwork.request(track.title, track.artist)
             }
             val effectiveState =
                 if (pipelineArt != null && pipelineArt != track.artworkUrl) {

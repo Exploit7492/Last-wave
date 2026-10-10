@@ -2,6 +2,9 @@ package com.lastwave.app.playback.resolve
 
 import android.util.Log
 import com.lastwave.app.data.music.YouTubeAudioStream
+import com.lastwave.app.data.music.isCooperativeCancellation
+import com.lastwave.app.data.music.isExpectedAudioResolutionFailure
+import com.lastwave.app.data.music.resolutionFailureDetail
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -109,16 +112,23 @@ class PrefetchResolver(
                     TAG,
                     "[PREFETCH_COMPLETED] youtubeVideoId=$videoId elapsedMs=${elapsedSince(started)}",
                 )
-            } catch (cancellation: CancellationException) {
+            } catch (error: Throwable) {
+                if (error.isCooperativeCancellation()) {
+                    if (activeVideoId == videoId) activeVideoId = null
+                    logger.event(
+                        ResolveEvent.CANCELLED,
+                        identity,
+                        elapsedSince(started),
+                        durationMs,
+                        "prefetch flight-continues",
+                    )
+                    throw error
+                }
                 if (activeVideoId == videoId) activeVideoId = null
-                logger.event(
-                    ResolveEvent.CANCELLED,
-                    identity,
-                    elapsedSince(started),
-                    durationMs,
-                    "prefetch flight-continues",
-                )
-                throw cancellation
+                val detail = resolutionFailureDetail(error)
+                logger.event(ResolveEvent.FAILED, identity, elapsedSince(started), durationMs, "prefetch $detail")
+                Log.w(TAG, "[RESOLVE_FAILED] youtubeVideoId=$videoId $detail")
+                if (!error.isExpectedAudioResolutionFailure()) throw error
             }
         }
     }
