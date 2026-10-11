@@ -140,6 +140,10 @@ data class MiscSettings(
     val rotatingBackgroundEnabled: Boolean = true,
     /** When true (default), downloads fetch and save synced lyrics (.lrc companion files and embedded tags). */
     val downloadLyrics: Boolean = true,
+    /** Stable ids for the last sort selected on each Downloads tab. */
+    val downloadSongSort: String = "recent",
+    val downloadArtistSort: String = "name_az",
+    val downloadAlbumSort: String = "title_az",
     /** In-app language override tag: "system" (default), "en", "tr", "zh-Hans". */
     val appLanguageTag: String = AppLanguage.SYSTEM.tag,
     /** Subfolder name under public Music/ where downloads are saved.
@@ -261,6 +265,9 @@ class SettingsPreferences @Inject constructor(
         val WAVY_SEEKBAR_ENABLED = booleanPreferencesKey("lw_wavy_seekbar_enabled")
         val ROTATING_BACKGROUND_ENABLED = booleanPreferencesKey("lw_rotating_background_enabled")
         val DOWNLOAD_LYRICS = booleanPreferencesKey("lw_download_lyrics")
+        val DOWNLOAD_SONG_SORT = stringPreferencesKey("lw_download_song_sort")
+        val DOWNLOAD_ARTIST_SORT = stringPreferencesKey("lw_download_artist_sort")
+        val DOWNLOAD_ALBUM_SORT = stringPreferencesKey("lw_download_album_sort")
         val APP_LANGUAGE = stringPreferencesKey("lw_app_language")
         val DOWNLOAD_FOLDER = stringPreferencesKey("lw_download_folder")
         val DOWNLOAD_TREE_URI = stringPreferencesKey("lw_download_tree_uri")
@@ -304,6 +311,9 @@ class SettingsPreferences @Inject constructor(
                 wavySeekbarEnabled = p.readSafely(Keys.WAVY_SEEKBAR_ENABLED) ?: true,
                 rotatingBackgroundEnabled = p.readSafely(Keys.ROTATING_BACKGROUND_ENABLED) ?: true,
                 downloadLyrics = p.readSafely(Keys.DOWNLOAD_LYRICS) ?: true,
+                downloadSongSort = p.readSafely(Keys.DOWNLOAD_SONG_SORT) ?: "recent",
+                downloadArtistSort = p.readSafely(Keys.DOWNLOAD_ARTIST_SORT) ?: "name_az",
+                downloadAlbumSort = p.readSafely(Keys.DOWNLOAD_ALBUM_SORT) ?: "title_az",
                 appLanguageTag = AppLanguage.fromTag(p.readSafely(Keys.APP_LANGUAGE)).tag,
                 downloadFolder = sanitizeDownloadFolderName(p.readSafely(Keys.DOWNLOAD_FOLDER)),
                 downloadTreeUri = p.readSafely(Keys.DOWNLOAD_TREE_URI)?.takeIf { it.isNotBlank() }.orEmpty(),
@@ -448,6 +458,18 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setDownloadLyrics(enabled: Boolean) {
         dataStore.edit { it[Keys.DOWNLOAD_LYRICS] = enabled }
+    }
+
+    suspend fun setDownloadSongSort(sortId: String) {
+        dataStore.edit { it[Keys.DOWNLOAD_SONG_SORT] = sortId }
+    }
+
+    suspend fun setDownloadArtistSort(sortId: String) {
+        dataStore.edit { it[Keys.DOWNLOAD_ARTIST_SORT] = sortId }
+    }
+
+    suspend fun setDownloadAlbumSort(sortId: String) {
+        dataStore.edit { it[Keys.DOWNLOAD_ALBUM_SORT] = sortId }
     }
 
     suspend fun setDownloadFolder(name: String) {

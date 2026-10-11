@@ -143,26 +143,29 @@ enum class DownloadTab(val label: String) {
     ALBUMS("Albums"),
 }
 
-enum class SongSortOption(val label: String) {
-    RECENT("Recently Added"),
-    OLDEST("Oldest First"),
-    TITLE_AZ("Title (A-Z)"),
-    ARTIST_AZ("Artist (A-Z)"),
-    SIZE_DESC("File Size"),
-}
-
-enum class ArtistSortOption(val label: String) {
-    NAME_AZ("Name (A-Z)"),
-    MOST_SONGS("Most Songs"),
-    STORAGE_SIZE("Storage Size"),
-}
-
-enum class AlbumSortOption(val label: String) {
-    TITLE_AZ("Title (A-Z)"),
-    ARTIST_AZ("Artist (A-Z)"),
-    MOST_TRACKS("Most Tracks"),
-    RECENT("Recently Added"),
-}
+// Sort option definitions were moved to DownloadsViewModel.kt so the
+// persisted sort state and its stable ids live together. Kept here as
+// comments to preserve the original code for upstream review.
+// enum class SongSortOption(val label: String) {
+//     RECENT("Recently Added"),
+//     OLDEST("Oldest First"),
+//     TITLE_AZ("Title (A-Z)"),
+//     ARTIST_AZ("Artist (A-Z)"),
+//     SIZE_DESC("File Size"),
+// }
+//
+// enum class ArtistSortOption(val label: String) {
+//     NAME_AZ("Name (A-Z)"),
+//     MOST_SONGS("Most Songs"),
+//     STORAGE_SIZE("Storage Size"),
+// }
+//
+// enum class AlbumSortOption(val label: String) {
+//     TITLE_AZ("Title (A-Z)"),
+//     ARTIST_AZ("Artist (A-Z)"),
+//     MOST_TRACKS("Most Tracks"),
+//     RECENT("Recently Added"),
+// }
 
 /** OpenDocumentTree that also requests a persistable grant, so the chosen
  *  download folder survives reboots (takePersistableUriPermission in the
@@ -194,6 +197,9 @@ fun DownloadsScreen(
     val totalBytes by viewModel.totalBytes.collectAsStateWithLifecycle()
     val activeDownloadsMap by viewModel.activeDownloads.collectAsStateWithLifecycle()
     val downloadLyrics by viewModel.downloadLyrics.collectAsStateWithLifecycle()
+    val songSort by viewModel.songSort.collectAsStateWithLifecycle()
+    val artistSort by viewModel.artistSort.collectAsStateWithLifecycle()
+    val albumSort by viewModel.albumSort.collectAsStateWithLifecycle()
     val downloadFolder by viewModel.downloadFolder.collectAsStateWithLifecycle()
     val downloadStructure by viewModel.downloadStructure.collectAsStateWithLifecycle()
     val useAlbumArtistForFolders by viewModel.useAlbumArtistForFolders.collectAsStateWithLifecycle()
@@ -210,9 +216,11 @@ fun DownloadsScreen(
     val currentSubView = subViewStack.last()
 
     var searchQuery by remember { mutableStateOf("") }
-    var songSort by remember { mutableStateOf(SongSortOption.RECENT) }
-    var artistSort by remember { mutableStateOf(ArtistSortOption.NAME_AZ) }
-    var albumSort by remember { mutableStateOf(AlbumSortOption.TITLE_AZ) }
+    // Replaced by the DataStore-backed ViewModel state above so these values
+    // survive navigation. Original screen-local state kept for upstream review:
+    // var songSort by remember { mutableStateOf(SongSortOption.RECENT) }
+    // var artistSort by remember { mutableStateOf(ArtistSortOption.NAME_AZ) }
+    // var albumSort by remember { mutableStateOf(AlbumSortOption.TITLE_AZ) }
     var filterLosslessOnly by remember { mutableStateOf(false) }
     var filterLyricsOnly by remember { mutableStateOf(false) }
 
@@ -526,11 +534,14 @@ fun DownloadsScreen(
                             onSearchQueryChange = { searchQuery = it },
                             selectedTab = selectedTab,
                             songSort = songSort,
-                            onSongSortChange = { songSort = it },
+                            // Previously: onSongSortChange = { songSort = it },
+                            onSongSortChange = viewModel::setSongSort,
                             artistSort = artistSort,
-                            onArtistSortChange = { artistSort = it },
+                            // Previously: onArtistSortChange = { artistSort = it },
+                            onArtistSortChange = viewModel::setArtistSort,
                             albumSort = albumSort,
-                            onAlbumSortChange = { albumSort = it },
+                            // Previously: onAlbumSortChange = { albumSort = it },
+                            onAlbumSortChange = viewModel::setAlbumSort,
                             filterLossless = filterLosslessOnly,
                             onToggleLossless = { filterLosslessOnly = !filterLosslessOnly },
                             filterLyrics = filterLyricsOnly,
