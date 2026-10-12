@@ -257,7 +257,41 @@ class FeedRepository @Inject constructor(
         val regularPicks = tasteProfile?.topTracksRaw.orEmpty().map {
             YouTubeMusicTrack(it.youtubeVideoIdOrNull().orEmpty(), it.name, it.artist, it.album, it.artworkUrl)
         }
-        val quickCandidates = buildList {
+
+        val discoverySeeds = (ytLikedSongs + ytRecentSongs + regularPicks + localQuickPicks)
+            .filter { it.videoId.isNotBlank() }
+            .shuffled(random)
+            .distinctBy { ArtistHelper.primaryArtist(it.artist).lowercase() }
+            .take(3)
+        val discoveryDef = async(Dispatchers.IO) {
+            discoverySeeds.map { seed ->
+                async {
+                    try {
+                        innerTube.fetchRelatedSongs(seed.videoId, limit = 30, prefetchStreams = false)
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
+            }.awaitAll()
+        }
+
+        val discoveryResults = discoverySeeds.zip(discoveryDef.await())
+        val discoveryTracks = discoveryResults.flatMap { it.second }.distinctBy { it.videoId }
+
+        val familiarVideoIds = (ytLikedSongs + ytRecentSongs + regularPicks + localQuickPicks + homeSongs).mapTo(mutableSetOf()) { it.videoId }
+        val familiarKeys = (ytLikedSongs + ytRecentSongs + regularPicks + localQuickPicks + homeSongs).mapTo(mutableSetOf()) {
+            it.artist.trim().lowercase() to it.title.trim().lowercase()
+        }
+
+        val newDiscoveryCandidates = discoveryTracks.filter { track ->
+            track.videoId.isNotBlank() &&
+                track.videoId !in familiarVideoIds &&
+                (track.artist.trim().lowercase() to track.title.trim().lowercase()) !in familiarKeys
+        }
+
+        val familiarCandidates = buildList {
             ytQuickPicks.forEachIndexed { i, t -> add(t to trackScore(t, i, 3.0)) }
             ytLikedSongs.forEachIndexed { i, t -> add(t to trackScore(t, i, 2.2)) }
             ytRecentSongs.forEachIndexed { i, t -> add(t to trackScore(t, i, 1.6)) }
@@ -271,6 +305,18 @@ class FeedRepository @Inject constructor(
             .distinctBy { (t, _) -> t.artist.trim().lowercase() to t.title.trim().lowercase() }
             .sortedByDescending { it.second }
             .map { it.first }
+
+        val newCandidates = newDiscoveryCandidates
+            .mapIndexed { i, t -> t to trackScore(t, i, 2.8) }
+            .distinctBy { (t, _) -> t.artist.trim().lowercase() to t.title.trim().lowercase() }
+            .sortedByDescending { it.second }
+            .map { it.first }
+
+        val quickCandidates = blend(
+            first = diversify(familiarCandidates, YouTubeMusicTrack::artist, maxPerArtist = 2),
+            second = diversify(newCandidates, YouTubeMusicTrack::artist, maxPerArtist = 1),
+        )
+
         val quickPicks = diversify(quickCandidates, YouTubeMusicTrack::artist, maxPerArtist = 2)
             .take(18)
             .ifEmpty { charts }
@@ -327,22 +373,6 @@ class FeedRepository @Inject constructor(
             .take(8)
             .shuffled(random)
 
-        val discoverySeeds = (ytLikedSongs + ytRecentSongs + quickPicks).filter { it.videoId.isNotBlank() }
-            .shuffled(random).distinctBy { it.artist.lowercase() }.take(3)
-        val discoveryDef = async(Dispatchers.IO) {
-            discoverySeeds.map { seed ->
-                async {
-                    try {
-                        innerTube.fetchRelatedSongs(seed.videoId, limit = 30, prefetchStreams = false)
-                    } catch (cancellation: CancellationException) {
-                        throw cancellation
-                    } catch (_: Exception) {
-                        emptyList()
-                    }
-                }
-            }.awaitAll()
-        }
-
         val topArtists = topArtistNames.map { name ->
             async(Dispatchers.IO) {
                 val trackArtwork = artistSignalTracks
@@ -382,8 +412,6 @@ class FeedRepository @Inject constructor(
             .ifEmpty { previous?.newReleases.orEmpty() }
             .distinctBy { it.id }.shuffled(random).take(15)
 
-        val discoveryResults = discoverySeeds.zip(discoveryDef.await())
-        val discoveryTracks = discoveryResults.flatMap { it.second }.distinctBy { it.videoId }
         val familiarIds = (ytLikedSongs + ytRecentSongs + regularPicks).mapTo(mutableSetOf()) { it.videoId }
         val freshPool = (discoveryTracks + charts + homeSongs + ytQuickPicks)
             .filter { it.videoId.isNotBlank() && it.videoId !in familiarIds }
