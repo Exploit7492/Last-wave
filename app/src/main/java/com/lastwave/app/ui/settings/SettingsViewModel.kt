@@ -504,6 +504,45 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    // ── Fork: internal direct output (mixer bypass without a USB DAC) ──
+
+    val internalDirectEnabled: StateFlow<Boolean> =
+        com.lastwave.app.playback.usb.InternalDirectPrefs.enabledFlow(context)
+            .withSettingsFallback("internal direct output", false)
+            .stateIn(viewModelScope, SettingsSharing, false)
+
+    val forceSoftwareVolume: StateFlow<Boolean> =
+        com.lastwave.app.playback.usb.InternalDirectPrefs.forceSoftwareVolumeFlow(context)
+            .withSettingsFallback("software volume", false)
+            .stateIn(viewModelScope, SettingsSharing, false)
+
+    /** Collecting this (settings screen visible) lets route changes re-probe the output. */
+    val internalDirectAvailability = musicPlayer.internalDirectAvailability
+
+    /** Probes what the current output accepts; called when the audio settings open. */
+    fun refreshInternalDirectAvailability() {
+        musicPlayer.refreshInternalDirectAvailability()
+    }
+
+    fun setInternalDirectEnabled(enabled: Boolean) = launchSettingsAction("update internal direct output") {
+        com.lastwave.app.playback.usb.InternalDirectPrefs.setEnabled(context, enabled)
+        if (enabled) {
+            // Same contract as USB exclusive: Bit-Perfect is what turns the DSP off.
+            applyNativeAudio { it.setBitPerfect(true) }
+            settingsPreferences.setBitPerfectEnabled(true)
+            settingsPreferences.setStudioMasterClarity(false)
+            applyNativeAudio { it.setStudioMasterClarity(false) }
+            _uiState.update {
+                it.copy(toastMessage = context.getString(com.lastwave.app.R.string.settings_internal_direct_enabled_toast))
+            }
+        }
+        musicPlayer.refreshInternalDirectAvailability()
+    }
+
+    fun setForceSoftwareVolume(enabled: Boolean) = launchSettingsAction("update software volume") {
+        com.lastwave.app.playback.usb.InternalDirectPrefs.setForceSoftwareVolume(context, enabled)
+    }
+
     // ── Clarity output preset + spatial bypass ──
 
     fun setClarityPreset(preset: Int) = launchSettingsAction("update clarity preset") {

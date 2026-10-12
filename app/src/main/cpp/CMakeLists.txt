@@ -45,6 +45,8 @@ add_library(
     lastwave_audio
     SHARED
     AudioEngine.cpp
+    DirectOutputBridge.cpp
+    DirectOutputStream.cpp
     DspProcessor.cpp
     NativeBridge.cpp
     SecretsBridge.cpp
