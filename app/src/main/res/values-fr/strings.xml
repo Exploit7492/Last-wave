@@ -258,4 +258,6 @@
     <string name="desc_shuffle">Aléatoire</string>
     <string name="desc_repeat">Répéter</string>
     <string name="desc_play_pause">Lire ou suspendre</string>
+    <string name="signal_usb_diag_copy">Copier le diagnostic USB</string>
+    <string name="signal_usb_diag_copied">Diagnostic USB copié — colle-le dans un message</string>
 </resources>

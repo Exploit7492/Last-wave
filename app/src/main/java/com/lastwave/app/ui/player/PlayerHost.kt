@@ -3462,6 +3462,7 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             needsUsbPermission = dac != null && dac.hasUsbPeripheral && !dac.usbPermissionGranted,
             onRequestUsbAccess = player::requestUsbPermission,
             onDismiss = { showSignalPath = false },
+            usbDiagnostic = if (dac != null) player::usbDiagnosticReport else null,
         )
     }
 }

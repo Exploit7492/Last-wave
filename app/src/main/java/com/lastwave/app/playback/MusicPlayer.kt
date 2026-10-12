@@ -461,6 +461,8 @@ class MusicPlayer @Inject constructor(
     /** True while the usbdevfs exclusive session owns output. */
     @Volatile private var usbExclusiveSinkActive = false
     @Volatile private var usbExclusivePrefEnabled = false
+    /** Raw "USB Exclusive Output" toggle, before the Bit-Perfect gate. */
+    @Volatile private var usbExclusiveRawPref = false
     /** System audio-effects mode pref (Settings -> Experimental, default OFF). */
     @Volatile private var systemEffectsModePref = false
     /** Effective mode: pref ON and on a mixer route (bypass routes suspend). */
@@ -1583,13 +1585,15 @@ class MusicPlayer @Inject constructor(
                         lastSignalPathMs = tickerNow
                         val exclusiveRate = exclusiveUsbOutput.currentRateHz()
                         if (exclusiveUsbOutput.isActive() && exclusiveRate > 0) {
-                            healthTracker.sampleExclusive(
+                            val drift = healthTracker.sampleExclusive(
                                 exclusiveUsbOutput.framesWritten(),
                                 exclusiveRate,
                                 tickerNow,
                                 true,
                             )
+                            checkExclusiveHealth(drift)
                         } else {
+                            exclusiveBadDriftTicks = 0
                             healthTracker.sample(pos, tickerNow, true)
                         }
                         updateSignalPath()
@@ -1645,6 +1649,7 @@ class MusicPlayer @Inject constructor(
                 bitPerfectEnabled = settings.isBitPerfectEnabled
                 systemEffectsModePref = settings.systemEffectsMode
                 updateBitPerfectState()
+                recomputeUsbExclusivePref()
                 if (bitPerfectEnabled && settings.isStudioMasterClarityEnabled) {
                     // Self-heal: both must never be on — Bit-Perfect wins.
                     settingsPreferences.setStudioMasterClarity(false)
@@ -1698,7 +1703,9 @@ class MusicPlayer @Inject constructor(
 
         applicationScope.launch {
             UsbExclusivePrefs.enabledFlow(appContext).collect { enabled ->
-                usbExclusivePrefEnabled = enabled && bitPerfectEnabled
+                if (enabled && !usbExclusiveRawPref) exclusiveUsbOutput.clearBlockedDevices()
+                usbExclusiveRawPref = enabled
+                recomputeUsbExclusivePref()
                 if (usbExclusivePrefEnabled) maybeRequestUsbPermission()
                 onMain {
                     applyDacRoutingFor(currentSourceRateHz())
@@ -2831,6 +2838,48 @@ class MusicPlayer @Inject constructor(
         if (isSpatialAudioCodec(resolved.audioCodec) || isSpatialAudioCodec(_state.value.audioCodec)) 48000
         else resolved.samplingRateKHz?.times(1000.0)?.toInt()?.takeIf { it > 0 }
             ?: currentSourceRateHz()
+
+    /**
+     * Effective USB exclusive wish, recomputed whenever an input changes. The
+     * old code captured "enabled && bitPerfectEnabled" once per pref emission:
+     * when the pref flow emitted before the settings flow at startup, USB
+     * exclusive stayed off for the whole session.
+     */
+    private fun recomputeUsbExclusivePref() {
+        usbExclusivePrefEnabled = bitPerfectEnabled && usbExclusiveRawPref
+    }
+
+    /** Consecutive 1 Hz ticks with an implausible clock on an unconfirmed DAC. */
+    private var exclusiveBadDriftTicks = 0
+
+    /**
+     * Safety guard. A DAC whose clock was never confirmed and that consumes
+     * the stream several % away from the configured rate is playing garbage
+     * (seen as loud distorted noise on a UAC1 dongle). Healthy DACs stay within
+     * a few hundred PPM, so 2 % sustained for 2 s is unambiguous. Only while
+     * PCM is actually flowing: a network stall must not trip it.
+     */
+    private fun checkExclusiveHealth(driftPpm: Double?) {
+        if (driftPpm == null || exclusiveUsbOutput.isClockMatched() || !exclusiveUsbOutput.isStreamingAudio()) {
+            exclusiveBadDriftTicks = 0
+            return
+        }
+        if (kotlin.math.abs(driftPpm) < EXCLUSIVE_DRIFT_ABORT_PPM) {
+            exclusiveBadDriftTicks = 0
+            return
+        }
+        exclusiveBadDriftTicks++
+        if (exclusiveBadDriftTicks < EXCLUSIVE_DRIFT_ABORT_TICKS) return
+        exclusiveBadDriftTicks = 0
+        val percent = String.format(java.util.Locale.ROOT, "%.1f", driftPpm / 10_000.0)
+        exclusiveUsbOutput.abortUnhealthy("DAC clock off by $percent %")
+        healthTracker.reset()
+        applyDacRoutingFor(currentSourceRateHz())
+        updateSignalPath()
+    }
+
+    /** Diagnostic text for the signal-path page (USB driver trace + descriptors). */
+    fun usbDiagnosticReport(): String = exclusiveUsbOutput.diagnosticReport()
 
     private fun exclusiveUsbWanted(): Boolean {
         if (isCasting) return false
@@ -6989,6 +7038,8 @@ class MusicPlayer @Inject constructor(
     }
 
     companion object {
+        private const val EXCLUSIVE_DRIFT_ABORT_PPM = 20_000.0
+        private const val EXCLUSIVE_DRIFT_ABORT_TICKS = 2
         /**
          * Fallback target when the DAC descriptor lacks the source rate.
          * Resamples to a clock rate supported by the DAC (including 48kHz, 96kHz, etc.)
