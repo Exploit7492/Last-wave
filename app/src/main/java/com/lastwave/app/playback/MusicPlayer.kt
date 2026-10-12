@@ -7232,6 +7232,17 @@ private fun MediaItem.toPlayableTrack(): PlayableTrack {
 }
 
 fun GeneratedTrack.toPlayableTrack(): PlayableTrack {
+    if (com.lastwave.app.data.generate.isLocalAudioPath(url)) {
+        // Local songs: imported file, played straight from app storage.
+        return PlayableTrack(
+            title = name,
+            artist = artist,
+            album = album,
+            artworkUrl = artworkUrl,
+            playbackUrl = url,
+            playbackMimeType = com.lastwave.app.data.generate.LocalAudioFormats.mimeFor(url),
+        )
+    }
     val videoId = youtubeVideoIdOrNull()
     return PlayableTrack(
         title = name,

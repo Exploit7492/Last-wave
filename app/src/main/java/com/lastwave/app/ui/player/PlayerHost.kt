@@ -539,6 +539,9 @@ class PlayerViewModel @Inject constructor(
                         forceRefresh = forceRefresh,
                         wordByWord = settingsPreferences.settings.first().wordByWordLyrics,
                         videoId = track.videoId,
+                        localLrcPath = com.lastwave.app.data.generate.LocalAudioFormats
+                            .importedPathOrNull(track.playbackUrl)
+                            ?.let(com.lastwave.app.data.generate.LocalAudioFormats::lrcPathFor),
                         onPartialResult = { partial ->
                             withContext(Dispatchers.Main.immediate) {
                                 coroutineContext.ensureActive()
@@ -954,7 +957,11 @@ private fun AddToPlaylistDialogHost(
     onFindCachedDuplicates: suspend (Set<Long>) -> Set<Long>,
     onCreate: (String) -> Unit,
 ) {
-    val playlists by viewModel.customPlaylists.collectAsStateWithLifecycle()
+    val allPlaylists by viewModel.customPlaylists.collectAsStateWithLifecycle()
+    // An imported file can't live in a YouTube Music playlist (no videoId).
+    val playlists = remember(allPlaylists, track) {
+        if (track.isImportedLocalFile()) allPlaylists.filterNot { it.remotePlaylistId != null } else allPlaylists
+    }
     AddToPlaylistDialog(
         track = track,
         playlists = playlists,
@@ -1821,9 +1828,11 @@ private fun FullPlayer(
     val context = LocalContext.current
     val artworkViewModel: ArtworkViewModel = hiltViewModel()
     val artworkKey = remember(track.title, track.artist) { ArtworkNormalizer.cacheKey(track.title, track.artist) }
-    val resolvedAmbientUrl by remember(artworkKey) {
+    val onlineAmbientUrl by remember(artworkKey) {
         artworkViewModel.resolved.map { it[artworkKey] }.distinctUntilChanged()
     }.collectAsStateWithLifecycle(initialValue = artworkViewModel.resolved.value[artworkKey])
+    // Local songs: the cover embedded in the user's file wins over online art.
+    val resolvedAmbientUrl = if (track.artworkUrl?.startsWith("file://") == true) null else onlineAmbientUrl
 
     var ambientPrimary by remember(track.videoId, track.artworkUrl, track.title, track.artist) { mutableStateOf<Color?>(null) }
     var ambientSecondary by remember(track.videoId, track.artworkUrl, track.title, track.artist) { mutableStateOf<Color?>(null) }
@@ -3869,5 +3878,12 @@ private fun PlayableTrack.toGeneratedTrack() = com.lastwave.app.data.generate.Ge
     artist = artist,
     artworkUrl = artworkUrl,
     album = album,
-    url = videoId?.let { "https://music.youtube.com/watch?v=$it" }.orEmpty(),
+    // Local songs: an imported file keeps its path so any playlist it
+    // is added to plays the copy on disk instead of a YouTube search.
+    url = com.lastwave.app.data.generate.LocalAudioFormats.importedPathOrNull(playbackUrl)
+        ?: videoId?.let { "https://music.youtube.com/watch?v=$it" }.orEmpty(),
 )
+
+/** True for files copied by the Local songs importer (app-private storage). */
+internal fun PlayableTrack.isImportedLocalFile(): Boolean =
+    com.lastwave.app.data.generate.LocalAudioFormats.importedPathOrNull(playbackUrl) != null
