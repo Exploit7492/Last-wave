@@ -1799,7 +1799,13 @@ private fun FullPlayer(
         }
     }
     var canvasAspect by remember(activeCanvas?.url) { mutableFloatStateOf(0f) }
-    var canvasRendered by remember(activeCanvas?.url) { mutableStateOf(false) }
+    // How much of the hero the canvas currently covers — its own fade-in alpha
+    // times the presentation alpha. The static hero fades out in step with it,
+    // so the cover never shows through the video (its bottom fade, its 320 ms
+    // reveal, the repaint window on a track change) and the two never fight for
+    // the same pixels. A disposed canvas reports 0, so the hero returns the
+    // moment a track without a canvas starts.
+    var canvasCover by remember { mutableFloatStateOf(0f) }
     var lyricsFullscreen by remember(currentTab) { mutableStateOf(false) }
     val view = LocalView.current
     DisposableEffect(view, lyricsFullscreen) {
@@ -2079,13 +2085,18 @@ private fun FullPlayer(
                         animationSpec = tween(280, easing = FastOutSlowInEasing),
                         label = "heroAlpha",
                     )
+                    // Static cover first, canvas on top: the hero is the
+                    // placeholder while the video loads, and hands the pixels
+                    // over as the canvas's own alpha climbs to full.
+                    val heroCover =
+                        if (canvasCover >= 0.95f) 0f else (1f - canvasCover).coerceIn(0f, 1f)
                     StaticArtworkHero(
                         name = track.title,
                         artist = track.artist,
                         embeddedUrl = track.artworkUrl,
                         resolvedUrl = resolvedAmbientUrl,
                         bottomFade = 0.42f,
-                        alpha = heroAlpha,
+                        alpha = heroAlpha * heroCover,
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .fillMaxWidth()
@@ -2099,8 +2110,8 @@ private fun FullPlayer(
                             alignPortraitTop = true,
                             bottomFade = 0.38f,
                             presentationAlpha = { heroAlpha },
+                            onCoverChanged = { canvasCover = it },
                             onAspectRatioChanged = { canvasAspect = it },
-                            onRenderedChanged = { canvasRendered = it },
                             pausedForTransition = shownDismissY > 0f || currentTab != FullPlayerTab.NOW_PLAYING,
                             modifier = Modifier
                                 .align(Alignment.TopStart)
@@ -3905,13 +3916,24 @@ private fun PlayerArtwork(
     transformations: List<coil.transform.Transformation> = emptyList(),
     onAspectRatioChanged: (Float) -> Unit = {},
 ) {
+    // The sleeve cover and its canvas are stacked in the same bounds: the
+    // cover is the placeholder while the video loads, then hands the pixels
+    // over as the canvas's own alpha climbs. Without this the static art
+    // stays at full opacity underneath the video and shows through wherever
+    // the canvas is transparent.
+    var sleeveCover by remember(canvas) { mutableFloatStateOf(0f) }
     Box(modifier.clip(RoundedCornerShape(corner)).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
         ArtworkImage(
             name = track.title,
             artist = track.artist,
             embeddedUrl = track.artworkUrl,
             fallbackIcon = Icons.Filled.MusicNote,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    alpha =
+                        if (sleeveCover >= 0.95f) 0f else (1f - sleeveCover).coerceIn(0f, 1f)
+                },
             decodeSizePx = decodeSizePx,
             transformations = transformations,
         )
@@ -3921,6 +3943,7 @@ private fun PlayerArtwork(
                 isPlaying = isPlaying,
                 pausedForTransition = pausedForTransition,
                 onAspectRatioChanged = onAspectRatioChanged,
+                onCoverChanged = { sleeveCover = it },
                 contentMode = CanvasContentMode.CROP,
                 modifier = Modifier.fillMaxSize(),
             )
