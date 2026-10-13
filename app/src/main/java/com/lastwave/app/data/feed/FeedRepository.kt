@@ -277,6 +277,48 @@ class FeedRepository @Inject constructor(
             }.awaitAll()
         }
 
+        val familiarCandidates = buildList {
+            ytQuickPicks.forEachIndexed { i, t -> add(it to trackScore(t, i, 3.0)) }
+            ytLikedSongs.forEachIndexed { i, t -> add(it to trackScore(t, i, 2.2)) }
+            ytRecentSongs.forEachIndexed { i, t -> add(it to trackScore(t, i, 1.6)) }
+            regularPicks.forEachIndexed { i, t -> add(it to trackScore(t, i, 2.6)) }
+            // Local-first: liked + saved Room tracks score as personal picks
+            // for guest/disconnected so Quick Picks never looks generic.
+            localQuickPicks.forEachIndexed { i, t -> add(it to trackScore(t, i, 2.4)) }
+            homeSongs.forEachIndexed { i, t -> add(it to trackScore(t, i, 1.2)) }
+            charts.forEachIndexed { i, t -> add(t to trackScore(t, i, 1.0)) }
+        }
+            .distinctBy { (t, _) -> t.artist.trim().lowercase() to t.title.trim().lowercase() }
+            .sortedByDescending { it.second }
+            .map { it.first }
+
+        fun shelf(quickPicks: List<YouTubeMusicTrack>): FeedData = (previous ?: FeedData()).copy(
+            isYtConnected = isYtConnected,
+            ytAccountName = connection.accountName.takeIf { isYtConnected },
+            userName = username,
+            hasYtRecommendations = ytTaste?.feedTracks?.isNotEmpty() == true,
+            hasPersonalContent = tasteProfile?.hasPersonalSignals == true || ytLikedSongs.isNotEmpty() || ytRecentSongs.isNotEmpty(),
+            quickPicks = quickPicks,
+            ytLikedSongs = ytLikedSongs,
+            ytRecentSongs = ytRecentSongs,
+        )
+
+        // First paint: familiar-only picks. These need no network beyond the
+        // parallel batch above, so a cold feed shows shelves immediately.
+        // Blending discovery into Quick Picks must never gate this
+        // emission — the related-songs round-trips (3 x up to 30 tracks) are
+        // the slowest calls in the load, and waiting on them left the whole
+        // feed blank for seconds on a cold start.
+        val familiarQuickPicks = diversify(familiarCandidates, YouTubeMusicTrack::artist, maxPerArtist = 2)
+            .take(18)
+            .ifEmpty { charts }
+            .distinctBy { it.artist.trim().lowercase() to it.title.trim().lowercase() }
+            .take(15)
+        onUpdate(shelf(familiarQuickPicks))
+
+        // Discovery: blends fresh picks over the familiar ones once the
+        // round-trips land, and feeds Fresh Finds / Mixes below. It overlaps
+        // with the artist fetches that follow instead of blocking paint.
         val discoveryResults = discoverySeeds.zip(discoveryDef.await())
         val discoveryTracks = discoveryResults.flatMap { it.second }.distinctBy { it.videoId }
 
@@ -290,21 +332,6 @@ class FeedRepository @Inject constructor(
                 track.videoId !in familiarVideoIds &&
                 (track.artist.trim().lowercase() to track.title.trim().lowercase()) !in familiarKeys
         }
-
-        val familiarCandidates = buildList {
-            ytQuickPicks.forEachIndexed { i, t -> add(t to trackScore(t, i, 3.0)) }
-            ytLikedSongs.forEachIndexed { i, t -> add(t to trackScore(t, i, 2.2)) }
-            ytRecentSongs.forEachIndexed { i, t -> add(t to trackScore(t, i, 1.6)) }
-            regularPicks.forEachIndexed { i, t -> add(t to trackScore(t, i, 2.6)) }
-            // Local-first: liked + saved Room tracks score as personal picks
-            // for guest/disconnected so Quick Picks never looks generic.
-            localQuickPicks.forEachIndexed { i, t -> add(t to trackScore(t, i, 2.4)) }
-            homeSongs.forEachIndexed { i, t -> add(t to trackScore(t, i, 1.2)) }
-            charts.forEachIndexed { i, t -> add(t to trackScore(t, i, 1.0)) }
-        }
-            .distinctBy { (t, _) -> t.artist.trim().lowercase() to t.title.trim().lowercase() }
-            .sortedByDescending { it.second }
-            .map { it.first }
 
         val newCandidates = newDiscoveryCandidates
             .mapIndexed { i, t -> t to trackScore(t, i, 2.8) }
@@ -323,16 +350,7 @@ class FeedRepository @Inject constructor(
             .distinctBy { it.artist.trim().lowercase() to it.title.trim().lowercase() }
             .take(15)
 
-        onUpdate((previous ?: FeedData()).copy(
-            isYtConnected = isYtConnected,
-            ytAccountName = connection.accountName.takeIf { isYtConnected },
-            userName = username,
-            hasYtRecommendations = ytTaste?.feedTracks?.isNotEmpty() == true,
-            hasPersonalContent = tasteProfile?.hasPersonalSignals == true || ytLikedSongs.isNotEmpty() || ytRecentSongs.isNotEmpty(),
-            quickPicks = quickPicks,
-            ytLikedSongs = ytLikedSongs,
-            ytRecentSongs = ytRecentSongs,
-        ))
+        onUpdate(shelf(quickPicks))
 
         val knownArtists = buildSet {
             addAll(affinity.keys)
