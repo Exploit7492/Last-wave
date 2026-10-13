@@ -96,6 +96,7 @@ import com.lastwave.app.ui.theme.liquidGlassContainerColor
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -791,8 +792,8 @@ private const val LYRIC_GLOW_ALPHA = 0.5f
  * same bounds by construction, for every script.
  *
  * Below API 31 Modifier.blur is a no-op, so the caller keeps the shadow there
- * and this draws nothing. clip = false keeps the halo unbounded instead of
- * cutting it at the Text's own edges.
+ * and this draws nothing. An unbounded edge treatment keeps the halo from
+ * being cut off at the Text's own bounds.
  */
 @Composable
 private fun LyricGlowText(text: String, style: TextStyle) {
@@ -804,7 +805,7 @@ private fun LyricGlowText(text: String, style: TextStyle) {
         textAlign = TextAlign.Start,
         modifier = Modifier
             .fillMaxWidth()
-            .blur(LYRIC_GLOW_RADIUS, clip = false),
+            .blur(LYRIC_GLOW_RADIUS, BlurredEdgeTreatment.Unbounded),
     )
 }
 
