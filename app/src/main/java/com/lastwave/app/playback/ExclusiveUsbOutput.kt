@@ -79,6 +79,8 @@ class ExclusiveUsbOutput @Inject constructor(
     private var volumeProbed = false
     @Volatile private var lastNonMaxListeningGain = Float.NaN
     @Volatile private var ignoreStreamMusicMax = false
+    /** Fork setting: never let the DAC's Feature Unit own the listening level. */
+    @Volatile private var forceSoftwareVolume = false
 
     private val audioManager: AudioManager? =
         appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -119,6 +121,32 @@ class ExclusiveUsbOutput @Inject constructor(
     }
 
     fun isWanted(): Boolean = wanted
+
+    /**
+     * Software (PCM-scaled) volume instead of the DAC's hardware Feature Unit.
+     * Switching to software parks the hardware level at 0 dB first so the two
+     * attenuations never stack. Switching back takes effect at the next start.
+     */
+    fun setForceSoftwareVolume(value: Boolean) {
+        synchronized(lock) {
+            if (forceSoftwareVolume == value) return
+            forceSoftwareVolume = value
+            if (value && active && hardwareVolume) {
+                runCatching { featureVolume?.setNormalized(1f) }
+                hardwareVolume = false
+                lastAppliedCombined = Float.NaN
+                applyVolumeLocked()
+                Log.i(TAG, "volume forced to software; Feature Unit parked at 0 dB")
+            }
+        }
+    }
+
+    fun isForceSoftwareVolume(): Boolean = forceSoftwareVolume
+
+    /** True when the attached DAC exposes a usable hardware volume (even if not used). */
+    fun hasHardwareVolumeControl(): Boolean = active && featureVolume != null && (hardwareVolume || featureVolumeAttached)
+
+    @Volatile private var featureVolumeAttached = false
 
     fun isActive(): Boolean = active
 
@@ -626,7 +654,13 @@ class ExclusiveUsbOutput @Inject constructor(
             }?.id ?: 0
         val volumeControl = UacFeatureVolume(info.connection, controlId)
         featureVolume = volumeControl
-        hardwareVolume = volumeControl.attach()
+        val attached = volumeControl.attach()
+        featureVolumeAttached = attached
+        hardwareVolume = attached && !forceSoftwareVolume
+        if (attached && forceSoftwareVolume) {
+            // Software volume requested: hardware level stays at 0 dB.
+            runCatching { volumeControl.setNormalized(1f) }
+        }
         Log.i(
             TAG,
             "decent USB started ${usbDevice.productName} ${sampleRate}Hz " +
@@ -650,7 +684,7 @@ class ExclusiveUsbOutput @Inject constructor(
         return true
     }
 
-    // ── Safety guard + diagnostics ──
+    // ── Fork: safety guard + diagnostics ──
 
     @Volatile private var currentDeviceKey: String? = null
     @Volatile private var sessionSummary: String = ""
@@ -687,7 +721,7 @@ class ExclusiveUsbOutput @Inject constructor(
     fun diagnosticReport(): String = buildString {
         append("LastWave USB diagnostic\n")
         append("active=$active wanted=$wanted rate=$configuredRateHz clockMatched=$clockMatched ")
-        append("hardwareVolume=$hardwareVolume\n")
+        append("hardwareVolume=$hardwareVolume forceSoftwareVolume=$forceSoftwareVolume\n")
         if (sessionSummary.isNotEmpty()) append(sessionSummary).append('\n')
         lastFailureReason?.let { append("lastFailure=").append(it).append('\n') }
         append(runCatching { usbAudio.diagnosticReport() }.getOrDefault(""))
@@ -846,6 +880,7 @@ class ExclusiveUsbOutput @Inject constructor(
             connection = null
         }
         featureVolume = null
+        featureVolumeAttached = false
         volumeProbed = false
         ignoreStreamMusicMax = false
         hardwareVolume = false

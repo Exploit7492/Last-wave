@@ -24,8 +24,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,7 +35,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.lastwave.app.R
+import com.lastwave.app.playback.InternalDirectAvailability
+import com.lastwave.app.playback.InternalDirectStream
+import com.lastwave.app.playback.InternalRoute
 import com.lastwave.app.playback.SignalPathReport
+import com.lastwave.app.playback.internalFailureDetail
 import com.lastwave.app.ui.theme.LiquidGlassPreset
 import com.lastwave.app.ui.theme.LocalLiquidGlass
 import com.lastwave.app.ui.theme.LocalLiquidGlassOverlayBackdrop
@@ -55,6 +57,9 @@ fun SignalPathDialog(
     needsUsbPermission: Boolean,
     onRequestUsbAccess: () -> Unit,
     onDismiss: () -> Unit,
+    internalAvailability: InternalDirectAvailability? = null,
+    internalEnabled: Boolean = false,
+    internalUnderruns: Long? = null,
     usbDiagnostic: (() -> String)? = null,
 ) {
     Dialog(onDismissRequest = onDismiss) {
@@ -99,6 +104,7 @@ fun SignalPathDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = when {
                         report.bitPerfect -> MaterialTheme.colorScheme.primary
+                        report.directToHal -> MaterialTheme.colorScheme.tertiary
                         report.clockFallbackResampled -> Color(0xFFFFB74D)
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
@@ -161,7 +167,9 @@ fun SignalPathDialog(
                 // Exclusive usbdevfs never uses AudioTrack. Gold is a stricter
                 // verdict (clock + unity/FU + DSP off); do not call exclusive
                 // output "Shared AudioTrack" just because a metadata check failed.
-                val routeTrack = if (report.usbExclusiveActive || report.bitPerfect) {
+                val routeTrack = if (report.internalDirectActive) {
+                    stringResource(R.string.signal_internal_track)
+                } else if (report.usbExclusiveActive || report.bitPerfect) {
                     stringResource(R.string.signal_direct_track)
                 } else {
                     stringResource(R.string.signal_shared_track)
@@ -176,9 +184,63 @@ fun SignalPathDialog(
                 )
                 HealthRow(stringResource(R.string.signal_glitches), report.glitchCount.toString())
 
+                // Fork: what the phone's own output allows, and what is in use.
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.signal_internal_section),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.height(4.dp))
+                val session = report.internalSession
+                val route = session?.route ?: internalAvailability?.route ?: InternalRoute.UNKNOWN
+                val routeName = session?.routeName ?: internalAvailability?.routeName.orEmpty()
+                HealthRow(
+                    stringResource(R.string.signal_internal_route),
+                    routeLabel(route) + if (routeName.isNotBlank()) " • $routeName" else "",
+                )
+                HealthRow(
+                    stringResource(R.string.signal_internal_status),
+                    when {
+                        report.internalDirectActive -> stringResource(R.string.internal_reason_active)
+                        !internalEnabled -> stringResource(R.string.signal_internal_off)
+                        internalAvailability != null -> stringResource(internalFailureDetail(internalAvailability.reason))
+                        else -> "—"
+                    },
+                )
+                val probe = internalAvailability?.probe
+                HealthRow(
+                    stringResource(R.string.signal_internal_endpoint),
+                    when {
+                        session != null -> stringResource(
+                            R.string.signal_internal_endpoint_value,
+                            session.deviceRateHz,
+                            InternalDirectStream.labelOf(session.deviceEncoding),
+                        ) + when {
+                            session.backend == com.lastwave.app.playback.InternalBackend.DIRECT_TRACK ->
+                                " • " + stringResource(R.string.signal_internal_backend_direct)
+                            session.mmap -> " • MMAP"
+                            else -> ""
+                        }
+                        probe != null && probe.usable -> stringResource(
+                            R.string.signal_internal_endpoint_value,
+                            probe.sampleRateHz,
+                            InternalDirectStream.labelOf(probe.encoding),
+                        ) + if (probe.mmap) " • MMAP" else ""
+                        probe != null && internalAvailability != null ->
+                            stringResource(internalFailureDetail(internalAvailability.reason))
+                        else -> stringResource(R.string.signal_internal_not_checked)
+                    },
+                )
+                if (internalUnderruns != null) {
+                    HealthRow(stringResource(R.string.signal_internal_underruns), internalUnderruns.toString())
+                }
+
                 if (usbDiagnostic != null) {
                     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
-                    var copied by remember { mutableStateOf(false) }
+                    val copiedLabel = stringResource(R.string.signal_usb_diag_copied)
+                    var copied by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
                     Spacer(Modifier.height(8.dp))
                     TextButton(
                         onClick = {
@@ -187,10 +249,7 @@ fun SignalPathDialog(
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(
-                            if (copied) stringResource(R.string.signal_usb_diag_copied)
-                            else stringResource(R.string.signal_usb_diag_copy),
-                        )
+                        Text(if (copied) copiedLabel else stringResource(R.string.signal_usb_diag_copy))
                     }
                 }
 
@@ -221,6 +280,7 @@ fun SignalPathDialog(
 @Composable
 private fun verdictText(report: SignalPathReport): String {
     if (report.bitPerfect) return stringResource(R.string.signal_verdict_ok)
+    if (report.directToHal) return stringResource(R.string.signal_verdict_direct_hal)
     val failing = report.checks.firstOrNull { !it.passed } ?: return ""
     return stringResource(failing.labelRes) +
         ": " +
@@ -231,17 +291,20 @@ private fun verdictText(report: SignalPathReport): String {
 private fun VerdictPill(report: SignalPathReport) {
     val bg = when {
         report.bitPerfect -> MaterialTheme.colorScheme.primary
+        report.directToHal -> MaterialTheme.colorScheme.tertiary
         report.clockFallbackResampled -> Color(0xFFE65100).copy(alpha = 0.25f)
         else -> MaterialTheme.colorScheme.surfaceContainerHighest
     }
     val fg = when {
         report.bitPerfect -> MaterialTheme.colorScheme.onPrimary
+        report.directToHal -> MaterialTheme.colorScheme.onTertiary
         report.clockFallbackResampled -> Color(0xFFFFB74D)
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     val text = when {
         report.bitPerfect -> stringResource(R.string.signal_bit_perfect)
-        report.clockFallbackResampled -> stringResource(R.string.signal_resampled_dac)
+        report.directToHal -> stringResource(R.string.signal_direct_hal)
+        report.clockFallbackResampled && !report.internalDirectActive -> stringResource(R.string.signal_resampled_dac)
         else -> stringResource(R.string.signal_check_path)
     }
     Box(
@@ -285,3 +348,15 @@ private fun HealthRow(label: String, value: String) {
         )
     }
 }
+
+@Composable
+private fun routeLabel(route: InternalRoute): String = stringResource(
+    when (route) {
+        InternalRoute.SPEAKER -> R.string.route_speaker
+        InternalRoute.WIRED -> R.string.route_wired
+        InternalRoute.BLUETOOTH -> R.string.route_bluetooth
+        InternalRoute.USB -> R.string.route_usb
+        InternalRoute.OTHER -> R.string.route_other
+        InternalRoute.UNKNOWN -> R.string.route_unknown
+    },
+)
