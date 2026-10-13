@@ -165,7 +165,7 @@ class FeedRepository @Inject constructor(
                     .distinctBy { it.key }
             }.getOrDefault(emptyList())
         }
-        // Real Last.fm albums for the taste — fetched up-front in parallel.
+        // Real Last.fm albums for the taste â€” fetched up-front in parallel.
         // Never derive albums from per-track `album` strings here: those are
         // usually just the single name and open a whole different record.
         val lastFmTopAlbumsDef = async(Dispatchers.IO) {
@@ -193,7 +193,7 @@ class FeedRepository @Inject constructor(
         }
 
         // Connected: personal mixes + taste signals + related artists lead.
-        // Guest/disconnected: local-first — liked + saved Room tracks plus
+        // Guest/disconnected: local-first â€” liked + saved Room tracks plus
         // accountless public trending (homeSongs/charts). Account-only
         // shelves (ytLikedSongs) stay empty so the UI suppresses them.
         val ytLikedSongs = ytTaste?.likedTracks.orEmpty().ifEmpty { previous?.ytLikedSongs.orEmpty() }
@@ -306,7 +306,7 @@ class FeedRepository @Inject constructor(
         // First paint: familiar-only picks. These need no network beyond the
         // parallel batch above, so a cold feed shows shelves immediately.
         // Blending discovery into Quick Picks must never gate this
-        // emission — the related-songs round-trips (3 x up to 30 tracks) are
+        // emission â€” the related-songs round-trips (3 x up to 30 tracks) are
         // the slowest calls in the load, and waiting on them left the whole
         // feed blank for seconds on a cold start.
         val familiarQuickPicks = diversify(familiarCandidates, YouTubeMusicTrack::artist, maxPerArtist = 2)
@@ -452,7 +452,7 @@ class FeedRepository @Inject constructor(
         // guest/disconnected builds it from local Room listening history
         // (liked + saved) so "Heavy Rotation" never empties.
         // Taste-weighted rotation: affinity dominates (40/35-point arms), but a
-        // ±20 jitter reorders within taste bands and last load's picks sink 20,
+        // Â±20 jitter reorders within taste bands and last load's picks sink 20,
         // so Heavy Rotation feels fresh every load without going generic.
         // Mirrors quickPicks' trackScore jitter/previous-penalty pattern.
         val previousHeavyKeys = previous?.heavyRotation.orEmpty().mapTo(mutableSetOf()) { it.key }
@@ -518,14 +518,14 @@ class FeedRepository @Inject constructor(
             .distinctBy { it.artist.displayName.trim().lowercase() to it.name.trim().lowercase() }
         val jumpBackIn = diversify(jumpCandidates, { it.artist.displayName }, maxPerArtist = 2).take(15)
 
-        // ── Albums for you: REAL albums only. ─────────────────────────────
+        // â”€â”€ Albums for you: REAL albums only. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // Never derive albums from per-track `album` strings (YT track.album
         // / Last.fm recent-track album): those are usually just the single
         // name, so opening them lands on a whole different record.
         // Sources, both taste-ranked:
         //  1. Last.fm user.gettopalbums (real albums, playcount-ranked).
         //  2. YT Music artist discography Albums for our top taste artists
-        //     (real MPRE entities with browseId — no fuzzy search needed).
+        //     (real MPRE entities with browseId â€” no fuzzy search needed).
         // An entry is shown only with a verified browseId, so tap always
         // opens that exact album and never a name-search guess.
         val albumArtworkRequests = Semaphore(4)
@@ -543,7 +543,7 @@ class FeedRepository @Inject constructor(
             if (wantParts.isEmpty()) return true
             return ArtistHelper.splitArtists(candidateArtist).any { it.trim().lowercase() in wantParts }
         }
-        // YT Music real albums: Album shelf only — Singles/EPs are skipped so
+        // YT Music real albums: Album shelf only â€” Singles/EPs are skipped so
         // a one-track "album" can never appear here.
         val lastFmArtByKey = lastFmTopAlbums.associate { top ->
             "${top.artist.trim().lowercase()}_${top.name.trim().lowercase()}" to top.artworkUrl
@@ -580,7 +580,7 @@ class FeedRepository @Inject constructor(
                     }
                 }
             }.awaitAll().flatten()
-        // Last.fm top albums → strict YT Music verification. No exact
+        // Last.fm top albums â†’ strict YT Music verification. No exact
         // title+artist MPRE match = dropped, never guessed.
         val lastFmRealAlbums = lastFmTopAlbums
             .filter { it.name.isNotBlank() && it.artist.isNotBlank() }
