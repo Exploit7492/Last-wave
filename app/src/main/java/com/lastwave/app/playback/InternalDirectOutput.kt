@@ -38,7 +38,7 @@ enum class InternalRoute { SPEAKER, WIRED, BLUETOOTH, USB, OTHER, UNKNOWN }
 enum class InternalBackend {
     /** Vendor `direct_pcm_out` profile via a 24-bit AudioTrack (UAPP HiRes Direct recipe). */
     DIRECT_TRACK,
-    /** AAudio EXCLUSIVE (MMAP) stream — fallback, often fixed at 48 kHz. */
+    /** AAudio EXCLUSIVE (MMAP) stream — source rate, else 48 kHz, else device native. */
     MMAP,
 }
 
@@ -96,7 +96,10 @@ data class InternalDirectSession(
  *     that AudioFlinger never mixes — speaker, jack AND Bluetooth A2DP, 44.1 to
  *     384 kHz. Verified per track (Android refuses rate changes on direct tracks).
  *  2. AAudio EXCLUSIVE (MMAP) via [InternalDirectStream]: writes into the HAL
- *     buffer. Usually fixed at 48 kHz, so 44.1 kHz sources get resampled (soxr).
+ *     buffer. Opens at the source rate when the HAL accepts it, otherwise at
+ *     48 kHz — the one rate every HAL accepts — and only then at whatever
+ *     rate the device natively runs at (see [fallbackRates]). Whatever does
+ *     not match the source costs one native soxr conversion.
  *
  * Limits that remain: USB DACs use the usbdevfs exclusive output; on Bluetooth
  * the codec still re-encodes after the bypass; a vendor DSP after the HAL is
@@ -455,10 +458,12 @@ class InternalDirectOutput @Inject constructor(
         ) {
             return srcRate to probe.encoding
         }
-        if (probe.sampleRateHz != srcRate &&
-            target.open(probe.sampleRateHz, OUT_CHANNELS, probe.encoding) == InternalDirectStream.OPEN_OK
-        ) {
-            return probe.sampleRateHz to probe.encoding
+        // The source rate is refused. Try the rates in [fallbackRates] order:
+        // the universal 48 kHz family first, the device's native rate last.
+        for (rate in fallbackRates(srcRate, probe.sampleRateHz)) {
+            if (target.open(rate, OUT_CHANNELS, probe.encoding) == InternalDirectStream.OPEN_OK) {
+                return rate to probe.encoding
+            }
         }
         return null
     }
@@ -668,6 +673,29 @@ class InternalDirectOutput @Inject constructor(
             srcEnc == InternalDirectStream.ENC_FLOAT -> false
             devEnc == InternalDirectStream.ENC_FLOAT -> srcBits <= 24
             else -> InternalDirectStream.bitsOf(devEnc) >= srcBits
+        }
+
+        /**
+         * Rates to try when the HAL refused the source rate, in order.
+         *
+         * 48 kHz comes first: it is the one rate every Android HAL accepts,
+         * and the documented normal case for this backend ("MMAP ... often
+         * fixed at 48 kHz, so 44.1 kHz sources get resampled"). The probe's
+         * own rate — the device's native primary output rate — comes LAST:
+         * on a 44.1-primary HAL it would otherwise resample every source,
+         * 48 kHz YouTube streams included, DOWN to 44.1. The probe rate is
+         * still kept as the final attempt so a device that genuinely cannot
+         * open 48 kHz keeps its current behaviour instead of failing closed.
+         *
+         * The source rate is never repeated (it was just refused), and
+         * duplicates are collapsed so a 48-primary HAL makes one attempt.
+         */
+        fun fallbackRates(sourceHz: Int, probeRateHz: Int): List<Int> = buildList {
+            if (sourceHz <= 0) return@buildList
+            if (48_000 != sourceHz) add(48_000)
+            probeRateHz
+                .takeIf { it > 0 && it != sourceHz && it != 48_000 }
+                ?.let { add(it) }
         }
 
         fun classify(type: Int): InternalRoute = when (type) {

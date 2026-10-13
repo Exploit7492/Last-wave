@@ -226,4 +226,32 @@ class InternalDirectSignalPathTest {
         assertThat(report.directToHal).isTrue()
         assertThat(report.checks.none { it.labelRes == com.lastwave.app.R.string.signal_label_bt_codec }).isTrue()
     }
+
+    // ---- MMAP rate fallback order -----------------------------------------
+
+    @Test
+    fun fallbackRatesPrefer48kHzOverTheDeviceNativeRate() {
+        // A 44.1-primary HAL probes at 44100. The device still opens 48 kHz
+        // (the one rate every HAL accepts), so it must be tried BEFORE the
+        // probe rate — otherwise a 96 kHz source gets resampled DOWN to
+        // 44.1 for no reason the user asked for.
+        assertThat(InternalDirectOutput.fallbackRates(96_000, 44_100))
+            .containsExactly(48_000, 44_100)
+            .inOrder()
+    }
+
+    @Test
+    fun fallbackRatesSkipTheSourceRateAndDuplicates() {
+        // 48 was refused at the source rate: asking again is pointless.
+        assertThat(InternalDirectOutput.fallbackRates(48_000, 48_000)).isEmpty()
+        assertThat(InternalDirectOutput.fallbackRates(48_000, 44_100)).containsExactly(44_100)
+        // Probe already at 48: one attempt, not two.
+        assertThat(InternalDirectOutput.fallbackRates(96_000, 48_000)).containsExactly(48_000)
+        // 44.1 refused but 48 available (48-primary HAL): up, never down.
+        assertThat(InternalDirectOutput.fallbackRates(44_100, 48_000)).containsExactly(48_000)
+        // No probe rate at all: 48 is still worth the try.
+        assertThat(InternalDirectOutput.fallbackRates(44_100, 0)).containsExactly(48_000)
+        // A garbage source never reaches the loop.
+        assertThat(InternalDirectOutput.fallbackRates(0, 44_100)).isEmpty()
+    }
 }
