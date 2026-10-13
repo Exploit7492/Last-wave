@@ -141,6 +141,7 @@ class FeedViewModel @Inject constructor(
     private fun fetchFeed(refreshing: Boolean) {
         feedJob?.cancel()
         feedJob = viewModelScope.launch {
+            val self = coroutineContext[Job]
             _uiState.update { it.copy(isLoading = !refreshing || it.isLoading, isRefreshing = refreshing, error = null) }
             try {
                 val connection = ytAuth.awaitLoadedConnection()
@@ -174,6 +175,15 @@ class FeedViewModel @Inject constructor(
                 ensureActive()
                 _uiState.update {
                     it.copy(isLoading = false, isRefreshing = false, error = "Couldn't update your feed. Please try again.")
+                }
+            } finally {
+                // Every exit above the success path — cancellation mid-load
+                // and the changed-identity guard — used to leave isRefreshing
+                // true, and with it a pull-to-refresh spinner that spins over
+                // fully-loaded content. Only the job that still owns the state
+                // may clear it, so a newer feed job's flags are never reset.
+                if (feedJob === self) {
+                    _uiState.update { it.copy(isRefreshing = false) }
                 }
             }
         }
