@@ -708,6 +708,12 @@ Java_com_decent_usbaudio_UsbAudioStream_nativeGetFramesWritten(
 }
 
 JNIEXPORT jint JNICALL
+Java_com_decent_usbaudio_UsbAudioStream_nativeUsbSpeed(
+        JNIEnv *, jclass, jint fd) {
+    return ioctl(fd, USBDEVFS_GET_SPEED, 0);
+}
+
+JNIEXPORT jint JNICALL
 Java_com_decent_usbaudio_UsbAudioStream_nativeUsbReset(
         JNIEnv *, jclass, jint fd) {
     LOGI("USBDEVFS_RESET fd=%d", fd);

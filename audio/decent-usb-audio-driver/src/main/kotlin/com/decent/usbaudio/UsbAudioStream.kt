@@ -229,5 +229,19 @@ class UsbAudioStream(
          */
         @JvmStatic
         external fun nativeUsbReset(fd: Int): Int
+
+        @JvmStatic
+        external fun nativeUsbSpeed(fd: Int): Int
+
+        /** "full" (USB 1.1, 1 ms frames), "high" (USB 2.0, 125 µs microframes)… */
+        fun usbSpeedName(fd: Int): String = when (runCatching { nativeUsbSpeed(fd) }.getOrDefault(-1)) {
+            1 -> "low"
+            2 -> "full"
+            3 -> "high"
+            4 -> "wireless"
+            5 -> "super"
+            6 -> "super+"
+            else -> "unknown"
+        }
     }
 }

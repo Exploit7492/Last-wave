@@ -23,6 +23,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,6 +55,7 @@ fun SignalPathDialog(
     needsUsbPermission: Boolean,
     onRequestUsbAccess: () -> Unit,
     onDismiss: () -> Unit,
+    usbDiagnostic: (() -> String)? = null,
 ) {
     Dialog(onDismissRequest = onDismiss) {
         val glass = LocalLiquidGlass.current
@@ -170,6 +175,24 @@ fun SignalPathDialog(
                     },
                 )
                 HealthRow(stringResource(R.string.signal_glitches), report.glitchCount.toString())
+
+                if (usbDiagnostic != null) {
+                    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                    var copied by remember { mutableStateOf(false) }
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(
+                        onClick = {
+                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(usbDiagnostic()))
+                            copied = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            if (copied) stringResource(R.string.signal_usb_diag_copied)
+                            else stringResource(R.string.signal_usb_diag_copy),
+                        )
+                    }
+                }
 
                 if (needsUsbPermission) {
                     Spacer(Modifier.height(12.dp))
