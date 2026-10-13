@@ -121,6 +121,27 @@ android {
                 enableV2Signing = true
                 enableV3Signing = true
             } else {
+                // Never silently fall back to the debug key for a release
+                // variant. A release APK signed with the runner's random debug
+                // key installs once, then every future update fails with
+                // INSTALL_FAILED_UPDATE_INCOMPATIBLE (signature conflict) and
+                // forces the user to uninstall and lose their data. apksigner
+                // verify only proves *a* signature is valid, not whose it is,
+                // so we must refuse to produce the APK in the first place.
+                //
+                // Only fail when a release variant is actually being requested,
+                // so debug builds and unit tests keep working with no signing
+                // secrets present on a dev machine.
+                val requestsRelease =
+                    gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
+                if (requestsRelease) {
+                    throw GradleException(
+                        "No release signing key found. Provide SIGNING_KEY (base64 " +
+                            "keystore) or RELEASE_STORE_FILE + RELEASE_STORE_PASSWORD + " +
+                            "RELEASE_KEY_ALIAS. Refusing to sign a release variant with " +
+                            "the debug key."
+                    )
+                }
                 initWith(getByName("debug"))
             }
         }

@@ -50,9 +50,13 @@ class ModulesViewModel @Inject constructor(
     val addonUrl: StateFlow<String?> = settingsPreferences.addonUrl
     val addonName: StateFlow<String?> = settingsPreferences.addonName
     val addonEnabled: StateFlow<Boolean> = settingsPreferences.addonEnabled
+    val httpAddons: StateFlow<List<com.lastwave.app.data.local.HttpAddonConfig>> = settingsPreferences.httpAddons
 
     private val _addonHealth = MutableStateFlow<com.lastwave.app.data.addon.AddonHealth?>(null)
     val addonHealth: StateFlow<com.lastwave.app.data.addon.AddonHealth?> = _addonHealth.asStateFlow()
+
+    private val _addonHealthMap = MutableStateFlow<Map<String, com.lastwave.app.data.addon.AddonHealth>>(emptyMap())
+    val addonHealthMap: StateFlow<Map<String, com.lastwave.app.data.addon.AddonHealth>> = _addonHealthMap.asStateFlow()
 
     fun setPreferModules(enabled: Boolean) {
         viewModelScope.launch {
@@ -66,7 +70,17 @@ class ModulesViewModel @Inject constructor(
         }
     }
 
+    fun toggleAddon(id: String, enabled: Boolean) {
+        viewModelScope.launch {
+            settingsPreferences.toggleHttpAddon(id, enabled)
+        }
+    }
+
     fun saveAddon(rawUrl: String) {
+        saveAddon(null, rawUrl)
+    }
+
+    fun saveAddon(id: String?, rawUrl: String) {
         val trimmed = rawUrl.trim()
         if (trimmed.isBlank()) {
             _notice.value = "Addon URL cannot be empty"
@@ -77,13 +91,19 @@ class ModulesViewModel @Inject constructor(
             try {
                 val client = com.lastwave.app.data.addon.AddonClient(trimmed, nativeSecrets = nativeSecrets)
                 val health = client.health()
-                _addonHealth.value = health
                 val manifestRes = client.manifest()
                 val manifestName = manifestRes.getOrNull()?.displayName ?: "HTTP Addon"
 
-                settingsPreferences.setAddonUrl(trimmed)
-                settingsPreferences.setAddonName(manifestName)
-                settingsPreferences.setAddonEnabled(true)
+                val targetId = if (id.isNullOrBlank()) {
+                    val added = settingsPreferences.addHttpAddon(trimmed, manifestName)
+                    added.id
+                } else {
+                    settingsPreferences.updateHttpAddon(id, trimmed, manifestName)
+                    id
+                }
+
+                _addonHealth.value = health
+                _addonHealthMap.value = _addonHealthMap.value + (targetId to health)
 
                 when (health) {
                     is com.lastwave.app.data.addon.AddonHealth.Ok -> _notice.value = "Connected: $manifestName"
@@ -98,31 +118,69 @@ class ModulesViewModel @Inject constructor(
         }
     }
 
-    fun removeAddon() {
+    fun removeAddon(id: String) {
         viewModelScope.launch {
-            settingsPreferences.setAddonUrl(null)
-            settingsPreferences.setAddonName(null)
-            settingsPreferences.setAddonEnabled(false)
-            _addonHealth.value = null
+            settingsPreferences.removeHttpAddon(id)
+            _addonHealthMap.value = _addonHealthMap.value - id
             _notice.value = "Addon removed"
         }
     }
 
-    fun testAddon() {
-        val current = addonUrl.value
-        if (current.isNullOrBlank()) return
+    fun removeAddon() {
+        val first = httpAddons.value.firstOrNull()
+        if (first != null) {
+            removeAddon(first.id)
+        } else {
+            viewModelScope.launch {
+                settingsPreferences.setAddonUrl(null)
+                settingsPreferences.setAddonName(null)
+                settingsPreferences.setAddonEnabled(false)
+                _addonHealth.value = null
+                _notice.value = "Addon removed"
+            }
+        }
+    }
+
+    fun testAddon(id: String) {
+        val addon = httpAddons.value.firstOrNull { it.id == id } ?: return
+        if (addon.url.isBlank()) return
         viewModelScope.launch {
             _busy.value = true
             try {
-                val health = com.lastwave.app.data.addon.AddonClient(current, nativeSecrets = nativeSecrets).health()
+                val health = com.lastwave.app.data.addon.AddonClient(addon.url, nativeSecrets = nativeSecrets).health()
+                _addonHealthMap.value = _addonHealthMap.value + (id to health)
                 _addonHealth.value = health
                 _notice.value = when (health) {
-                    is com.lastwave.app.data.addon.AddonHealth.Ok -> "Addon is active and reachable"
-                    is com.lastwave.app.data.addon.AddonHealth.Unreachable -> "Addon unreachable: ${health.reason}"
-                    is com.lastwave.app.data.addon.AddonHealth.Rejected -> "Addon rejected: ${health.reason}"
+                    is com.lastwave.app.data.addon.AddonHealth.Ok -> "${addon.name}: Active and reachable"
+                    is com.lastwave.app.data.addon.AddonHealth.Unreachable -> "${addon.name}: Unreachable (${health.reason})"
+                    is com.lastwave.app.data.addon.AddonHealth.Rejected -> "${addon.name}: Rejected (${health.reason})"
                 }
             } finally {
                 _busy.value = false
+            }
+        }
+    }
+
+    fun testAddon() {
+        val first = httpAddons.value.firstOrNull()
+        if (first != null) {
+            testAddon(first.id)
+        } else {
+            val current = addonUrl.value
+            if (current.isNullOrBlank()) return
+            viewModelScope.launch {
+                _busy.value = true
+                try {
+                    val health = com.lastwave.app.data.addon.AddonClient(current, nativeSecrets = nativeSecrets).health()
+                    _addonHealth.value = health
+                    _notice.value = when (health) {
+                        is com.lastwave.app.data.addon.AddonHealth.Ok -> "Addon is active and reachable"
+                        is com.lastwave.app.data.addon.AddonHealth.Unreachable -> "Addon unreachable: ${health.reason}"
+                        is com.lastwave.app.data.addon.AddonHealth.Rejected -> "Addon rejected: ${health.reason}"
+                    }
+                } finally {
+                    _busy.value = false
+                }
             }
         }
     }

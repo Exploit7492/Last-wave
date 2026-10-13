@@ -5,8 +5,10 @@ import android.os.SystemClock
 import com.lastwave.app.data.local.AppLanguage
 import com.lastwave.app.data.local.SettingsPreferences
 import com.lastwave.app.data.local.appLocale
+import com.lastwave.app.data.generate.normalizeTrackText
 import java.util.Locale
 import com.lastwave.app.data.music.potoken.BotGuardTokenGenerator
+import com.lastwave.app.data.music.potoken.PoTokenResult
 import com.lastwave.app.data.ytmusic.YtMusicAuthManager
 import com.lastwave.app.data.ytmusic.YtConnection
 import kotlinx.coroutines.CoroutineScope
@@ -61,6 +63,27 @@ data class YouTubeMusicTrack(
     val artworkUrl: String? = null,
     val durationSeconds: Int? = null,
 )
+
+/**
+ * Collapses the same song appearing twice in a fetched playlist. A YouTube
+ * playlist can legitimately repeat a track under two uploads (different
+ * videoIds), and an account-authenticated browse can hand back the same song
+ * under two renderers; both surface as two identical title+artist rows in
+ * every playlist detail, which reads as a duplication bug. Keeps the first
+ * occurrence per videoId and per normalized title+artist.
+ */
+internal fun List<YouTubeMusicTrack>.distinctPlaylistSongs(): List<YouTubeMusicTrack> {
+    if (size < 2) return this
+    val seenVideoIds = mutableSetOf<String>()
+    val seenSongs = mutableSetOf<String>()
+    val out = ArrayList<YouTubeMusicTrack>(size)
+    for (track in this) {
+        val songKey = "${track.title.normalizeTrackText()}|${track.artist.normalizeTrackText()}".lowercase()
+        if (!seenVideoIds.add(track.videoId) || !seenSongs.add(songKey)) continue
+        out += track
+    }
+    return out
+}
 
 enum class YouTubeMusicEntityKind { ARTIST, ALBUM }
 
@@ -166,6 +189,13 @@ data class YtOwnedPlaylist(
     val id: String,
     val title: String,
     val items: List<YtOwnedPlaylistItem> = emptyList(),
+    /**
+     * False when a continuation page failed to load (e.g. a 429) and [items] is
+     * therefore a truncated view of the real playlist. Callers that diff against
+     * the remote must skip the merge when this is false, otherwise present
+     * tracks look "removed remotely" and get deleted.
+     */
+    val complete: Boolean = true,
 )
 
 /**
@@ -202,6 +232,9 @@ class InnerTubeMusicApi @Inject constructor(
     private val lastResolvedStreams = ConcurrentHashMap<String, YouTubeAudioStream>()
     @Volatile private var lastSuccessfulClientName: String? = null
     @Volatile private var webConfig: WebConfig? = null
+    /** Last wall-clock attempt to (re)bootstrap visitor data: the fast path
+     *  must not re-fetch on every song when the config endpoint is down. */
+    @Volatile private var lastVisitorBootstrapAttemptMs = 0L
 
     fun invalidateCache(videoId: String) {
         streamCache.keys.removeIf { it.videoId == videoId }
@@ -414,6 +447,20 @@ class InnerTubeMusicApi @Inject constructor(
         if (songs.isEmpty()) {
             android.util.Log.w(PLAYLIST_LOG_TAG, "playlist-no-tracks browseId=$browseId")
             return@withContext null
+        }
+        // Diagnostic: the same song arriving under two videoIds renders as
+        // two identical rows in every playlist detail (the display layer
+        // collapses them, but the upstream shape stays visible here).
+        val sameSongTwice = songs
+            .groupBy { "${it.title.trim().lowercase()}|${it.artist.trim().lowercase()}" }
+            .filter { it.value.size > 1 }
+        if (sameSongTwice.isNotEmpty()) {
+            android.util.Log.w(
+                PLAYLIST_LOG_TAG,
+                "playlist-same-song-two-videoIds browseId=$browseId " +
+                    sameSongTwice.values.flatten()
+                        .joinToString { "${it.title}|${it.artist}|${it.videoId}" },
+            )
         }
         YouTubePlaylistResult(
             id = rawId,
@@ -1280,19 +1327,32 @@ class InnerTubeMusicApi @Inject constructor(
         fun targetFound() = stopAfterVideoId != null && items.any {
             it.videoId == stopAfterVideoId && !it.setVideoId.isNullOrBlank()
         }
+        var complete = true
         while (!targetFound() && !token.isNullOrBlank() && page < MAX_CONTINUATION_PAGES) {
             val currentToken = token ?: break
             if (!seenTokens.add(currentToken)) break
             val nextPage = runCatching { browseContinuation(currentToken, authenticated = true) }
-                .getOrNull() ?: break
+                .getOrNull()
+            if (nextPage == null) {
+                // A continuation page failed to load (e.g. a 429). items is now a
+                // truncated view of the real playlist — flag it so diffing callers
+                // skip the merge instead of treating present tracks as "removed".
+                complete = false
+                break
+            }
             val pageContainers = playlistTrackContainers(nextPage)
             val effectivePageContainers = if (pageContainers.isNotEmpty()) pageContainers else listOf(nextPage)
             effectivePageContainers.forEach(::absorb)
             token = effectivePageContainers.firstNotNullOfOrNull(::playlistTrackContinuationToken)
             page++
         }
+        // Hitting the page cap with a token still pending is also a truncated view
+        // (unless we stopped early because the target was already found).
+        if (!targetFound() && !token.isNullOrBlank() && page >= MAX_CONTINUATION_PAGES) {
+            complete = false
+        }
 
-        YtOwnedPlaylist(id = rawId, title = title, items = items)
+        YtOwnedPlaylist(id = rawId, title = title, items = items, complete = complete)
     }
 
     private suspend fun editRemotePlaylist(playlistId: String, actions: List<JsonElement>): Boolean =
@@ -2118,10 +2178,27 @@ class InnerTubeMusicApi @Inject constructor(
         videoId: String,
         authScope: String,
     ): YouTubeAudioStream? {
-        // Cached-only visitor data: never fetch the web config here — the
-        // fast path must stay a pure player POST per client. Startup pre-warm
-        // (preWarmPlayback) keeps this populated from the first song.
-        val visitorData = webConfig?.visitorData
+        // Visitor data is mandatory, not best-effort: VISIONOS/ANDROID_VR
+        // answer LOGIN_REQUIRED with zero formats when it is missing, so a
+        // resolve without it burns the fast-path budget on misses. Bootstrap
+        // it here (bounded, throttled) when the startup pre-warm hasn't.
+        var visitorData = webConfig?.visitorData
+        if (visitorData.isNullOrBlank()) {
+            val now = System.currentTimeMillis()
+            if (now - lastVisitorBootstrapAttemptMs >= VISITOR_BOOTSTRAP_RETRY_COOLDOWN_MS) {
+                lastVisitorBootstrapAttemptMs = now
+                visitorData = runCatching {
+                    kotlinx.coroutines.withTimeoutOrNull(VISITOR_BOOTSTRAP_BUDGET_MS) {
+                        getWebConfig()
+                    }?.visitorData
+                }.getOrNull() ?: visitorData
+            }
+            noteAttempt("direct-fast=visitor-${if (!visitorData.isNullOrBlank()) "ok" else "missing"}")
+        }
+        // One PoToken per resolve, shared across clients: the minter serves
+        // cache hits in milliseconds (engine is pre-warmed at startup) and
+        // anything slower proceeds without a token instead of stalling audio.
+        val poToken = fastPoToken(videoId, visitorData)
         val nowMs = System.currentTimeMillis()
         val ordered = DIRECT_FAST_CLIENT_ORDER
             .mapNotNull { name -> PLAYER_CLIENTS.firstOrNull { it.name == name } }
@@ -2147,8 +2224,8 @@ class InnerTubeMusicApi @Inject constructor(
                         client = client,
                         visitorData = visitorData,
                         signatureTimestamp = null,
-                        playerPoToken = null,
-                        gvsPoToken = null,
+                        playerPoToken = if (client.needsPoToken) poToken?.playerToken else null,
+                        gvsPoToken = if (client.needsGvsPoToken) poToken?.sessionToken else null,
                         authScope = authScope,
                         probeCandidates = false,
                         allowCipherFormats = false,
@@ -2303,6 +2380,29 @@ class InnerTubeMusicApi @Inject constructor(
         } finally {
             channel.close()
             jobs.forEach { it.cancel() }
+        }
+    }
+
+    /**
+     * One video-bound PoToken for the fast path, served from the minter's
+     * cache whenever the pre-warmed engine is alive (milliseconds). Uses the
+     * same session rule as the startup pre-warm so the engine is actually
+     * reusable. Anything slower — cold WebView boot, missing WebView, dead
+     * challenge — returns null and the resolve proceeds without a token
+     * instead of blocking audio on it.
+     */
+    private suspend fun fastPoToken(videoId: String, visitorData: String?): PoTokenResult? {
+        if (videoId.isBlank()) return null
+        val session = visitorData?.takeIf { it.isNotBlank() } ?: FALLBACK_TOKEN_SESSION
+        return try {
+            kotlinx.coroutines.withTimeoutOrNull(POTOKEN_FAST_BUDGET_MS) {
+                BotGuardTokenGenerator.mintToken(videoId, session)
+            }
+        } catch (error: Throwable) {
+            // A timed-out mint reports as cancellation while the parent is
+            // still alive; only a genuinely cancelled parent rethrows.
+            if (error is kotlinx.coroutines.CancellationException && !currentCoroutineContext().isActive) throw error
+            null
         }
     }
 
@@ -2785,11 +2885,14 @@ class InnerTubeMusicApi @Inject constructor(
     }
 
     private suspend fun getWebConfig(): WebConfig {
-        webConfig?.let { return it }
+        webConfig?.takeIf { it.visitorData != null }?.let { return it }
         return configMutex.withLock {
-            webConfig?.let { return@withLock it }
+            webConfig?.takeIf { it.visitorData != null }?.let { return@withLock it }
+            // A cached copy without visitor data is a poisoned fallback from
+            // an earlier failed fetch: re-fetch so later resolves get a real
+            // visitor instead of guaranteed-miss player calls forever.
             val config = runCatching { fetchWebConfig() }
-                .getOrElse { WebConfig(FALLBACK_WEB_KEY, FALLBACK_WEB_VERSION, null) }
+                .getOrElse { WebConfig(FALLBACK_WEB_KEY, FALLBACK_WEB_VERSION, webConfig?.visitorData) }
             webConfig = config
             config
         }
@@ -3518,6 +3621,10 @@ class InnerTubeMusicApi @Inject constructor(
             get() = name == "WEB_REMIX" || name == "WEB_EMBEDDED_PLAYER" || name == "MWEB"
         val needsPoToken: Boolean
             get() = name == "WEB_REMIX" || name == "WEB_EMBEDDED_PLAYER" || name == "MWEB" || name == "ANDROID_MUSIC" || name == "ANDROID"
+        /** TVHTML5 mints readable URLs only when the media URL carries a GVS
+         *  `pot=` token (the player body itself needs none). */
+        val needsGvsPoToken: Boolean
+            get() = needsPoToken || name == "TVHTML5"
         val origin = if (name == "WEB_REMIX") YOUTUBE_MUSIC_ORIGIN else YOUTUBE_ORIGIN
         val referer = when (name) {
             "WEB_REMIX" -> "$YOUTUBE_MUSIC_ORIGIN/"
@@ -3573,6 +3680,17 @@ class InnerTubeMusicApi @Inject constructor(
         const val HEDGED_CLIENT_STAGGER_DELAY_MS = 300L
         /** Per-client bound for the direct-URL fast path (single POST, no extras). */
         const val DIRECT_FAST_CLIENT_TIMEOUT_MS = 2_500L
+        /** Bound for the mandatory visitor-data bootstrap on the fast path.
+         *  VISIONOS/ANDROID_VR answer LOGIN_REQUIRED with zero formats when
+         *  visitor data is missing, so a resolve without it burns the whole
+         *  fast-path budget on guaranteed misses. */
+        const val VISITOR_BOOTSTRAP_BUDGET_MS = 1_500L
+        /** Cooldown before the fast path retries a failed visitor bootstrap. */
+        const val VISITOR_BOOTSTRAP_RETRY_COOLDOWN_MS = 60_000L
+        /** Bound for a warm PoToken mint on the fast path. The engine is
+         *  pre-warmed at startup, so a cache hit lands in milliseconds;
+         *  anything slower proceeds without a token. */
+        const val POTOKEN_FAST_BUDGET_MS = 1_000L
         /** Whole fast path must settle inside this budget before heavier stages run. */
         const val DIRECT_FAST_PATH_BUDGET_MS = 4_000L
         /** Whole-call cap for one player-API POST (connect + read + body). */

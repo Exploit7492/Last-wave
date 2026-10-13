@@ -19,14 +19,20 @@ fun qualityBadgeLabel(state: MusicPlayerState): String {
     if (spatial != null) return spatial
 
     val codec = state.audioCodec
-    val flacLike = isFlacLikeCodec(codec) || state.isLossless
+    val isLossy = !state.isLossless && (codec?.contains("kbps", ignoreCase = true) == true ||
+        codec?.contains("AAC", ignoreCase = true) == true ||
+        codec?.contains("MP3", ignoreCase = true) == true ||
+        codec?.contains("OPUS", ignoreCase = true) == true ||
+        codec?.equals("320k", ignoreCase = true) == true ||
+        codec?.equals("96k", ignoreCase = true) == true)
+    val flacLike = !isLossy && (isFlacLikeCodec(codec) || state.isLossless)
     val rate = state.samplingRateKHz ?: inferSamplingRate(state)
     // One shared rule for every surface: the song's depth, corrected only by
     // the fact that a rate above 48kHz is 24-bit in practice (see
     // resolveDepthForDisplay). The decoder's PCM encoding is never consulted.
-    val depth = resolveDepthForDisplay(state.bitDepth, rate)
+    val depth = if (isLossy) null else (resolveDepthForDisplay(state.bitDepth, rate)
         ?: inferBitDepth(state.copy(bitDepth = null), allowRateGuess = false)
-        ?: parseQualityFromCodec(codec)?.substringBefore('/')?.toIntOrNull()
+        ?: parseQualityFromCodec(codec)?.substringBefore('/')?.toIntOrNull())
 
     if (flacLike && depth != null && rate != null && rate > 0.0) {
         return "$depth/${formatSampleRateKHz(rate)}kHz"
@@ -44,8 +50,14 @@ fun qualityBadgeLabel(state: MusicPlayerState): String {
     }
 
     if (codec?.equals("MP3 320k", ignoreCase = true) == true) return "MP3 320 kbps"
+    if (codec?.equals("320 kbps", ignoreCase = true) == true || codec?.equals("320k", ignoreCase = true) == true) return "320 kbps"
+    if (codec?.equals("96 kbps", ignoreCase = true) == true || codec?.equals("96k", ignoreCase = true) == true) return "96 kbps"
+    if (codec != null && (codec.endsWith("kbps", ignoreCase = true) || codec.contains("kbps", ignoreCase = true))) return codec
     if (codec?.uppercase() in GENERIC_AUDIO_LABELS) return "AUDIO"
-    if (codec != null && state.bitrateKbps != null) return "${codec.uppercase()} ${state.bitrateKbps} kbps"
+    if (codec != null && state.bitrateKbps != null) {
+        val clean = codec.replace(Regex("""(?i)\s*\d+\s*k(?:bps)?"""), "").trim()
+        return if (clean.isNotBlank()) "${clean.uppercase()} ${state.bitrateKbps} kbps" else "${state.bitrateKbps} kbps"
+    }
     if (codec != null) return codec.uppercase()
     if (state.bitrateKbps != null) return "${state.bitrateKbps} kbps"
     return "AUDIO"

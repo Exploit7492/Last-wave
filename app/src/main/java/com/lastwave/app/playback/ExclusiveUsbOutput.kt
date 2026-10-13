@@ -814,6 +814,14 @@ class ExclusiveUsbOutput @Inject constructor(
         thread.start()
     }
 
+    /**
+     * Signal the writer thread to exit, drop queued PCM, and wait for it to
+     * finish. The join is unbounded on purpose: a timeout here is what let the
+     * old code release() the native context while the writer was still inside
+     * write() — a use-after-free. Callers MUST stop the native stream first
+     * (see [stopStreamLocked]) so a write() blocked on a full URB ring returns
+     * and this join is guaranteed to terminate.
+     */
     private fun stopWriterLocked() {
         writerStop = true
         synchronized(pcmLock) {
@@ -821,7 +829,7 @@ class ExclusiveUsbOutput @Inject constructor(
             queuedBytes = 0
             pcmLock.notifyAll()
         }
-        writer?.join(2_000)
+        writer?.join()
         writer = null
     }
 
@@ -864,11 +872,20 @@ class ExclusiveUsbOutput @Inject constructor(
     }
 
     private fun stopStreamLocked() {
+        val running = stream
+        // Stop the native stream FIRST. This flips running=false so a write()
+        // blocked on a full URB ring returns (the native reap loop wakes roughly
+        // every 200ms and breaks). Only then can stopWriterLocked()'s unbounded
+        // join() terminate — joining before stop() would always time out and
+        // leave the writer alive.
+        runCatching { running?.stop() }
         stopWriterLocked()
-        val running = stream ?: return
-        runCatching { running.stop() }
-        runCatching { running.drainUrbs() }
-        runCatching { running.release() }
+        // The writer thread is now guaranteed dead, so releasing native state is
+        // safe. Releasing it while the writer was still alive was a use-after-free.
+        if (running != null) {
+            runCatching { running.drainUrbs() }
+            runCatching { running.release() }
+        }
         stream = null
         active = false
     }

@@ -116,13 +116,6 @@ class FileExportHelper @Inject constructor(
             }
         }
 
-        // Automatic secondary local safety mirror
-        runCatching {
-            val backupDir = File(documentsDir(), "Backups").apply { if (!exists()) mkdirs() }
-            val autoBackup = File(backupDir, "latest-lastwave-backup.json")
-            autoBackup.writeText(content, Charsets.UTF_8)
-        }
-
         bytes.size.toLong()
     }
 

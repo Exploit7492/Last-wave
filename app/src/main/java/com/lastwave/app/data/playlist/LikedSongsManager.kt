@@ -43,6 +43,15 @@ class LikedSongsManager @Inject constructor(
                     .onSuccess { removed ->
                         if (removed > 0) android.util.Log.i("LikedSongsManager", "Healed $removed duplicate liked tracks")
                     }
+                // Older builds could bootstrap a second Liked Songs row when
+                // a playlist read briefly failed; each duplicate row then
+                // mirrored as its own YouTube playlist. Merge them into the
+                // one with the most tracks and delete the leftovers — the
+                // next sync pass sweeps their remote mirrors as orphans.
+                runCatching { collapseDuplicateLikedRows() }
+                    .onSuccess { removed ->
+                        if (removed > 0) android.util.Log.i("LikedSongsManager", "Collapsed $removed duplicate liked playlists")
+                    }
                 playlistRepository.changes.collect { refresh() }
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -116,6 +125,33 @@ class LikedSongsManager @Inject constructor(
     }
 
     /**
+     * One-time heal: collapses duplicate `liked`-mode rows into the one with
+     * the most tracks, merging every removed row's songs into the keeper and
+     * deleting the leftovers. A duplicate row's remote mirror is then swept
+     * as an orphan by the next sync pass. Best-effort — never throws.
+     *
+     * @return number of duplicate playlists collapsed.
+     */
+    private suspend fun collapseDuplicateLikedRows(): Int = mutationMutex.withLock {
+        val liked = try {
+            playlistRepository.getAll().filter { it.mode == LIKED_SONGS_MODE }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            android.util.Log.w("LikedSongsManager", "Duplicate liked-row heal skipped", error)
+            return@withLock 0
+        }
+        if (liked.size <= 1) return@withLock 0
+        val keeper = liked.maxBy { it.tracks.size }
+        val others = liked.filter { it.id != keeper.id }
+        val merged = (keeper.tracks + others.flatMap { it.tracks }).distinctSongs()
+        playlistRepository.replaceTracksForSync(keeper.id, merged, keeper.tracks)
+        others.forEach { duplicate -> playlistRepository.delete(duplicate.id) }
+        refresh()
+        others.size
+    }
+
+    /**
      * One-time heal: collapses pre-existing duplicates (same videoId or same
      * normalized title+artist) keeping the first occurrence. Best-effort —
      * never throws, so startup can safely invoke it.
@@ -139,7 +175,18 @@ class LikedSongsManager @Inject constructor(
     }
 
     private suspend fun refresh() {
-        _likedTrackKeys.value = playlistRepository.getLikedSongs()
+        // Runs after the mutation already landed: a failed read-back must
+        // neither fail the like nor blank the heart state, so keep the last
+        // known keys instead.
+        val liked = try {
+            playlistRepository.getLikedSongs()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            android.util.Log.w("LikedSongsManager", "Liked Songs refresh failed", error)
+            return
+        }
+        _likedTrackKeys.value = liked
             ?.tracks
             ?.mapTo(mutableSetOf()) { it.key }
             .orEmpty()

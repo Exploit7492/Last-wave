@@ -536,7 +536,15 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
 
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!promoteForPlayback()) return START_NOT_STICKY
+        // Promote to foreground only when playback is actually active. A
+        // pause/stop/no-op command must not force a media-playback FGS; when an
+        // action such as PLAY starts playback the state collector promotes the
+        // service on the isPlaying edge. If we do promote while active and the
+        // system refuses, bail with START_NOT_STICKY as before.
+        val state = musicPlayer.state.value
+        if (state.isPlaying || state.isBuffering) {
+            if (!promoteForPlayback()) return START_NOT_STICKY
+        }
         when (intent?.action) {
             Intent.ACTION_MEDIA_BUTTON -> androidx.media.session.MediaButtonReceiver.handleIntent(mediaSession, intent)
             MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH -> playCarSearch(
@@ -938,6 +946,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
 
     private fun publishNotification(state: MusicPlayerState, force: Boolean = false) {
         val track = state.current
+        val activelyPlaying = state.isPlaying || state.isBuffering
         if (track == null) {
             notificationSignature = ""
             if (isPlaybackForeground) {
@@ -948,7 +957,20 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
             return
         }
-        if (!isPlaybackForeground) {
+        // Paused/stopped with a track still loaded: release the foreground
+        // service privilege but keep the notification posted (DETACH), so a
+        // media-playback FGS isn't retained through an idle pause. The paused
+        // notification is still refreshed below via notify(), keeping transport
+        // controls; resume re-promotes the service on the isPlaying edge below.
+        if (!activelyPlaying && isPlaybackForeground) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_DETACH)
+            else @Suppress("DEPRECATION") stopForeground(true)
+            isPlaybackForeground = false
+        }
+        // Only startForeground() when there is something to play. While paused
+        // we stay detached (the notification remains from the DETACH above) and
+        // merely refresh it — we do not hold the FGS during idle.
+        if (!isPlaybackForeground && activelyPlaying) {
             if (!promoteForPlayback()) return
         }
         val signature = "${track.title}|${track.artist}|${track.album}|${state.isPlaying}|${state.isBuffering}|${state.shuffleEnabled}|${state.repeatMode}|$artworkUrl|${artworkBitmap != null}"

@@ -72,12 +72,11 @@ fun ModulesScreen(
     val busy by viewModel.busy.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
     val preferModules by viewModel.preferModules.collectAsStateWithLifecycle()
-    val addonUrl by viewModel.addonUrl.collectAsStateWithLifecycle()
-    val addonName by viewModel.addonName.collectAsStateWithLifecycle()
-    val addonEnabled by viewModel.addonEnabled.collectAsStateWithLifecycle()
-    val addonHealth by viewModel.addonHealth.collectAsStateWithLifecycle()
+    val httpAddons by viewModel.httpAddons.collectAsStateWithLifecycle()
+    val addonHealthMap by viewModel.addonHealthMap.collectAsStateWithLifecycle()
 
     var showAddonDialog by remember { mutableStateOf(false) }
+    var editingAddonId by remember { mutableStateOf<String?>(null) }
     var addonInputText by remember { mutableStateOf("") }
     val snackbar = remember { SnackbarHostState() }
 
@@ -97,7 +96,7 @@ fun ModulesScreen(
     if (showAddonDialog) {
         AlertDialog(
             onDismissRequest = { showAddonDialog = false },
-            title = { Text(if (addonUrl.isNullOrBlank()) "Add Streaming Addon" else "Edit Streaming Addon") },
+            title = { Text(if (editingAddonId == null) "Add Streaming Addon" else "Edit Streaming Addon") },
             text = {
                 Column {
                     Text(
@@ -121,12 +120,12 @@ fun ModulesScreen(
                     onClick = {
                         val toSave = addonInputText.trim()
                         if (toSave.isNotBlank()) {
-                            viewModel.saveAddon(toSave)
+                            viewModel.saveAddon(editingAddonId, toSave)
                             showAddonDialog = false
                         }
                     },
                 ) {
-                    Text("Connect")
+                    Text(if (editingAddonId == null) "Connect" else "Save")
                 }
             },
             dismissButton = {
@@ -155,140 +154,141 @@ fun ModulesScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            // --- Section 1: HTTP Addon ---
+            // --- Section 1: HTTP Addons ---
             item {
                 Text(
-                    "Streaming Addon",
+                    "Streaming Addons",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    "Take requests directly from a personal or community Addon service",
+                    "Take requests directly from personal or community Addon services. Multiple enabled addons query concurrently for the best audio stream.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
-            if (!addonUrl.isNullOrBlank()) {
-                item {
-                    Card(
-                        shape = RoundedCornerShape(20.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        ),
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    Icons.Filled.Cloud,
-                                    contentDescription = null,
-                                    tint = if (addonHealth is AddonHealth.Unreachable) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(28.dp),
-                                )
-                                Spacer(Modifier.width(14.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        addonName?.ifBlank { "HTTP Addon" } ?: "HTTP Addon",
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.titleMedium,
-                                    )
-                                    val masked = addonUrl?.let { url ->
-                                        if (url.length > 36) url.take(24) + "..." + url.takeLast(8) else url
-                                    }.orEmpty()
-                                    Text(
-                                        masked,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                Switch(
-                                    checked = addonEnabled,
-                                    onCheckedChange = viewModel::setAddonEnabled,
-                                )
-                            }
-
-                            Spacer(Modifier.height(8.dp))
-
-                            val statusText = when (val h = addonHealth) {
-                                is AddonHealth.Ok -> h.info ?: "Connected"
-                                is AddonHealth.Unreachable -> "Unreachable: ${h.reason}"
-                                is AddonHealth.Rejected -> "Rejected: ${h.reason}"
-                                null -> if (addonEnabled) "Enabled" else "Disabled"
-                            }
-                            val statusColor = when (addonHealth) {
-                                is AddonHealth.Ok -> MaterialTheme.colorScheme.primary
-                                is AddonHealth.Unreachable, is AddonHealth.Rejected -> MaterialTheme.colorScheme.error
-                                null -> MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
+            items(httpAddons, key = { it.id }) { addon ->
+                val health = addonHealthMap[addon.id]
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    ),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Filled.Cloud,
+                                contentDescription = null,
+                                tint = if (health is AddonHealth.Unreachable) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(28.dp),
+                            )
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
                                 Text(
-                                    statusText,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = statusColor,
-                                    modifier = Modifier.weight(1f),
+                                    addon.name.ifBlank { "HTTP Addon" },
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium,
                                 )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    IconButton(
-                                        onClick = { viewModel.testAddon() },
-                                        enabled = !busy,
-                                    ) {
-                                        Icon(Icons.Filled.Refresh, contentDescription = "Test connection")
-                                    }
-                                    IconButton(
-                                        onClick = {
-                                            addonInputText = addonUrl.orEmpty()
-                                            showAddonDialog = true
-                                        },
-                                    ) {
-                                        Icon(Icons.Filled.Edit, contentDescription = "Edit Addon URL")
-                                    }
-                                    IconButton(
-                                        onClick = { viewModel.removeAddon() },
-                                    ) {
-                                        Icon(Icons.Filled.Delete, contentDescription = "Remove Addon")
-                                    }
+                                val masked = if (addon.url.length > 36) addon.url.take(24) + "..." + addon.url.takeLast(8) else addon.url
+                                Text(
+                                    masked,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = addon.enabled,
+                                onCheckedChange = { viewModel.toggleAddon(addon.id, it) },
+                            )
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+
+                        val statusText = when (health) {
+                            is AddonHealth.Ok -> health.info ?: "Connected"
+                            is AddonHealth.Unreachable -> "Unreachable: ${health.reason}"
+                            is AddonHealth.Rejected -> "Rejected: ${health.reason}"
+                            null -> if (addon.enabled) "Enabled" else "Disabled"
+                        }
+                        val statusColor = when (health) {
+                            is AddonHealth.Ok -> MaterialTheme.colorScheme.primary
+                            is AddonHealth.Unreachable, is AddonHealth.Rejected -> MaterialTheme.colorScheme.error
+                            null -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(
+                                statusText,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = statusColor,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { viewModel.testAddon(addon.id) },
+                                    enabled = !busy,
+                                ) {
+                                    Icon(Icons.Filled.Refresh, contentDescription = "Test connection")
+                                }
+                                IconButton(
+                                    onClick = {
+                                        editingAddonId = addon.id
+                                        addonInputText = addon.url
+                                        showAddonDialog = true
+                                    },
+                                ) {
+                                    Icon(Icons.Filled.Edit, contentDescription = "Edit Addon URL")
+                                }
+                                IconButton(
+                                    onClick = { viewModel.removeAddon(addon.id) },
+                                ) {
+                                    Icon(Icons.Filled.Delete, contentDescription = "Remove Addon")
                                 }
                             }
                         }
                     }
                 }
-            } else {
-                item {
-                    Card(
-                        onClick = {
-                            addonInputText = ""
-                            showAddonDialog = true
-                        },
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                        modifier = Modifier.fillMaxWidth(),
+            }
+
+            item {
+                Card(
+                    onClick = {
+                        editingAddonId = null
+                        addonInputText = ""
+                        showAddonDialog = true
+                    },
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (httpAddons.isEmpty()) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp).fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp).fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Icons.Filled.Cloud, contentDescription = null)
-                            Spacer(Modifier.width(16.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    "Add Streaming Addon",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Text(
-                                    "Connect to your personal or custom Addon server URL",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
+                        Icon(if (httpAddons.isEmpty()) Icons.Filled.Cloud else Icons.Filled.Add, contentDescription = null)
+                        Spacer(Modifier.width(16.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Add Streaming Addon",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                if (httpAddons.isEmpty()) "Connect to your personal or custom Addon server URL" else "Add another concurrent streaming addon server",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                         }
                     }
                 }

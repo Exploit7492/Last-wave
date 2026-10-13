@@ -85,10 +85,16 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 }
             }
         }
-        runCatching { lastFmAuthCallback.capture(intent) }
-            .onFailure { android.util.Log.e(STARTUP_TAG, "Auth callback ignored during startup", it) }
-        handlePlaybackIntent(intent)
-        handleNavigationIntent(intent)
+        // Launch intents (play-from-search, shared/opened links, deep nav) must
+        // only be consumed on the first creation. On rotation or config-change
+        // recreation (savedInstanceState != null) re-running them would re-fire
+        // playback or re-navigate; subsequent intents arrive via onNewIntent.
+        if (savedInstanceState == null) {
+            runCatching { lastFmAuthCallback.capture(intent) }
+                .onFailure { android.util.Log.e(STARTUP_TAG, "Auth callback ignored during startup", it) }
+            handlePlaybackIntent(intent)
+            handleNavigationIntent(intent)
+        }
         runCatching {
             splashScreen?.setOnExitAnimationListener { provider ->
                 runCatching {

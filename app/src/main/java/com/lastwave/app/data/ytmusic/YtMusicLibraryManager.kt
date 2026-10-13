@@ -10,6 +10,7 @@ import com.lastwave.app.data.generate.youtubeVideoIdOrNull
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.music.YouTubeMusicTrack
 import com.lastwave.app.data.music.YouTubePlaylistSummary
+import com.lastwave.app.data.music.distinctPlaylistSongs
 import com.lastwave.app.data.playlist.PlaylistImportManager
 import com.lastwave.app.data.playlist.PlaylistRepository
 import com.lastwave.app.data.playlist.SavedPlaylist
@@ -365,7 +366,7 @@ class YtMusicLibraryManager @Inject constructor(
                 title = summary?.title?.takeIf { it.isNotBlank() } ?: "YouTube Playlist",
                 subtitle = "YouTube Music • Connected account",
                 mode = "youtube_remote",
-                tracks = partialSongs.map(YouTubeMusicTrack::toGeneratedTrack),
+                tracks = partialSongs.distinctPlaylistSongs().map(YouTubeMusicTrack::toGeneratedTrack),
                 createdAtMillis = 0L,
                 remotePlaylistId = remoteId,
                 remoteArtworkUrl = partialArtwork,
@@ -391,7 +392,7 @@ class YtMusicLibraryManager @Inject constructor(
             title = title,
             subtitle = "YouTube Music • Connected account",
             mode = "youtube_remote",
-            tracks = result.tracks.map(YouTubeMusicTrack::toGeneratedTrack),
+            tracks = result.tracks.distinctPlaylistSongs().map(YouTubeMusicTrack::toGeneratedTrack),
             createdAtMillis = 0L,
             remotePlaylistId = result.id,
             remoteArtworkUrl = artworkUrl,

@@ -10,19 +10,11 @@ import android.os.SystemClock
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 private const val TAG = "WidgetUpdater"
 private const val ART_FILE_NAME = "widget_now_playing_art.png"
-private const val TICK_INTERVAL_MS = 600L
 
 /**
  * Single-widget publisher: plain SharedPreferences + AppWidgetManager.
@@ -32,9 +24,9 @@ private const val TICK_INTERVAL_MS = 600L
  * MusicPlayer and LastWaveApplication keep compiling unchanged — but the
  * inside is dependency-free: no Glance, no Hilt, no theme repo.
  *
- * While playing, a light 600ms ticker re-pushes only the equalizer frame
- * and the live progress fraction (read off the MediaController, never
- * written to disk). It stops on pause/clear or when no widget is placed.
+ * The equalizer/progress live ticker was removed (audit #9): re-pushing
+ * every 600ms burned CPU/battery for a cosmetic progress bar. Pushes now
+ * happen only on discrete playback/metadata events.
  */
 object WidgetUpdater {
 
@@ -42,38 +34,15 @@ object WidgetUpdater {
     var animationFrame: Int = 0
         private set
 
-    private val tickerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
-    @Volatile
-    private var tickerJob: Job? = null
-
-    /** Starts the equalizer/progress ticker for active playback (idempotent). */
-    fun startWaveAnimation(context: Context) {
-        synchronized(this) {
-            if (tickerJob?.isActive == true) return
-            val app = context.applicationContext
-            tickerJob = tickerScope.launch {
-                while (isActive) {
-                    delay(TICK_INTERVAL_MS)
-                    animationFrame = (animationFrame + 1) % 3
-                    val snapshot = WidgetSnapshot.read(app)
-                    if (!snapshot.hasSession || !snapshot.isPlaying) {
-                        stopWaveAnimation()
-                        return@launch
-                    }
-                    val fraction = readLiveFraction(app, snapshot.progress)
-                    if (!pushAll(app, eqFrame = animationFrame, progressOverride = fraction)) break
-                }
-            }
-        }
+    // Live ticker removed (audit #9). The functions stay as no-ops so
+    // MusicPlaybackService / MusicPlayer callers keep compiling unchanged.
+    fun startWaveAnimation(@Suppress("UNUSED_PARAMETER") context: Context) {
+        // no-op
     }
 
-    /** Stops the equalizer/progress ticker. */
+    /** No-op: ticker removed. Kept for API compatibility. */
     fun stopWaveAnimation() {
-        synchronized(this) {
-            tickerJob?.cancel()
-            tickerJob = null
-        }
+        // no-op
     }
 
     // Snapshot write + widget push stay atomic: the playback service and
@@ -152,9 +121,9 @@ object WidgetUpdater {
     }
 
     /**
-     * Pushes the single widget to every placed id. Optional overrides drive
-     * the live ticker without touching disk. Returns false when nothing is
-     * placed (ticker stops itself then).
+     * Pushes the single widget to every placed id. Optional overrides let a
+     * caller render a specific frame/progress without touching disk. Returns
+     * false when nothing is placed.
      */
     private fun pushAll(context: Context, eqFrame: Int? = null, progressOverride: Float? = null): Boolean =
         runCatching {
@@ -162,12 +131,12 @@ object WidgetUpdater {
             val ids = manager.getAppWidgetIds(ComponentName(context, NowPlayingWidgetReceiver::class.java))
             for (appWidgetId in ids) {
                 val views = WidgetViews.build(context, appWidgetId, eqFrame, progressOverride)
-                runCatching { manager.updateAppWidget(appWidgetId, views) }
+                runCatching { manager.partiallyUpdateAppWidget(appWidgetId, views) }
             }
             val obsidianIds = manager.getAppWidgetIds(ComponentName(context, ObsidianGlassWidgetReceiver::class.java))
             for (appWidgetId in obsidianIds) {
                 val views = ObsidianWidgetViews.build(context, appWidgetId, eqFrame, progressOverride)
-                runCatching { manager.updateAppWidget(appWidgetId, views) }
+                runCatching { manager.partiallyUpdateAppWidget(appWidgetId, views) }
             }
             ids.isNotEmpty() || obsidianIds.isNotEmpty()
         }.onFailure { Log.w(TAG, "widget push failed", it) }.getOrDefault(false)
