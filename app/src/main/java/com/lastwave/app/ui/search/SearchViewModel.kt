@@ -48,6 +48,7 @@ class SearchViewModel @Inject constructor(
 
     private var debounceJob: Job? = null
     private var suggestionsJob: Job? = null
+    private var searchJob: Job? = null
     private var searchQueueJob: Job? = null
     private var lastIssuedQuery: String = ""
 
@@ -65,6 +66,7 @@ class SearchViewModel @Inject constructor(
         suggestionsJob?.cancel()
 
         if (query.isBlank()) {
+            searchJob?.cancel()
             _uiState.update {
                 it.copy(
                     status = SearchStatus.IDLE,
@@ -85,10 +87,10 @@ class SearchViewModel @Inject constructor(
             }
         }
 
-        // Full search results debounce (400ms)
+        // Full search results debounce (350ms)
         debounceJob = viewModelScope.launch {
-            delay(400)
-            runSearch(query, saveToHistory = false)
+            delay(350)
+            triggerSearch(query, saveToHistory = false)
         }
     }
 
@@ -106,7 +108,7 @@ class SearchViewModel @Inject constructor(
         if (q.isNotBlank()) {
             debounceJob?.cancel()
             suggestionsJob?.cancel()
-            viewModelScope.launch { runSearch(q, saveToHistory = false) }
+            triggerSearch(q, saveToHistory = false)
         }
     }
 
@@ -128,7 +130,14 @@ class SearchViewModel @Inject constructor(
                 isShowingSuggestions = false,
             )
         }
-        viewModelScope.launch { runSearch(trimmed, saveToHistory = true) }
+        triggerSearch(trimmed, saveToHistory = true)
+    }
+
+    private fun triggerSearch(query: String, saveToHistory: Boolean) {
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            runSearch(query, saveToHistory)
+        }
     }
 
     fun removeRecentSearch(query: String) {
@@ -188,7 +197,7 @@ class SearchViewModel @Inject constructor(
             val results = repository.search(tab, query)
             // Stale-response guard: discard if the user has typed something
             // new since this call was issued.
-            if (lastIssuedQuery != query || _uiState.value.query != query || _uiState.value.tab != tab) return
+            if (lastIssuedQuery != query || _uiState.value.query.trim() != query.trim() || _uiState.value.tab != tab) return
             _uiState.update {
                 it.copy(
                     status = if (results.isEmpty()) SearchStatus.EMPTY else SearchStatus.RESULTS,
@@ -196,7 +205,8 @@ class SearchViewModel @Inject constructor(
                 )
             }
         } catch (e: Exception) {
-            if (lastIssuedQuery != query || _uiState.value.query != query || _uiState.value.tab != tab) return
+            if (e is CancellationException) throw e
+            if (lastIssuedQuery != query || _uiState.value.query.trim() != query.trim() || _uiState.value.tab != tab) return
             _uiState.update { it.copy(status = SearchStatus.EMPTY, results = emptyList()) }
         }
     }
@@ -204,6 +214,7 @@ class SearchViewModel @Inject constructor(
     fun clearQuery() {
         debounceJob?.cancel()
         suggestionsJob?.cancel()
+        searchJob?.cancel()
         _uiState.update {
             it.copy(
                 query = "",

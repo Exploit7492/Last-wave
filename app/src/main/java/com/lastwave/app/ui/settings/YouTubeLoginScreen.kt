@@ -65,13 +65,18 @@ fun YouTubeLoginScreen(
     var loadProgressVisible by remember { mutableStateOf(true) }
     var webViewError by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
-        val cookies = readYouTubeCookies()
-        val hasSession = listOf("__Secure-3PAPISID=", "SAPISID=").any { token ->
-            cookies?.contains(token) == true
-        } && cookies?.contains("LOGIN_INFO=") == true
-        if (hasSession && !state.verifying && state.connectedName == null) {
-            viewModel.attemptConnect(cookies)
+    LaunchedEffect(state.connectedName, state.verifying) {
+        if (state.connectedName != null || state.verifying) return@LaunchedEffect
+        while (true) {
+            val cookies = readYouTubeCookies()
+            if (hasSessionTokens(cookies)) {
+                val current = viewModel.uiState.value
+                if (!current.verifying && current.connectedName == null) {
+                    viewModel.attemptConnect(cookies)
+                }
+                break
+            }
+            kotlinx.coroutines.delay(1_200L)
         }
     }
 
@@ -100,15 +105,33 @@ fun YouTubeLoginScreen(
                         @SuppressLint("SetJavaScriptEnabled")
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
+                        settings.databaseEnabled = true
                         // Google blocks the default WebView user agent on
-                        // accounts.google.com ("may not be secure"); a plain
-                        // Chrome UA signs in normally.
-                        settings.userAgentString =
-                            "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                        // accounts.google.com ("may not be secure"). Stripping
+                        // embedded WebView markers ("; wv" and "Version/X.X")
+                        // preserves the device's real Chrome engine version,
+                        // avoiding client-hint and security fingerprint mismatches.
+                        val defaultUa = settings.userAgentString
+                        val cleanUa = if (!defaultUa.isNullOrBlank()) {
+                            defaultUa.replace("; wv", "").replace(Regex("Version/\\d+\\.\\d+\\s*"), "")
+                        } else {
+                            "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                        }
+                        settings.userAgentString = cleanUa
                         CookieManager.getInstance().setAcceptCookie(true)
                         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
                         webViewClient = object : WebViewClient() {
+                            override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                                super.doUpdateVisitedHistory(view, url, isReload)
+                                val current = viewModel.uiState.value
+                                if (current.verifying || current.connectedName != null) return
+                                val cookies = readYouTubeCookies()
+                                if (hasSessionTokens(cookies)) {
+                                    viewModel.attemptConnect(cookies)
+                                }
+                            }
+
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 loadProgressVisible = false
@@ -116,10 +139,7 @@ fun YouTubeLoginScreen(
                                 val current = viewModel.uiState.value
                                 if (current.verifying || current.connectedName != null) return
                                 val cookies = readYouTubeCookies()
-                                val hasSession = listOf("__Secure-3PAPISID=", "SAPISID=").any { token ->
-                                    cookies?.contains(token) == true
-                                } && cookies?.contains("LOGIN_INFO=") == true
-                                if (hasSession && url?.startsWith("https://music.youtube.com") == true) {
+                                if (hasSessionTokens(cookies)) {
                                     viewModel.attemptConnect(cookies)
                                 }
                             }
@@ -272,10 +292,26 @@ fun YouTubeLoginScreen(
 }
 
 private const val LOGIN_URL =
-    "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmusic.youtube.com%2F&hl=en"
+    "https://accounts.google.com/ServiceLogin?service=youtube&uilel=3&passive=true&continue=https%3A%2F%2Fwww.youtube.com%2Fsignin%3Faction_handle_signin%3Dtrue%26app%3Ddesktop%26hl%3Den%26next%3Dhttps%253A%252F%252Fmusic.youtube.com%252F&hl=en"
+
+private fun hasSessionTokens(cookies: String?): Boolean {
+    if (cookies == null) return false
+    val hasSapisid = listOf("__Secure-3PAPISID=", "SAPISID=", "APISID=").any { cookies.contains(it) }
+    val hasSession = listOf("LOGIN_INFO=", "SID=", "__Secure-1PSID=", "SSID=").any { cookies.contains(it) }
+    return hasSapisid && hasSession
+}
 
 private fun readYouTubeCookies(): String? = try {
-    CookieManager.getInstance().getCookie("https://music.youtube.com")
+    val cm = CookieManager.getInstance()
+    cm.flush()
+    val domains = listOf(
+        "https://music.youtube.com",
+        "https://www.youtube.com",
+        "https://youtube.com",
+        "https://accounts.google.com",
+    )
+    val cookies = domains.mapNotNull { cm.getCookie(it)?.takeIf(String::isNotBlank) }
+    if (cookies.isEmpty()) null else cookies.distinct().joinToString("; ")
 } catch (error: Exception) {
     null
 } catch (error: LinkageError) {

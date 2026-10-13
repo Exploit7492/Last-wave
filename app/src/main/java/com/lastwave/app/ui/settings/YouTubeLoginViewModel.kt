@@ -44,8 +44,8 @@ class YouTubeLoginViewModel @Inject constructor(
         if (_uiState.value.verifying) return
         val cookies = rawCookieHeader.orEmpty()
         val hasSapisid = listOf("__Secure-3PAPISID=", "SAPISID=", "APISID=").any { it in cookies }
-        val hasLoginInfo = "LOGIN_INFO=" in cookies
-        if (!hasSapisid || !hasLoginInfo) {
+        val hasSession = listOf("LOGIN_INFO=", "SID=", "__Secure-1PSID=", "SSID=").any { it in cookies }
+        if (!hasSapisid || !hasSession) {
             _uiState.update {
                 it.copy(errorMessage = "Sign-in incomplete — finish signing in, then tap \"I'm signed in\".")
             }
