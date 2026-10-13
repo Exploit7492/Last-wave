@@ -14,10 +14,9 @@ class YtMusicLikeTest {
 
     @Test
     fun likeAndRemoveLikeUseTheAuthenticatedRateEndpoints() {
-        assertThat(InnerTubeMusicApi.LIKE_ENDPOINT).isEqualTo("like/like")
-        assertThat(InnerTubeMusicApi.REMOVE_LIKE_ENDPOINT).isEqualTo("like/removelike")
-        assertThat(InnerTubeMusicApi.LIKE_ENDPOINT)
-            .isNotEqualTo(InnerTubeMusicApi.REMOVE_LIKE_ENDPOINT)
+        assertThat(LIKE_ENDPOINT).isEqualTo("like/like")
+        assertThat(REMOVE_LIKE_ENDPOINT).isEqualTo("like/removelike")
+        assertThat(LIKE_ENDPOINT).isNotEqualTo(REMOVE_LIKE_ENDPOINT)
     }
 
     @Test
