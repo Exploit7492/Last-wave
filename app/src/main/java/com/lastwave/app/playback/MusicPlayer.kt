@@ -2362,6 +2362,7 @@ class MusicPlayer @Inject constructor(
             if (isCasting) castPlayback?.pause()
             if (playerDelegate.isInitialized()) player.pause()
             _state.update { it.copy(isPlaying = false, isBuffering = false) }
+            persistPlaybackSession()
         }
     }
 
@@ -7516,10 +7517,7 @@ class MusicPlayer @Inject constructor(
         val sourceQueue = snapshot.queue.ifEmpty {
             snapshot.current?.let(::listOf).orEmpty()
         }
-        if (sourceQueue.isEmpty()) {
-            clearPersistedPlaybackSession()
-            return
-        }
+        if (sourceQueue.isEmpty()) return
         val sourceIndex = snapshot.currentIndex.coerceIn(sourceQueue.indices)
         val startIndex = (sourceIndex - RESTORED_PREVIOUS_TRACKS).coerceAtLeast(0)
         val endIndex = minOf(sourceQueue.size, startIndex + MAX_PERSISTED_QUEUE_SIZE)
