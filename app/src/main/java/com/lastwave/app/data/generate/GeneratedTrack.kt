@@ -92,6 +92,8 @@ suspend fun List<GeneratedTrack>.pinnedWithVideoIds(
     map { track ->
         async {
             if (track.youtubeVideoIdOrNull() != null) return@async track
+            // Imported files play from disk; never swap them for a YouTube match.
+            if (track.isLocalFile()) return@async track
             if (track.name.isBlank()) return@async null
             limiter.withPermit {
                 try {
@@ -147,6 +149,68 @@ fun GeneratedTrack.youtubeVideoIdOrNull(): String? {
 }
 
 private val YOUTUBE_VIDEO_ID_REGEX = Regex("[A-Za-z0-9_-]{11}")
+
+/**
+ * Local songs: an imported audio file stores its absolute path in
+ * [GeneratedTrack.url]. Such rows play straight from disk and must never be
+ * re-pinned to a YouTube videoId, searched for, or mirrored to YouTube Music.
+ */
+fun GeneratedTrack.isLocalFile(): Boolean = isLocalAudioPath(url)
+
+fun isLocalAudioPath(url: String?): Boolean = url != null && url.startsWith("/")
+
+/**
+ * Formats Media3 1.2.1 (+ the bundled FFmpeg audio decoder) can open from a
+ * plain file. AIFF, APE, WMA, DSD and WavPack have no extractor in this
+ * version, so the importer skips and reports them instead of storing files
+ * that would fail at play time.
+ */
+object LocalAudioFormats {
+    private val MIME_BY_EXTENSION = mapOf(
+        "mp3" to "audio/mpeg",
+        "flac" to "audio/flac",
+        "wav" to "audio/wav",
+        "wave" to "audio/wav",
+        "ogg" to "audio/ogg",
+        "oga" to "audio/ogg",
+        "opus" to "audio/ogg",
+        "m4a" to "audio/mp4",
+        "m4b" to "audio/mp4",
+        "mp4" to "audio/mp4",
+        "alac" to "audio/mp4",
+        "aac" to "audio/aac",
+        "mka" to "audio/x-matroska",
+        "webm" to "audio/webm",
+        "amr" to "audio/amr",
+        "ac3" to "audio/ac3",
+    )
+
+    /** Audio-looking extensions we recognise but cannot play (reported as skipped). */
+    val UNSUPPORTED_AUDIO = setOf("aif", "aiff", "aifc", "ape", "wma", "dsf", "dff", "wv", "mpc", "tta", "mid", "midi")
+
+    val supportedExtensions: Set<String> get() = MIME_BY_EXTENSION.keys
+
+    fun extensionOf(name: String): String =
+        name.substringAfterLast('/').substringAfterLast('.', "").lowercase()
+
+    fun isSupported(name: String): Boolean = extensionOf(name) in MIME_BY_EXTENSION
+
+    fun mimeFor(name: String): String? = MIME_BY_EXTENSION[extensionOf(name)]
+
+    /**
+     * Path of a file copied by the Local songs importer, or null. Accepts the
+     * `file://` form too: a queue restored from Media3 carries the file URI.
+     */
+    fun importedPathOrNull(url: String?): String? {
+        val path = url?.removePrefix("file://") ?: return null
+        return path.takeIf { isLocalAudioPath(it) && it.contains("/$IMPORT_DIR/") }
+    }
+
+    const val IMPORT_DIR = "local_music"
+
+    /** Sidecar lyrics path for an imported file: same base name, `.lrc`. */
+    fun lrcPathFor(audioPath: String): String = audioPath.substringBeforeLast('.') + ".lrc"
+}
 
 /**
  * Last.fm's quirky "bare object instead of a 1-item array" behavior (seen

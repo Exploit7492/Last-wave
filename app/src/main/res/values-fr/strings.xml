@@ -258,6 +258,26 @@
     <string name="desc_shuffle">Aléatoire</string>
     <string name="desc_repeat">Répéter</string>
     <string name="desc_play_pause">Lire ou suspendre</string>
+    <!-- Local songs -->
+    <string name="local_add_to_playlist">Ajouter à une playlist</string>
+    <string name="local_panel_title">Morceaux de l\'appareil</string>
+    <string name="local_panel_hint">Choisis un dossier : chaque fichier MP3, FLAC, WAV, OGG/Opus, M4A/ALAC ou AAC qu\'il contient (sous-dossiers compris) est copié dans l\'app avec ses tags, sa pochette et ses paroles .lrc.</string>
+    <string name="local_no_folder">Aucun dossier choisi pour l\'instant.</string>
+    <string name="local_forget_folder">Oublier ce dossier (les morceaux copiés restent)</string>
+    <string name="local_choose_folder">Choisir un dossier</string>
+    <string name="local_rescan">Rescanner</string>
+    <string name="local_scanning">Recherche… %1$d fichiers trouvés</string>
+    <string name="local_copying">Copie %1$d/%2$d — %3$s</string>
+    <string name="local_report_space">Pas assez d\'espace libre pour copier ces morceaux.</string>
+    <string name="local_report_summary">%1$d ajoutés · %2$d mis à jour · %3$d inchangés</string>
+    <plurals name="local_report_unsupported">
+        <item quantity="one">%1$d fichier ignoré (format non pris en charge : %2$s)</item>
+        <item quantity="many">%1$d fichiers ignorés (format non pris en charge : %2$s)</item>
+        <item quantity="other">%1$d fichiers ignorés (format non pris en charge : %2$s)</item>
+    </plurals>
+    <string name="local_report_failed">%1$d fichier(s) n\'ont pas pu être copiés</string>
+    <string name="local_report_unreachable">%1$d dossier(s) inaccessible(s) — choisis-les à nouveau</string>
+    <string name="local_storage_used">Espace utilisé par les morceaux locaux : %1$s</string>
     <!-- Fork : sortie directe interne (contournement du mixer sans DAC USB) -->
     <string name="signal_label_internal">Sortie directe interne</string>
     <string name="signal_detail_internal_resampled">Sortie fixée à %2$d Hz — %1$d Hz rééchantillonné dans l\'app (libsoxr)</string>

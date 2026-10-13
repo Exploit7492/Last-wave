@@ -125,6 +125,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.playlist.LIKED_SONGS_MODE
+import com.lastwave.app.data.playlist.LOCAL_SONGS_MODE
+import com.lastwave.app.data.generate.isLocalFile
 import com.lastwave.app.data.playlist.SavedPlaylist
 import com.lastwave.app.data.playlist.isYouTubeOnly
 import com.lastwave.app.playback.toPlayableTrack
@@ -503,6 +505,11 @@ fun PlaylistDetailScreen(
                         ) {
                             Icon(Icons.Rounded.MyLocation, contentDescription = "Locate playing song", modifier = Modifier.size(22.dp))
                         }
+                    }
+
+                    if (playlist.mode == LOCAL_SONGS_MODE) {
+                        Spacer(Modifier.height(14.dp))
+                        LocalSongsPanel(trackCount = playlist.tracks.size)
                     }
 
                     Spacer(Modifier.height(18.dp))
@@ -1014,7 +1021,8 @@ fun PlaylistDetailScreen(
                                     overflowMenuOpen = false
                                 },
                             )
-                            DropdownMenuItem(
+                            val isLocalSongs = playlist.mode == LOCAL_SONGS_MODE
+                            if (!isLocalSongs) DropdownMenuItem(
                                 text = { Text("Download all songs") },
                                 leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
                                 onClick = {
@@ -1023,7 +1031,7 @@ fun PlaylistDetailScreen(
                                     overflowMenuOpen = false
                                 },
                             )
-                            DropdownMenuItem(
+                            if (!isLocalSongs) DropdownMenuItem(
                                 text = { Text("Cancel playlist downloads") },
                                 leadingIcon = { Icon(Icons.Filled.Close, contentDescription = null) },
                                 onClick = {
@@ -1042,7 +1050,7 @@ fun PlaylistDetailScreen(
                                     },
                                 )
                             } else {
-                                if (playlist.mode != LIKED_SONGS_MODE) {
+                                if (playlist.mode != LIKED_SONGS_MODE && !isLocalSongs) {
                                     DropdownMenuItem(
                                         text = {
                                             Text(
@@ -1094,7 +1102,7 @@ fun PlaylistDetailScreen(
                                     overflowMenuOpen = false
                                 },
                             )
-                            if (!playlist.isYouTubeOnly) {
+                            if (!playlist.isYouTubeOnly && !isLocalSongs) {
                                 val isSyncedToYt = syncedPlaylistIds == null || playlistId in (syncedPlaylistIds ?: emptySet())
                                 DropdownMenuItem(
                                     text = { Text(if (isSyncedToYt) "Syncing to YouTube Music" else "Sync to YouTube Music") },
@@ -1112,7 +1120,7 @@ fun PlaylistDetailScreen(
                                     },
                                 )
                             }
-                                DropdownMenuItem(
+                                if (!isLocalSongs) DropdownMenuItem(
                                     text = { Text("Delete playlist", color = MaterialTheme.colorScheme.error) },
                                     leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
                                     onClick = {
@@ -1288,6 +1296,8 @@ fun PlaylistDetailScreen(
         TrackContextMenuSheet(
             target = TrackMenuTarget.Track(track.name, track.artist, track.url),
             capabilities = TrackMenuCapabilities(showCopyActions = true, showDeleteScrobble = true),
+            // Keep the file path so menu actions play / add the local copy.
+            playableTrack = track.takeIf { it.isLocalFile() }?.toPlayableTrack(),
             playbackSourceLabel = playlist.title,
             onDismiss = { menuTarget = null },
             onRemoveFromPlaylist = {

@@ -239,7 +239,7 @@ private fun openUrl(context: Context, url: String) {
 
 private fun buildLastFmUrl(target: TrackMenuTarget): String {
     return when (target) {
-        is TrackMenuTarget.Track -> if (target.url.isNotBlank()) target.url else try {
+        is TrackMenuTarget.Track -> if (target.url.isNotBlank() && !target.url.startsWith("/")) target.url else try {
             "https://www.last.fm/music/${java.net.URLEncoder.encode(target.artist, "UTF-8")}/_/${java.net.URLEncoder.encode(target.name, "UTF-8")}"
         } catch (e: Exception) { "" }
         is TrackMenuTarget.Artist -> if (target.url.isNotBlank()) target.url else try {
@@ -472,8 +472,22 @@ fun TrackContextMenuSheet(
                     onPlayNext = { musicPlayer.playNext(playable); onDismiss() },
                     onAddToPlaylist = { addToPlaylist(playable); onDismiss() },
                 )
+                // Local songs: imported files get an explicit row.
+                val isLocalFile = com.lastwave.app.data.generate.LocalAudioFormats.importedPathOrNull(playable.playbackUrl) != null
                 val rows = buildList<@Composable (GroupPosition) -> Unit> {
                     val t = target
+                    if (isLocalFile) {
+                        add { pos ->
+                            MenuActionRow(
+                                Icons.Filled.PlaylistAdd,
+                                androidx.compose.ui.res.stringResource(com.lastwave.app.R.string.local_add_to_playlist),
+                                position = pos,
+                            ) {
+                                addToPlaylist(playable)
+                                onDismiss()
+                            }
+                        }
+                    }
                     if (resolvingGenre || !resolvedGenre.isNullOrBlank()) {
                         add { pos ->
                             val genre = resolvedGenre
@@ -511,7 +525,8 @@ fun TrackContextMenuSheet(
                     }
                     val downloadKey = com.lastwave.app.data.download.TrackDownloadManager.makeDownloadKey(t.name, t.artist)
                     val isDownloading = activeDownloads[downloadKey]?.let { !it.isFinished } == true
-                    add { pos ->
+                    // The file is already on the device; no streaming download.
+                    if (!isLocalFile) add { pos ->
                         when {
                             isDownloaded -> {
                                 MenuActionRow(Icons.Filled.CheckCircle, "Downloaded", position = pos) {

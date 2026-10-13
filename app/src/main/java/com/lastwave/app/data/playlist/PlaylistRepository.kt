@@ -5,6 +5,7 @@ import androidx.compose.runtime.Immutable
 import com.lastwave.app.data.local.db.SavedPlaylistDao
 import com.lastwave.app.data.local.db.SavedPlaylistEntity
 import com.lastwave.app.data.generate.GeneratedTrack
+import com.lastwave.app.data.generate.isLocalFile
 import com.lastwave.app.data.generate.StoredTrack
 import com.lastwave.app.data.generate.pinnedWithVideoIds
 import com.lastwave.app.data.generate.sameSongAs
@@ -64,6 +65,9 @@ private const val STARTUP_SYNC_WAIT_MS = 2_000L
 private const val TAG = "PlaylistRepository"
 const val LIKED_SONGS_MODE = "liked"
 const val LIKED_SONGS_TITLE = "Liked Songs"
+/** Built-in playlist holding audio files imported from the device. */
+const val LOCAL_SONGS_MODE = "local"
+const val LOCAL_SONGS_TITLE = "Local songs"
 
 @Singleton
 class PlaylistRepository @Inject constructor(
@@ -113,12 +117,15 @@ class PlaylistRepository @Inject constructor(
 
     private val videoIdBackfillOnce = AtomicBoolean(false)
 
+    private fun GeneratedTrack.needsVideoIdBackfill(): Boolean =
+        !isLocalFile() && youtubeVideoIdOrNull() == null && name.isNotBlank()
+
     /** One-shot per process: pins ids for rows saved before list-time pinning
      *  existed, then persists them so the work never repeats. Fire-and-forget
      *  on [exportScope]; playback never waits on it. */
     private fun backfillMissingVideoIdsOnce(loaded: List<SavedPlaylist>) {
         if (loaded.none { playlist ->
-            playlist.tracks.any { it.youtubeVideoIdOrNull() == null && it.name.isNotBlank() }
+            playlist.tracks.any { it.needsVideoIdBackfill() }
         }) return
         if (!videoIdBackfillOnce.compareAndSet(false, true)) return
         exportScope.launch {
@@ -126,7 +133,7 @@ class PlaylistRepository @Inject constructor(
                 var changed = false
                 for (entity in dao.getAll()) {
                     val domain = runCatching { entity.toDomain() }.getOrNull() ?: continue
-                    if (domain.tracks.none { it.youtubeVideoIdOrNull() == null && it.name.isNotBlank() }) continue
+                    if (domain.tracks.none { it.needsVideoIdBackfill() }) continue
                     val pinned = domain.tracks.pinnedWithVideoIds(innerTube)
                     if (pinned.size == domain.tracks.size &&
                         pinned.zip(domain.tracks).all { (newTrack, oldTrack) -> newTrack.url == oldTrack.url }
@@ -325,7 +332,8 @@ class PlaylistRepository @Inject constructor(
             val playlist = entity.toDomain()
             if (playlist.mode != "custom" && playlist.mode != LIKED_SONGS_MODE) return@withLock playlist
             if ((playlist.mode == LIKED_SONGS_MODE || !allowDuplicate) && playlist.tracks.any { it.sameSongAs(track) }) return@withLock playlist
-            if (track.youtubeVideoIdOrNull() == null && !innerTube.isPlayable(track.name, track.artist)) return@withLock playlist
+            // An imported file is playable by definition (it is on disk).
+            if (!track.isLocalFile() && track.youtubeVideoIdOrNull() == null && !innerTube.isPlayable(track.name, track.artist)) return@withLock playlist
             val updatedTracksJson = json.encodeToString((playlist.tracks + track).map { it.toStored() })
             val updated = entity.copy(tracksJson = updatedTracksJson)
             dao.upsert(updated)
@@ -368,6 +376,47 @@ class PlaylistRepository @Inject constructor(
                 add(toIndex, removeAt(fromIndex))
             }
             val updated = entity.copy(tracksJson = json.encodeToString(updatedTracks.map { it.toStored() }))
+            dao.upsert(updated)
+            syncPublicMirror()
+            _changes.tryEmit(Unit)
+            updated.toDomain()
+        }
+    }
+
+    suspend fun getLocalSongs(): SavedPlaylist? =
+        getAll().firstOrNull { it.mode == LOCAL_SONGS_MODE }
+
+    /** Creates the built-in "Local songs" playlist (pinned) when absent. */
+    suspend fun ensureLocalSongs(): SavedPlaylist = likedSongsMutex.withLock {
+        getLocalSongs()?.let { return@withLock it }
+        val created = save(
+            title = LOCAL_SONGS_TITLE,
+            subtitle = "Audio files imported from this device",
+            mode = LOCAL_SONGS_MODE,
+            tracks = emptyList(),
+        )
+        setPinned(created.id, true) ?: created.copy(isPinned = true)
+    }
+
+    /**
+     * Merges an import pass into "Local songs" under [saveMutex], so a
+     * removal made in the UI while a scan runs is never overwritten. Rows
+     * whose file path is in [updates] get the fresh metadata; [additions]
+     * not already present (by path) are appended in order.
+     */
+    suspend fun mergeLocalSongs(
+        updates: Map<String, GeneratedTrack>,
+        additions: List<GeneratedTrack>,
+    ): SavedPlaylist? {
+        val target = ensureLocalSongs()
+        return saveMutex.withLock {
+            val entity = dao.getById(target.id) ?: return@withLock null
+            val current = entity.toDomain().tracks
+            val present = current.mapTo(mutableSetOf()) { it.url }
+            val merged = current.map { updates[it.url] ?: it } +
+                additions.filter { present.add(it.url) }
+            if (merged == current) return@withLock entity.toDomain()
+            val updated = entity.copy(tracksJson = json.encodeToString(merged.map { it.toStored() }))
             dao.upsert(updated)
             syncPublicMirror()
             _changes.tryEmit(Unit)

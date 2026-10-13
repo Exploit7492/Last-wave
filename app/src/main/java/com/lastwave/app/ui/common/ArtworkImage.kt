@@ -63,7 +63,12 @@ fun ArtworkImage(
     var embeddedFailed by remember(name, artist, embeddedUrl) { mutableStateOf(false) }
     var refreshRequested by remember(key) { mutableStateOf(false) }
 
-    LaunchedEffect(key, resolvedFailed) {
+    // Local songs: a cover extracted from the user's own file wins
+    // over any online lookup, and no lookup is started for it.
+    val localCover = embeddedUrl?.startsWith("file://") == true && !embeddedFailed
+
+    LaunchedEffect(key, resolvedFailed, localCover) {
+        if (localCover) return@LaunchedEffect
         if (resolvedFailed && !refreshRequested) {
             refreshRequested = true
             artworkViewModel.refresh(name, artist)
@@ -77,7 +82,9 @@ fun ArtworkImage(
 
     // High-resolution master artwork from Spotify -> Apple Music -> Tidal -> Deezer takes priority.
     // While resolving in background, embeddedUrl (upscaled) is shown seamlessly.
-    val displayUrl = if (useHighRes) {
+    val displayUrl = if (localCover) {
+        embeddedUrl
+    } else if (useHighRes) {
         highResUrl
     } else if (ArtworkNormalizer.isRealImage(embeddedUrl) && !embeddedFailed) {
         ArtworkNormalizer.upscaleYoutubeArtwork(embeddedUrl)
@@ -102,7 +109,9 @@ fun ArtworkImage(
                 alignment = alignment,
                 modifier = Modifier.fillMaxSize(),
                 onError = {
-                    if (useHighRes) {
+                    if (localCover) {
+                        embeddedFailed = true
+                    } else if (useHighRes) {
                         resolvedFailed = true
                     } else {
                         embeddedFailed = true

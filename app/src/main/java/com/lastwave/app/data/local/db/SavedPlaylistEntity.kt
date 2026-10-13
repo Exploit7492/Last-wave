@@ -58,7 +58,7 @@ interface SavedPlaylistDao {
     @Query("SELECT COUNT(*) FROM saved_playlists")
     suspend fun count(): Int
 
-    @Query("SELECT id FROM saved_playlists WHERE mode NOT IN ('custom', 'liked') AND isPinned = 0 ORDER BY createdAtMillis DESC")
+    @Query("SELECT id FROM saved_playlists WHERE mode NOT IN ('custom', 'liked', 'local') AND isPinned = 0 ORDER BY createdAtMillis DESC")
     suspend fun getUnpinnedGeneratedIds(): List<Long>
 
     /** Keeps pinned/generated playlists plus the newest [max] unpinned ones. */

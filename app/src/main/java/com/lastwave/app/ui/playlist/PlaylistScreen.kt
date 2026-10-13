@@ -742,7 +742,8 @@ private fun PlaylistCard(
                         leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
                         onClick = { onTogglePin(); menuExpanded = false },
                     )
-                    DropdownMenuItem(
+                    val isLocalSongs = playlist.mode == com.lastwave.app.data.playlist.LOCAL_SONGS_MODE
+                    if (!isLocalSongs) DropdownMenuItem(
                         text = { Text("Download all songs") },
                         leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
                         onClick = { onDownload(); menuExpanded = false },
@@ -754,7 +755,7 @@ private fun PlaylistCard(
                             onClick = { onMakeLocal(); menuExpanded = false },
                         )
                     } else {
-                        if (playlist.mode != LIKED_SONGS_MODE) {
+                        if (playlist.mode != LIKED_SONGS_MODE && !isLocalSongs) {
                             DropdownMenuItem(
                                 text = { Text(if (isRegenerating) "Regenerating…" else "Regenerate") },
                                 leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
@@ -782,7 +783,7 @@ private fun PlaylistCard(
                             onClick = { onExport(); menuExpanded = false },
                         )
                     }
-                    DropdownMenuItem(
+                    if (!isLocalSongs) DropdownMenuItem(
                         text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                         leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
                         onClick = { onDelete(); menuExpanded = false },

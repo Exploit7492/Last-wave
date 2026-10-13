@@ -106,8 +106,30 @@ class LyricsRepository @Inject constructor(
         wordByWord: Boolean = true,
         videoId: String? = null,
         isrc: String? = null,
+        /** Local songs: `.lrc` imported next to the audio file; wins over every provider. */
+        localLrcPath: String? = null,
         onPartialResult: suspend (LyricsResult.Success) -> Unit = {},
     ): LyricsResult = withContext(Dispatchers.Default) {
+        if (!localLrcPath.isNullOrBlank()) {
+            val lrc = runCatching {
+                java.io.File(localLrcPath).takeIf { it.isFile && it.length() > 0 }?.readText()
+            }.getOrNull()
+            if (!lrc.isNullOrBlank()) {
+                val lines = parseLrc(lrc)
+                val result = if (lines.isNotEmpty()) {
+                    LyricsResult.Success(
+                        lines = lines,
+                        isSynced = true,
+                        isWordSynced = lines.any { it.hasSyllables },
+                        source = "Local LRC",
+                    )
+                } else {
+                    LyricsResult.Success(lines = emptyList(), isSynced = false, plainLyrics = lrc.trim(), source = "Local LRC")
+                }
+                return@withContext result
+            }
+        }
+
         // User-chosen provider order: tried first, automatic fallback to the
         // rest when it returns nothing. Part of the cache key so switching
         // providers never serves the previous provider's result.

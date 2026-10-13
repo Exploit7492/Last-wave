@@ -78,6 +78,7 @@ class PlaylistViewModel @Inject constructor(
     private val trackDownloadManager: com.lastwave.app.data.download.TrackDownloadManager,
     private val innerTubeApi: com.lastwave.app.data.music.InnerTubeMusicApi,
     private val routeNavigator: com.lastwave.app.ui.navigation.AppRouteNavigator,
+    private val localMusicLibrary: com.lastwave.app.data.localmusic.LocalMusicLibrary,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlaylistUiState())
@@ -159,7 +160,13 @@ class PlaylistViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             val local = try {
-                playlistRepository.getAll()
+                // The built-in "Local songs" playlist is always present.
+                playlistRepository.getAll().let { all ->
+                    if (all.any { it.mode == com.lastwave.app.data.playlist.LOCAL_SONGS_MODE }) all
+                    else runCatching { playlistRepository.ensureLocalSongs() }
+                        .map { playlistRepository.getAll() }
+                        .getOrDefault(all)
+                }
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (e: Exception) {
@@ -403,7 +410,10 @@ class PlaylistViewModel @Inject constructor(
                     toastMessage = if (removed || playlistId >= 0L) "Song removed from playlist" else "Couldn't remove song",
                 )
             }
-            if (playlistId >= 0L) load()
+            if (playlistId >= 0L) {
+                load()
+                localMusicLibrary.cleanupOrphansAsync()
+            }
         }
     }
 
@@ -473,6 +483,7 @@ class PlaylistViewModel @Inject constructor(
             }
             if (id >= 0L) {
                 playlistRepository.delete(id)
+                localMusicLibrary.cleanupOrphansAsync()
             }
             _uiState.update { it.copy(deleteConfirmForPlaylistId = null) }
             load()
@@ -498,6 +509,7 @@ class PlaylistViewModel @Inject constructor(
                     playlistRepository.delete(id)
                 }
             }
+            localMusicLibrary.cleanupOrphansAsync()
             load()
         }
     }
@@ -574,7 +586,8 @@ class PlaylistViewModel @Inject constructor(
             var queued = 0
             var skipped = 0
             for (track in tracks) {
-                if (track.name.isBlank()) {
+                // Imported files are already on the device.
+                if (track.name.isBlank() || com.lastwave.app.data.generate.isLocalAudioPath(track.url)) {
                     skipped++
                     continue
                 }
