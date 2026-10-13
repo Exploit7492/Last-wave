@@ -21,6 +21,7 @@ import com.lastwave.app.playback.PlayableTrack
 import com.lastwave.app.data.ytmusic.YtMusicAuthManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.combine
@@ -55,10 +56,14 @@ class FeedViewModel @Inject constructor(
     private val innerTube: InnerTubeMusicApi,
     private val ytAuth: YtMusicAuthManager,
     private val homeRepository: com.lastwave.app.data.repository.HomeRepository,
+    private val discoverRepository: com.lastwave.app.data.discover.DiscoverRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FeedUiState())
     val uiState: StateFlow<FeedUiState> = _uiState.asStateFlow()
+    private val _discoveryTracks = MutableStateFlow<List<GeneratedTrack>>(emptyList())
+    val discoveryTracks: StateFlow<List<GeneratedTrack>> = _discoveryTracks.asStateFlow()
+
     /** Ids of Home sections the user hid in Settings → Home sections. */
     val hiddenHomeSections: StateFlow<Set<String>> = settingsPreferences.settings
         .map { it.hiddenHomeSections }
@@ -68,6 +73,7 @@ class FeedViewModel @Inject constructor(
     private var lastLoadedMillis: Long = 0L
 
     init {
+        loadDiscovery()
         viewModelScope.launch {
             ytAuth.awaitLoadedConnection()
             combine(ytAuth.connection, sessionPreferences.session) { connection, session ->
@@ -91,9 +97,24 @@ class FeedViewModel @Inject constructor(
         }
     }
 
+    fun loadDiscovery() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val cached = discoverRepository.allowedCachedFeed()
+                val tracks = if (cached.isNotEmpty()) cached.take(8) else discoverRepository.nextBatch(8)
+                _discoveryTracks.value = tracks
+            } catch (_: Exception) {
+                // Non-destructive fallback if offline/failed
+            }
+        }
+    }
+
     fun loadFeed() = fetchFeed(refreshing = false)
 
-    fun refresh() = fetchFeed(refreshing = true)
+    fun refresh() {
+        loadDiscovery()
+        fetchFeed(refreshing = true)
+    }
 
     fun onVisible() {
         if (feedJob?.isActive == true) return

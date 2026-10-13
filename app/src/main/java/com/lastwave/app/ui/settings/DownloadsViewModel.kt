@@ -71,6 +71,39 @@ data class DownloadedAlbum(
     val totalDurationMs: Long,
 )
 
+enum class SongSortOption(val id: String, val label: String) {
+    RECENT("recent", "Recently Added"),
+    OLDEST("oldest", "Oldest First"),
+    TITLE_AZ("title_az", "Title (A-Z)"),
+    ARTIST_AZ("artist_az", "Artist (A-Z)"),
+    SIZE_DESC("size_desc", "File Size");
+
+    companion object {
+        fun fromId(id: String?): SongSortOption = entries.firstOrNull { it.id == id } ?: RECENT
+    }
+}
+
+enum class ArtistSortOption(val id: String, val label: String) {
+    NAME_AZ("name_az", "Name (A-Z)"),
+    MOST_SONGS("most_songs", "Most Songs"),
+    STORAGE_SIZE("storage_size", "Storage Size");
+
+    companion object {
+        fun fromId(id: String?): ArtistSortOption = entries.firstOrNull { it.id == id } ?: NAME_AZ
+    }
+}
+
+enum class AlbumSortOption(val id: String, val label: String) {
+    TITLE_AZ("title_az", "Title (A-Z)"),
+    ARTIST_AZ("artist_az", "Artist (A-Z)"),
+    MOST_TRACKS("most_tracks", "Most Tracks"),
+    RECENT("recent", "Recently Added");
+
+    companion object {
+        fun fromId(id: String?): AlbumSortOption = entries.firstOrNull { it.id == id } ?: TITLE_AZ
+    }
+}
+
 @HiltViewModel
 class DownloadsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -201,6 +234,36 @@ class DownloadsViewModel @Inject constructor(
                 true,
             )
 
+    val songSort: StateFlow<SongSortOption> =
+        settingsPreferences.settings
+            .map { SongSortOption.fromId(it.downloadSongSort) }
+            .withDownloadsFallback(SongSortOption.RECENT)
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                SongSortOption.RECENT,
+            )
+
+    val artistSort: StateFlow<ArtistSortOption> =
+        settingsPreferences.settings
+            .map { ArtistSortOption.fromId(it.downloadArtistSort) }
+            .withDownloadsFallback(ArtistSortOption.NAME_AZ)
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                ArtistSortOption.NAME_AZ,
+            )
+
+    val albumSort: StateFlow<AlbumSortOption> =
+        settingsPreferences.settings
+            .map { AlbumSortOption.fromId(it.downloadAlbumSort) }
+            .withDownloadsFallback(AlbumSortOption.TITLE_AZ)
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                AlbumSortOption.TITLE_AZ,
+            )
+
     val downloadFolder: StateFlow<String> =
         settingsPreferences.settings
             .map { it.downloadFolder }
@@ -309,6 +372,24 @@ class DownloadsViewModel @Inject constructor(
     fun setDownloadLyrics(enabled: Boolean) {
         launchDownloadAction("toggle download lyrics") {
             settingsPreferences.setDownloadLyrics(enabled)
+        }
+    }
+
+    fun setSongSort(option: SongSortOption) {
+        launchDownloadAction("update song sort") {
+            settingsPreferences.setDownloadSongSort(option.id)
+        }
+    }
+
+    fun setArtistSort(option: ArtistSortOption) {
+        launchDownloadAction("update artist sort") {
+            settingsPreferences.setDownloadArtistSort(option.id)
+        }
+    }
+
+    fun setAlbumSort(option: AlbumSortOption) {
+        launchDownloadAction("update album sort") {
+            settingsPreferences.setDownloadAlbumSort(option.id)
         }
     }
 

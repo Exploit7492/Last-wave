@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Usb
+import androidx.compose.material.icons.filled.SpeakerPhone
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Waves
@@ -225,6 +226,39 @@ object SettingsSearchIndex {
                     icon = Icons.Filled.Usb,
                     iconContainer = { MaterialTheme.colorScheme.primaryContainer },
                     iconTint = { MaterialTheme.colorScheme.onPrimaryContainer },
+                    parentTab = SettingsTab.AUDIO,
+                    section = "Output & Loudness",
+                    type = EntryType.TOGGLE,
+                )
+            )
+            add(
+                SettingsEntry(
+                    id = "audio.internal_direct",
+                    title = "Internal direct output",
+                    subtitle = "Bypass the Android mixer on the speaker / jack without a USB DAC",
+                    keywords = listOf(
+                        "direct", "mixer", "bypass", "hires direct", "uapp", "aaudio", "mmap",
+                        "exclusive", "sortie directe", "interne", "contourner", "speaker", "jack",
+                    ),
+                    icon = Icons.Filled.SpeakerPhone,
+                    iconContainer = { MaterialTheme.colorScheme.tertiaryContainer },
+                    iconTint = { MaterialTheme.colorScheme.onTertiaryContainer },
+                    parentTab = SettingsTab.AUDIO,
+                    section = "Output & Loudness",
+                    type = EntryType.TOGGLE,
+                )
+            )
+            add(
+                SettingsEntry(
+                    id = "audio.force_software_volume",
+                    title = "Software volume (USB DAC)",
+                    subtitle = "Scale volume in the app instead of the DAC's hardware volume",
+                    keywords = listOf(
+                        "volume", "software volume", "hardware volume", "dac", "logiciel", "matériel",
+                    ),
+                    icon = Icons.Filled.VolumeUp,
+                    iconContainer = { MaterialTheme.colorScheme.secondaryContainer },
+                    iconTint = { MaterialTheme.colorScheme.onSecondaryContainer },
                     parentTab = SettingsTab.AUDIO,
                     section = "Output & Loudness",
                     type = EntryType.TOGGLE,

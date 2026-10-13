@@ -3,6 +3,7 @@
 package com.lastwave.app.ui.player
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.BitmapDrawable
@@ -3357,6 +3358,9 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             iconSize = if (isTranslucent) 19.dp else 20.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
         )
+        val modeBitPerfect = stringResource(com.lastwave.app.R.string.badge_mode_bit_perfect)
+        val modeDirect = stringResource(com.lastwave.app.R.string.badge_mode_direct)
+        val modeMixer = stringResource(com.lastwave.app.R.string.badge_mode_mixer)
         val pillLabel = remember(
             state.audioCodec,
             state.bitrateKbps,
@@ -3365,13 +3369,29 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             state.isLossless,
             signalPath.clockFallbackResampled,
             signalPath.appRateHz,
+            signalPath.bitPerfect,
+            signalPath.internalDirectActive,
+            signalPath.usbExclusiveActive,
+            signalPath.bypassRequested,
+            signalPath.internalSession,
+            modeBitPerfect,
         ) {
             val base = qualityBadgeLabel(state)
-            if (signalPath.clockFallbackResampled && signalPath.appRateHz > 0) {
+            val withRate = if (signalPath.clockFallbackResampled && signalPath.appRateHz > 0) {
                 "$base → ${formatSampleRateKHz(signalPath.appRateHz.toDouble())}k"
             } else {
                 base
             }
+            // Fork: say which path the audio actually takes. "Mixer" only when the
+            // user asked for a bypass that is not happening, so it is never noise.
+            val mode = when {
+                signalPath.bitPerfect -> modeBitPerfect
+                signalPath.internalDirectActive && signalPath.internalSession?.directVerified == false -> "$modeDirect?"
+                signalPath.internalDirectActive -> modeDirect
+                signalPath.bypassRequested && !signalPath.usbExclusiveActive -> modeMixer
+                else -> null
+            }
+            if (mode != null) "$withRate · $mode" else withRate
         }
         val isSpatialPill = remember(state.audioCodec) { isSpatialAudioCodec(state.audioCodec) }
         // Atmos gets its own spatial logo — HQ badge is only for lossless, never for spatial.
@@ -3385,15 +3405,23 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             state.isLossless -> "Lossless quality"
             else -> "Audio quality"
         }
+        val pillHaptics = LocalHapticFeedback.current
         Surface(
             shape = RoundedCornerShape(24.dp),
             color = liquidGlassContainerColor(qualityButtonBackground),
             contentColor = qualityButtonContent,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
-            onClick = { showSignalPath = true },
             modifier = Modifier.weight(1.8f).height(if (isTranslucent) 44.dp else 48.dp)
-                .liquidGlassChrome(RoundedCornerShape(24.dp), LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls),
+                .liquidGlassChrome(RoundedCornerShape(24.dp), LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls)
+                .clip(RoundedCornerShape(24.dp))
+                .combinedClickable(
+                    onClick = { showSignalPath = true },
+                    onLongClick = {
+                        pillHaptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        showSignalPath = true
+                    },
+                ),
         ) {
             Row(
                 Modifier.fillMaxSize().padding(horizontal = 10.dp),
@@ -3431,6 +3459,7 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
                     textAlign = TextAlign.Center,
                     color = when {
                         signalPath.bitPerfect -> Color(0xFFE6C15A)
+                        signalPath.directToHal -> Color(0xFF7FD3C3)
                         signalPath.clockFallbackResampled -> Color(0xFFFFB74D)
                         isTranslucent -> Color.White.copy(alpha = 0.95f)
                         else -> Color.Unspecified
@@ -3466,11 +3495,17 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
     }
     if (showSignalPath) {
         val dac = usbDac.dac
+        val internalAvailability by player.internalDirectAvailability.collectAsStateWithLifecycle()
+        LaunchedEffect(Unit) { player.refreshInternalDirectAvailability() }
         SignalPathDialog(
             report = signalPath,
             needsUsbPermission = dac != null && dac.hasUsbPeripheral && !dac.usbPermissionGranted,
             onRequestUsbAccess = player::requestUsbPermission,
             onDismiss = { showSignalPath = false },
+            internalAvailability = internalAvailability,
+            internalEnabled = player.isInternalDirectPrefEnabled,
+            internalUnderruns = if (signalPath.internalDirectActive) player.internalDirectUnderruns() else null,
+            usbDiagnostic = if (dac != null) player::usbDiagnosticReport else null,
         )
     }
 }
