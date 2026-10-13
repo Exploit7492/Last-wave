@@ -488,6 +488,21 @@ class YtMusicLibraryManager @Inject constructor(
         added
     }
 
+    /**
+     * Mirrors a like/unlike from the player onto the connected YouTube Music
+     * account. Best effort by design: a failure returns false for the caller
+     * to surface, never to undo the local like.
+     *
+     * Returns true — explicitly not a failure — when there is nothing to
+     * mirror: no account connected, or the track carries no YouTube videoId
+     * (an imported local file). Those cases must not read as errors.
+     */
+    suspend fun mirrorLikeToYouTube(track: GeneratedTrack, loved: Boolean): Boolean {
+        if (!auth.connection.value.isConnected) return true
+        val videoId = track.youtubeVideoIdOrNull() ?: return true
+        return if (loved) innerTube.likeVideo(videoId) else innerTube.removeVideoLike(videoId)
+    }
+
     suspend fun findDuplicatePlaylistIds(
         localIds: Set<Long>,
         track: GeneratedTrack,

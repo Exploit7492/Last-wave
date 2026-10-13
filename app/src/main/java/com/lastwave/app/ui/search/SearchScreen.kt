@@ -186,6 +186,14 @@ fun SearchScreen(
                                 focusManager.clearFocus()
                                 viewModel.searchNow()
                             },
+                            onDone = {
+                                focusManager.clearFocus()
+                                viewModel.searchNow()
+                            },
+                            onGo = {
+                                focusManager.clearFocus()
+                                viewModel.searchNow()
+                            },
                         ),
                         modifier = Modifier
                             .weight(1f)
@@ -201,13 +209,18 @@ fun SearchScreen(
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.Search,
-                                    contentDescription = null,
+                                    contentDescription = "Search",
                                     tint = if (state.query.isNotEmpty()) {
                                         MaterialTheme.colorScheme.primary
                                     } else {
                                         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.70f)
                                     },
-                                    modifier = Modifier.size(20.dp),
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .clickable(enabled = state.query.isNotBlank()) {
+                                            focusManager.clearFocus()
+                                            viewModel.searchNow()
+                                        },
                                 )
                                 Spacer(Modifier.width(10.dp))
                                 Box(
@@ -271,6 +284,35 @@ fun SearchScreen(
                         ),
                         modifier = Modifier.fillMaxSize(),
                     ) {
+                        item(key = "explicit_direct_search") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        focusManager.clearFocus()
+                                        viewModel.searchNow()
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Search,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                                Spacer(Modifier.width(16.dp))
+                                Text(
+                                    text = "Search for \"${state.query.trim()}\"",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+
                         if (matchingRecent.isNotEmpty()) {
                             items(matchingRecent, key = { "recent_match_$it" }) { recentText ->
                                 SuggestionRow(
