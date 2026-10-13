@@ -157,6 +157,10 @@ data class YtAccountInfo(
     val photoUrl: String? = null,
 )
 
+/** Rate endpoints: like, and clear a like (the web player's pair). */
+internal const val LIKE_ENDPOINT = "like/like"
+internal const val REMOVE_LIKE_ENDPOINT = "like/removelike"
+
 /**
  * One switchable YouTube channel within the signed-in session. Selection is
  * applied per-request, never via cookies: [pageId] (brand-channel delegation
@@ -1565,8 +1569,31 @@ class InnerTubeMusicApi @Inject constructor(
         } else {
             filtered
         }
+        val candidates = if (results.isNotEmpty()) {
+            results
+        } else {
+            // Fallback: in regions or on networks where YouTube Music (WEB_REMIX) is blocked/restricted,
+            // query YouTube's standard web endpoint using the WEB client.
+            runCatching {
+                val body = buildJsonObject {
+                    put("context", context("WEB", "2.20261011.05.00", null))
+                    put("query", query.trim())
+                }
+                val root = post(
+                    url = "$YOUTUBE_API/search?key=AIzaSyAO_FJ2SlqAz8GlBg1fA54p0wDE7Xk80mU&prettyPrint=false",
+                    body = body,
+                    clientName = "WEB",
+                    clientVersion = "2.20261011.05.00",
+                    userAgent = WEB_USER_AGENT,
+                    origin = YOUTUBE_ORIGIN,
+                    referer = "$YOUTUBE_ORIGIN/",
+                    callTimeoutMs = SEARCH_REQUEST_TIMEOUT_MS,
+                )
+                parseSongRenderers(root)
+            }.getOrDefault(emptyList())
+        }
 
-        val finalResults = results
+        val finalResults = candidates
             .distinctBy { it.videoId }
             .filter { it.videoId.isNotBlank() }
             .take(limit)
@@ -2005,8 +2032,25 @@ class InnerTubeMusicApi @Inject constructor(
                 clientVersion = config.clientVersion,
                 userAgent = WEB_USER_AGENT,
             )
+        }.getOrNull()
+        val items = root?.let { parseEntityRenderers(it, kind) }.orEmpty()
+        if (items.isNotEmpty()) return@withContext items.take(limit)
+
+        val fallbackRoot = runCatching {
+            post(
+                url = "$YOUTUBE_API/search?key=AIzaSyAO_FJ2SlqAz8GlBg1fA54p0wDE7Xk80mU&prettyPrint=false",
+                body = buildJsonObject {
+                    put("context", context("WEB", "2.20261011.05.00", null))
+                    put("query", query.trim())
+                },
+                clientName = "WEB",
+                clientVersion = "2.20261011.05.00",
+                userAgent = WEB_USER_AGENT,
+                origin = YOUTUBE_ORIGIN,
+                referer = "$YOUTUBE_ORIGIN/",
+            )
         }.getOrNull() ?: return@withContext emptyList()
-        parseEntityRenderers(root, kind).take(limit)
+        parseEntityRenderers(fallbackRoot, kind).take(limit)
     }
 
     suspend fun searchPlaylists(query: String, limit: Int = 30): List<YouTubePlaylistSummary> = withContext(Dispatchers.IO) {
@@ -2024,8 +2068,26 @@ class InnerTubeMusicApi @Inject constructor(
                 clientVersion = config.clientVersion,
                 userAgent = WEB_USER_AGENT,
             )
+        }.getOrNull()
+        val items = root?.let { parsePlaylistRenderers(it) }.orEmpty()
+        if (items.isNotEmpty()) return@withContext items.take(limit)
+
+        val fallbackRoot = runCatching {
+            post(
+                url = "$YOUTUBE_API/search?key=AIzaSyAO_FJ2SlqAz8GlBg1fA54p0wDE7Xk80mU&prettyPrint=false",
+                body = buildJsonObject {
+                    put("context", context("WEB", "2.20261011.05.00", null))
+                    put("query", query.trim())
+                    put("params", "Eg-KAQwIABAAGAAgACgB")
+                },
+                clientName = "WEB",
+                clientVersion = "2.20261011.05.00",
+                userAgent = WEB_USER_AGENT,
+                origin = YOUTUBE_ORIGIN,
+                referer = "$YOUTUBE_ORIGIN/",
+            )
         }.getOrNull() ?: return@withContext emptyList()
-        parsePlaylistRenderers(root).take(limit)
+        parsePlaylistRenderers(fallbackRoot).take(limit)
     }
 
     /** Fetches rich metadata (title, artist, album, artwork) for a single YouTube video ID */
@@ -2928,11 +2990,14 @@ class InnerTubeMusicApi @Inject constructor(
         webConfig?.takeIf { it.visitorData != null }?.let { return it }
         return configMutex.withLock {
             webConfig?.takeIf { it.visitorData != null }?.let { return@withLock it }
-            // A cached copy without visitor data is a poisoned fallback from
-            // an earlier failed fetch: re-fetch so later resolves get a real
-            // visitor instead of guaranteed-miss player calls forever.
             val config = runCatching { fetchWebConfig() }
-                .getOrElse { WebConfig(FALLBACK_WEB_KEY, FALLBACK_WEB_VERSION, webConfig?.visitorData) }
+                .getOrElse {
+                    WebConfig(
+                        FALLBACK_WEB_KEY,
+                        FALLBACK_WEB_VERSION,
+                        webConfig?.visitorData ?: FALLBACK_TOKEN_SESSION,
+                    )
+                }
             webConfig = config
             config
         }
@@ -2952,7 +3017,9 @@ class InnerTubeMusicApi @Inject constructor(
         return WebConfig(
             apiKey = findConfig(html, "INNERTUBE_API_KEY") ?: FALLBACK_WEB_KEY,
             clientVersion = findConfig(html, "INNERTUBE_CONTEXT_CLIENT_VERSION") ?: FALLBACK_WEB_VERSION,
-            visitorData = findConfig(html, "VISITOR_DATA"),
+            visitorData = findConfig(html, "VISITOR_DATA")
+                ?: findConfig(html, "EOM_VISITOR_DATA")
+                ?: FALLBACK_TOKEN_SESSION,
         )
     }
 
@@ -3689,6 +3756,7 @@ class InnerTubeMusicApi @Inject constructor(
         val ENGLISH_COUNTRIES = setOf("US", "GB", "CA", "AU", "NZ", "IE", "ZA")
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         val CLIENT_IDS = mapOf(
+            "WEB" to "1",
             "WEB_REMIX" to "67",
             "IOS" to "5",
             "IOS_MUSIC" to "26",
@@ -3716,10 +3784,6 @@ class InnerTubeMusicApi @Inject constructor(
         const val YT_CHARTS_BROWSE_ID = "FEmusic_charts"
         const val MAX_CONTINUATION_PAGES = 600
         const val WRITE_ACTIONS_PER_REQUEST = 50
-
-        /** Rate endpoints: like, and clear a like (the web player's pair). */
-        internal const val LIKE_ENDPOINT = "like/like"
-        internal const val REMOVE_LIKE_ENDPOINT = "like/removelike"
 
         const val HEDGED_CLIENT_STAGGER_DELAY_MS = 300L
         /** Per-client bound for the direct-URL fast path (single POST, no extras). */
@@ -3753,7 +3817,7 @@ class InnerTubeMusicApi @Inject constructor(
         val DIRECT_FAST_CLIENT_ORDER = listOf("VISIONOS", "ANDROID_VR", "TVHTML5")
         const val MAX_FORMAT_PROBES_PER_CLIENT = 2
         const val MAX_PLAYER_REQUEST_ATTEMPTS = 2
-        const val CONFIG_REQUEST_TIMEOUT_MS = 4_000L
+        const val CONFIG_REQUEST_TIMEOUT_MS = 6_000L
         const val RELATED_REQUEST_TIMEOUT_MS = 8_000L
         /** Per-call cap for interactive search POSTs: without it a hanging
          *  search burns both socket timeouts per attempt and stalls playback
