@@ -89,7 +89,17 @@ class PlaylistViewModel @Inject constructor(
 
     fun toggleYtSync(playlistId: Long) {
         viewModelScope.launch {
-            val allIds = playlistRepository.getAll().map { it.id }
+            // A failed read must abort the toggle: an empty fallback here
+            // would rewrite the sync selection from a partial list.
+            val allIds = try {
+                playlistRepository.getAll().map { it.id }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Couldn't read playlists for sync toggle", e)
+                _uiState.update { it.copy(toastMessage = "Couldn't read playlists. Try again.") }
+                return@launch
+            }
             val current = ytMusicPreferences.syncedPlaylistIds.first() ?: allIds.toSet()
             val isSynced = playlistId in current
             ytMusicPreferences.togglePlaylistSync(allIds, playlistId, !isSynced)
@@ -340,7 +350,14 @@ class PlaylistViewModel @Inject constructor(
 
     fun makeLocal(id: Long) {
         viewModelScope.launch {
-            val saved = ytMusicLibraryManager.makeLocal(id)
+            val saved = try {
+                ytMusicLibraryManager.makeLocal(id)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Make-local failed for $id", e)
+                null
+            }
             _uiState.update {
                 it.copy(
                     toastMessage = if (saved != null) "${saved.title} is now available locally" else "Couldn't make playlist local",

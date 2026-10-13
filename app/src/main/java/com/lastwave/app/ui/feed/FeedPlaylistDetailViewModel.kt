@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lastwave.app.data.feed.FeedRepository
 import com.lastwave.app.data.music.InnerTubeMusicApi
+import com.lastwave.app.data.music.distinctPlaylistSongs
 import com.lastwave.app.data.music.YouTubeMusicTrack
 import com.lastwave.app.data.music.YouTubePlaylistResult
 import com.lastwave.app.data.playlist.PlaylistImportManager
@@ -75,7 +76,8 @@ class FeedPlaylistDetailViewModel @Inject constructor(
                 if (state != null && state.playlist.tracks.size > tracks.size) return
                 _uiState.value = FeedPlaylistDetailUiState.Success(
                     YouTubePlaylistResult(id = playlistId, title = title, author = author,
-                        artworkUrl = tracks.firstOrNull()?.artworkUrl, trackCount = tracks.size, tracks = tracks),
+                        artworkUrl = tracks.firstOrNull()?.artworkUrl, trackCount = tracks.size,
+                        tracks = tracks.distinctPlaylistSongs()),
                     isLoadingMore = true,
                 )
             }
@@ -85,8 +87,9 @@ class FeedPlaylistDetailViewModel @Inject constructor(
                 val result = if (recent) {
                     val taste = innerTube.fetchTasteSignals(recentLimit = 50, likedLimit = 0, feedLimit = 0)
                     taste.recentTracks.takeIf { it.isNotEmpty() }?.let { tracks ->
+                        val distinct = tracks.distinctPlaylistSongs()
                         YouTubePlaylistResult(id = playlistId, title = title, author = author,
-                            artworkUrl = tracks.firstOrNull()?.artworkUrl, trackCount = tracks.size, tracks = tracks)
+                            artworkUrl = distinct.firstOrNull()?.artworkUrl, trackCount = distinct.size, tracks = distinct)
                     }
                 } else {
                     innerTube.fetchPlaylist(if (liked) "LM" else playlistId, progressive = true, onPageLoaded = ::showTracks)
@@ -97,9 +100,11 @@ class FeedPlaylistDetailViewModel @Inject constructor(
                     throw java.io.IOException("Couldn't finish loading this playlist. Tap Retry.")
                 }
                 if (result != null) {
+                    val distinctTracks = result.tracks.distinctPlaylistSongs()
                     _uiState.value = FeedPlaylistDetailUiState.Success(
                         result.copy(id = playlistId, title = if (liked || recent) title else result.title.ifBlank { title },
-                            author = result.author?.takeIf(String::isNotBlank) ?: author),
+                            author = result.author?.takeIf(String::isNotBlank) ?: author,
+                            tracks = distinctTracks, trackCount = distinctTracks.size),
                         // Truncated continuation pages still show what loaded, with
                         // an inline retry for the remainder (fixes logged-out
                         // playlists that previously collapsed to a dead Error).
@@ -180,5 +185,4 @@ class FeedPlaylistDetailViewModel @Inject constructor(
         videoId = videoId,
         durationMs = durationSeconds?.takeIf { it > 0 }?.times(1_000L),
     )
-
 }

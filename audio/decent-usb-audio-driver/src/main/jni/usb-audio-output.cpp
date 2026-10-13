@@ -769,29 +769,13 @@ void padInt24ToInt32(const uint8_t *src, uint8_t *dst, int numSamples) {
 
 // 32-bit → 24-bit packed (3 bytes/sample)
 void packInt32ToInt24(const uint8_t *src, uint8_t *dst, int numSamples) {
-    auto *in32 = reinterpret_cast<const int32_t *>(src);
-    bool isRightAligned24 = true;
-    bool hasNonZero = false;
-    int checkCount = std::min(numSamples, 64);
-    for (int i = 0; i < checkCount; i++) {
-        int32_t v = in32[i];
-        if (v != 0) hasNonZero = true;
-        int32_t signExt = (v << 8) >> 8;
-        if (v != signExt) {
-            isRightAligned24 = false;
-            break;
-        }
-    }
+    // Take the top 3 of 4 bytes (standard 32→24 truncation, equivalent to >>8).
+    // Do NOT sniff for "right-aligned 24-bit" and take the low 3 bytes: that
+    // discards the MSB of a full-scale 32-bit sample and swings level wildly.
     for (int i = 0; i < numSamples; i++) {
-        if (hasNonZero && isRightAligned24) {
-            dst[i * 3]     = src[i * 4];
-            dst[i * 3 + 1] = src[i * 4 + 1];
-            dst[i * 3 + 2] = src[i * 4 + 2];
-        } else {
-            dst[i * 3]     = src[i * 4 + 1];
-            dst[i * 3 + 1] = src[i * 4 + 2];
-            dst[i * 3 + 2] = src[i * 4 + 3];
-        }
+        dst[i * 3]     = src[i * 4 + 1];
+        dst[i * 3 + 1] = src[i * 4 + 2];
+        dst[i * 3 + 2] = src[i * 4 + 3];
     }
 }
 
@@ -966,23 +950,10 @@ Java_com_decent_usbaudio_UsbAudioStream_nativeUsbAudioWriteRaw(
 
     // Bit-depth matching: pad/pack input to DAC's bit depth (lossless integer ops)
     if (inputBitDepth == 32 && ctx->bitDepth == 32) {
-        auto *in32 = reinterpret_cast<const int32_t *>(rawData);
-        bool isRightAligned24 = true;
-        bool hasLowByteData = false;
-        int checkCount = std::min(totalSamples, 64);
-        for (int i = 0; i < checkCount; i++) {
-            int32_t v = in32[i];
-            if ((v & 0xFF) != 0) hasLowByteData = true;
-            if (v != ((v << 8) >> 8)) {
-                isRightAligned24 = false;
-                break;
-            }
-        }
-        if (hasLowByteData && isRightAligned24) {
-            shiftInt32From24((uint8_t *)rawData, ctx->transferBuffer, totalSamples);
-        } else {
-            memcpy(ctx->transferBuffer, rawData, inputBytes);
-        }
+        // Pass through unchanged. Do NOT sniff for "right-aligned 24-bit"
+        // samples and shift them up 8 bits — that raises level ~48 dB and
+        // clips/distorts. The producer must deliver correctly scaled 32-bit.
+        memcpy(ctx->transferBuffer, rawData, inputBytes);
     } else if (inputBitDepth == ctx->bitDepth) {
         // Same bit depth (16->16 or 24->24): zero-copy
         memcpy(ctx->transferBuffer, rawData, inputBytes);

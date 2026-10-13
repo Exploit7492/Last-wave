@@ -143,6 +143,7 @@ data class TrackSpecs(
     val qualityBadge: String = "Resolving...",
     val audioCodec: String = "Detecting...",
     val bitDepthSampleRate: String = "Analyzing...",
+    val bitrate: String? = null,
     val provider: String = "Lossless / YouTube",
     val isLossless: Boolean = false,
     val durationText: String = "--:--",
@@ -174,7 +175,8 @@ private fun describeLiveCodec(state: MusicPlayerState): String {
     return when {
         codec.contains("ATMOS", ignoreCase = true) -> "Dolby Atmos (E-AC-3 JOC Spatial)"
         codec.contains("MP3", ignoreCase = true) -> "MPEG Layer 3 (MP3)"
-        codec.contains("AAC", ignoreCase = true) || codec.contains("MP4A", ignoreCase = true) -> "Advanced Audio Coding (AAC)"
+        codec.contains("AAC", ignoreCase = true) || codec.contains("MP4A", ignoreCase = true) ||
+            codec.contains("320", ignoreCase = true) || codec.contains("96", ignoreCase = true) -> "Advanced Audio Coding (AAC)"
         codec.contains("OPUS", ignoreCase = true) -> "Opus Interactive Audio"
         codec.contains("FLAC", ignoreCase = true) || codec.equals("LOSSLESS", ignoreCase = true) ||
             codec.contains("HI-RES", ignoreCase = true) || state.isLossless -> "Free Lossless Audio Codec (FLAC)"
@@ -197,7 +199,8 @@ private fun describeLiveResolution(state: MusicPlayerState): String {
     val flacLike = isFlacLikeCodec(state.audioCodec) || state.isLossless
     val lossyName = when {
         state.audioCodec?.contains("OPUS", ignoreCase = true) == true -> "Opus"
-        state.audioCodec?.contains("AAC", ignoreCase = true) == true || state.audioCodec?.contains("MP4A", ignoreCase = true) == true -> "AAC"
+        state.audioCodec?.contains("AAC", ignoreCase = true) == true || state.audioCodec?.contains("MP4A", ignoreCase = true) == true ||
+            state.audioCodec?.contains("320", ignoreCase = true) == true || state.audioCodec?.contains("96", ignoreCase = true) == true -> "AAC"
         state.audioCodec?.contains("MP3", ignoreCase = true) == true -> "MP3"
         else -> null
     }
@@ -266,6 +269,14 @@ class TrackDetailsViewModel @Inject constructor(
                 cur.title.equals(title, ignoreCase = true) && cur.artist.equals(artist, ignoreCase = true)
             } == true
             if (isLiveTrack) {
+                val liveKbps = live.bitrateKbps?.takeIf { it > 0 }
+                    ?: downloaded?.bitrateKbps?.takeIf { it > 0 }
+                    ?: if (downloaded != null && downloaded.fileSizeBytes > 0 && downloaded.durationMs > 0) {
+                        val kbps = ((downloaded.fileSizeBytes * 8L) / downloaded.durationMs).toInt()
+                        if (kbps > 0) kbps else null
+                    } else null
+                val liveBitrateText = liveKbps?.let { "$it kbps" }
+
                 _specs.value = _specs.value?.copy(
                     qualityBadge = if (live.audioCodec.isNullOrBlank() && !live.isLossless) {
                         "Resolving..."
@@ -274,6 +285,7 @@ class TrackDetailsViewModel @Inject constructor(
                     },
                     audioCodec = describeLiveCodec(live),
                     bitDepthSampleRate = describeLiveResolution(live),
+                    bitrate = liveBitrateText,
                     provider = describeLiveProvider(live),
                     isLossless = live.isLossless,
                 )
@@ -461,10 +473,17 @@ class TrackDetailsViewModel @Inject constructor(
                         "%d:%02d".format(dur / 60, dur % 60)
                     } ?: "\u2014"
 
+                    val moduleBitrate = when {
+                        s.bandwidth > 0 -> "${s.bandwidth / 1000} kbps"
+                        (downloaded?.bitrateKbps ?: 0) > 0 -> "${downloaded?.bitrateKbps} kbps"
+                        else -> null
+                    }
+
                     _specs.value = _specs.value?.copy(
                         qualityBadge = badge,
                         audioCodec = codec,
                         bitDepthSampleRate = depthRate,
+                        bitrate = moduleBitrate,
                         provider = "Lossless Provider Module",
                         isLossless = isLossless,
                         durationText = durText,
@@ -486,7 +505,8 @@ class TrackDetailsViewModel @Inject constructor(
                     _specs.value = _specs.value?.copy(
                         qualityBadge = badge,
                         audioCodec = codec,
-                        bitDepthSampleRate = bitrate,
+                        bitDepthSampleRate = "Adaptive (${if (rawMime.contains("opus", ignoreCase = true)) "48.0 kHz" else "44.1 kHz"})",
+                        bitrate = bitrate,
                         provider = "YouTube Music CDN",
                         isLossless = false,
                     )
@@ -935,6 +955,9 @@ fun TrackDetailsSheet(
 
                     DetailRow(label = "Codec", value = currentSpecs.audioCodec)
                     DetailRow(label = "Resolution", value = currentSpecs.bitDepthSampleRate)
+                    currentSpecs.bitrate?.takeIf { it.isNotBlank() }?.let {
+                        DetailRow(label = "Bitrate", value = it)
+                    }
                     DetailRow(label = "Provider", value = currentSpecs.provider)
                     if (currentSpecs.durationText != "--:--") {
                         DetailRow(label = "Duration", value = currentSpecs.durationText)

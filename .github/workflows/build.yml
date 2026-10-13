@@ -28,10 +28,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           java-version: '17'
           distribution: 'temurin'
@@ -45,7 +45,7 @@ jobs:
 
       - name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unit-test-reports
           path: app/build/reports/tests/testDebugUnitTest
@@ -61,31 +61,10 @@ jobs:
           RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.RELEASE_KEY_PASSWORD }}
         run: ./gradlew assembleRelease assembleRawRelease --stacktrace
 
-      - name: Sign Release APK with Custom Key (Optional)
-        if: env.SIGNING_KEY != ''
-        uses: r0adkll/sign-android-release@v1
-        id: sign_app
-        with:
-          releaseDirectory: app/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.ALIAS || secrets.RELEASE_KEY_ALIAS || 'release_key' }}
-          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD || secrets.RELEASE_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD || secrets.RELEASE_KEY_PASSWORD }}
-        env:
-          BUILD_TOOLS_VERSION: "34.0.0"
-
-      - name: Sign Raw APK with Custom Key (Optional)
-        if: env.SIGNING_KEY != ''
-        uses: r0adkll/sign-android-release@v1
-        id: sign_app_raw
-        with:
-          releaseDirectory: app/build/outputs/apk/rawRelease
-          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.ALIAS || secrets.RELEASE_KEY_ALIAS || 'release_key' }}
-          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD || secrets.RELEASE_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD || secrets.RELEASE_KEY_PASSWORD }}
-        env:
-          BUILD_TOOLS_VERSION: "34.0.0"
+        # NOTE: Gradle signs release + rawRelease in place via the
+        # release_config signingConfig (v1+v2+v3), so no separate re-sign
+        # step is needed. A missing keystore now fails the build outright
+        # instead of silently shipping a debug-signed APK.
 
       - name: Stage Android 10 Final APKs
         id: prep_apk
@@ -123,18 +102,8 @@ jobs:
           RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.RELEASE_KEY_PASSWORD }}
         run: ./gradlew assembleRelease -PminSdk=24 --stacktrace
 
-      - name: Sign Android 7 Legacy APK with Custom Key (Optional)
-        if: env.SIGNING_KEY != ''
-        uses: r0adkll/sign-android-release@v1
-        id: sign_app_legacy
-        with:
-          releaseDirectory: app/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.ALIAS || secrets.RELEASE_KEY_ALIAS || 'release_key' }}
-          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD || secrets.RELEASE_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD || secrets.RELEASE_KEY_PASSWORD }}
-        env:
-          BUILD_TOOLS_VERSION: "34.0.0"
+        # NOTE: Gradle signs this APK in place via release_config, so the
+        # separate r0adkll re-sign step was removed (see Android 10 build).
 
       - name: Stage Android 7 Final APK
         run: |
@@ -168,7 +137,7 @@ jobs:
           cat final_apk/SHA256SUMS.txt
 
       - name: Upload Release APKs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: LastWave-v${{ steps.prep_apk.outputs.version }}-APKs
           path: final_apk/*

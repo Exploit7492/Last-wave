@@ -49,7 +49,17 @@
 -keep class org.jsoup.** { *; }
 -dontwarn org.jsoup.**
 -dontwarn java.beans.**
+# NewPipe's JS engine (Rhino) resolves classes by name at runtime
+# (Context.getRegExpProxy() → org.mozilla.javascript.regexp.RegExpImpl,
+#  Context.createInterpreter, script compilation) and the jar bundles no
+# consumer R8 rules. Under shrinking the release path silently loses the
+# player-JS deobfuscation (the unminified rawRelease hides this). Keep the
+# whole engine plus ClassFileWriter, which is instantiated reflectively for
+# compiled scripts.
+-keep class org.mozilla.javascript.** { *; }
+-keep class org.mozilla.classfile.ClassFileWriter { *; }
 -dontwarn org.mozilla.javascript.**
+-dontwarn org.mozilla.classfile.**
 -dontwarn javax.script.**
 
 # InnerTubeX is reached through the Kotlin-compatibility reflection boundary;

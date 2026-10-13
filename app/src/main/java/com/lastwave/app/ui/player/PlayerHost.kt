@@ -689,14 +689,34 @@ class PlayerViewModel @Inject constructor(
 
     fun toggleLiked(track: PlayableTrack) {
         viewModelScope.launch {
-            val loved = likedSongsManager.toggle(track.toGeneratedTrack())
+            // The like write reads Liked Songs, replaces its tracks, then
+            // mirrors to Last.fm — any step can fail while a sync pass holds
+            // the database. An uncaught exception in this launch takes the
+            // process down, so report it like the other playlist mutations.
+            val loved = try {
+                likedSongsManager.toggle(track.toGeneratedTrack())
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                android.util.Log.e("PlayerViewModel", "Like toggle failed", error)
+                _toastMessage.tryEmit("Couldn't update Liked Songs")
+                return@launch
+            }
             mirrorLastFmLove(track, loved)
         }
     }
 
     fun like(track: PlayableTrack) {
         viewModelScope.launch {
-            likedSongsManager.like(track.toGeneratedTrack())
+            try {
+                likedSongsManager.like(track.toGeneratedTrack())
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                android.util.Log.e("PlayerViewModel", "Like failed", error)
+                _toastMessage.tryEmit("Couldn't update Liked Songs")
+                return@launch
+            }
             mirrorLastFmLove(track, loved = true)
         }
     }
@@ -3681,7 +3701,12 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                 val dismissState = androidx.compose.material3.rememberSwipeToDismissBoxState(
                     confirmValueChange = { dismissValue ->
                         if (dismissValue != androidx.compose.material3.SwipeToDismissBoxValue.Settled) {
-                            player.removeQueueItem(index)
+                            // Resolve the index at swipe time by stable key: the
+                            // composition-time `index` can be stale if the queue
+                            // shifted between composition and the gesture, which
+                            // removed the wrong item (audit #12).
+                            val currentIndex = queueKeys.indexOf(stableKey)
+                            if (currentIndex >= 0) player.removeQueueItem(currentIndex)
                             true
                         } else {
                             false

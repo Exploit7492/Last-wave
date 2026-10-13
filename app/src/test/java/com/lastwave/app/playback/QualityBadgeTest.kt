@@ -185,6 +185,29 @@ audioCodec = "24/192kHz",
     }
 
     @Test
+    fun lossy320And96Badges() {
+        assertThat(
+            qualityBadgeLabel(
+                MusicPlayerState(
+                    audioCodec = "320 kbps",
+                    bitrateKbps = 320,
+                    isLossless = false,
+                ),
+            ),
+        ).isEqualTo("320 kbps")
+
+        assertThat(
+            qualityBadgeLabel(
+                MusicPlayerState(
+                    audioCodec = "96 kbps",
+                    bitrateKbps = 96,
+                    isLossless = false,
+                ),
+            ),
+        ).isEqualTo("96 kbps")
+    }
+
+    @Test
     fun intermediateQualityBadgesForAllTiers() {
         // 16-bit 48 kHz
         assertThat(

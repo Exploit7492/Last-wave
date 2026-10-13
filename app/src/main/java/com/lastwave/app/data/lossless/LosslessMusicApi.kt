@@ -9,6 +9,8 @@ import com.lastwave.app.data.addon.AddonStream
 import com.lastwave.app.data.local.SettingsPreferences
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
@@ -106,6 +108,8 @@ class LosslessMusicApi @Inject constructor(
     val isConfigured: Boolean
         get() {
             if (System.currentTimeMillis() < failureCooldownUntilMs) return false
+            val addons = settingsPreferences.httpAddons.value
+            if (addons.any { it.enabled && it.url.isNotBlank() }) return true
             val addonUrl = settingsPreferences.addonUrl.value
             return settingsPreferences.addonEnabled.value && !addonUrl.isNullOrBlank()
         }
@@ -129,6 +133,15 @@ class LosslessMusicApi @Inject constructor(
         const val QUALITY_MP3_320 = 5     // 320 kbps MP3 / AAC High
         const val QUALITY_DATA_SAVER = 4  // 96 kbps HE-AAC Data Saver
         const val QUALITY_YOUTUBE = -1    // YouTube Music standard stream
+
+        /**
+         * Consecutive backend misses before the chain is treated as down and
+         * every resolve falls through to YouTube directly.
+         */
+        private const val FAILURE_COOLDOWN_THRESHOLD = 2
+
+        /** How long a backed-off backend stays out of the resolve path. */
+        private const val FAILURE_COOLDOWN_MS = 30_000L
 
         fun getQualityAttemptOrder(preferred: Int): List<Int> {
             // YouTube is strict: no lossless attempt, no upgrade. Empty = caller goes straight to YouTube.
@@ -604,15 +617,40 @@ class LosslessMusicApi @Inject constructor(
         failureCooldownUntilMs = 0L
     }
 
-    suspend fun getCredentials(): BackendCredentials? = withContext(Dispatchers.IO) {
+    /**
+     * Records a backend miss. One transient 404/503 must not black out the
+     * whole chain; once misses repeat, back off for [FAILURE_COOLDOWN_MS] so
+     * every resolve inside that window falls through to YouTube instantly
+     * (the callers of [isCoolingDown]) instead of walking the module round
+     * trips — the difference between a 200ms fallback and a 5s stall.
+     */
+    private fun noteBackendFailure() {
+        consecutiveFailures++
+        if (consecutiveFailures >= FAILURE_COOLDOWN_THRESHOLD) {
+            failureCooldownUntilMs = System.currentTimeMillis() + FAILURE_COOLDOWN_MS
+        }
+    }
+
+    suspend fun getAllEnabledCredentials(): List<BackendCredentials> = withContext(Dispatchers.IO) {
+        val addons = settingsPreferences.httpAddons.value
+        val enabled = addons.filter { it.enabled && it.url.isNotBlank() }
+        if (enabled.isNotEmpty()) {
+            return@withContext enabled.map {
+                BackendCredentials(baseUrl = AddonClient.normalizeBase(it.url), apiKey = "addon", isAddon = true)
+            }
+        }
         val addonUrl = settingsPreferences.addonUrl.value
         val addonEnabled = settingsPreferences.addonEnabled.value
         if (addonEnabled && !addonUrl.isNullOrBlank()) {
-            val normalized = AddonClient.normalizeBase(addonUrl)
-            return@withContext BackendCredentials(baseUrl = normalized, apiKey = "addon", isAddon = true)
+            return@withContext listOf(
+                BackendCredentials(baseUrl = AddonClient.normalizeBase(addonUrl), apiKey = "addon", isAddon = true)
+            )
         }
+        emptyList()
+    }
 
-        null
+    suspend fun getCredentials(): BackendCredentials? = withContext(Dispatchers.IO) {
+        getAllEnabledCredentials().firstOrNull()
     }
 
     suspend fun resolveStream(
@@ -628,22 +666,65 @@ class LosslessMusicApi @Inject constructor(
             return@withContext null
         }
 
-        val creds = getCredentials()
-        if (creds == null || creds.baseUrl.isBlank() || !creds.isAddon) {
+        val allCreds = getAllEnabledCredentials()
+        if (allCreds.isEmpty()) {
             return@withContext null
         }
-        Log.i(TAG, "resolveStream starting for '$title' by '$artist' via addon (preferredQuality=$preferredQuality, isDownload=$isDownload)")
 
-        return@withContext resolveFromAddon(
-            title = title,
-            artist = artist,
-            expectedDurationSeconds = expectedDurationSeconds,
-            expectedAlbum = expectedAlbum,
-            preferredQuality = preferredQuality,
-            addonBaseUrl = creds.baseUrl,
-            excludedUrls = excludedUrls,
-            isDownload = isDownload,
-        )
+        if (allCreds.size == 1) {
+            Log.i(TAG, "resolveStream starting for '$title' by '$artist' via addon (preferredQuality=$preferredQuality, isDownload=$isDownload)")
+            val resolved = runCatching {
+                resolveFromAddon(
+                    title = title,
+                    artist = artist,
+                    expectedDurationSeconds = expectedDurationSeconds,
+                    expectedAlbum = expectedAlbum,
+                    preferredQuality = preferredQuality,
+                    addonBaseUrl = allCreds.first().baseUrl,
+                    excludedUrls = excludedUrls,
+                    isDownload = isDownload,
+                )
+            }.getOrNull()
+            if (resolved == null) noteBackendFailure()
+            return@withContext resolved
+        }
+
+        Log.i(TAG, "resolveStream racing for '$title' by '$artist' across ${allCreds.size} addons concurrently (preferredQuality=$preferredQuality, isDownload=$isDownload)")
+        val deferreds = allCreds.map { creds ->
+            async {
+                runCatching {
+                    resolveFromAddon(
+                        title = title,
+                        artist = artist,
+                        expectedDurationSeconds = expectedDurationSeconds,
+                        expectedAlbum = expectedAlbum,
+                        preferredQuality = preferredQuality,
+                        addonBaseUrl = creds.baseUrl,
+                        excludedUrls = excludedUrls,
+                        isDownload = isDownload,
+                    )
+                }.getOrNull()
+            }
+        }
+
+        val candidates = deferreds.awaitAll().filterNotNull()
+        if (candidates.isEmpty()) {
+            noteBackendFailure()
+            return@withContext null
+        }
+
+        candidates.maxByOrNull { stream ->
+            val tierScore = when (stream.formatId) {
+                QUALITY_DOLBY_ATMOS -> 1000
+                QUALITY_MAX_HI_RES -> 800
+                QUALITY_HI_RES_96 -> 700
+                QUALITY_CD_LOSSLESS -> 500
+                QUALITY_MP3_320 -> 300
+                QUALITY_DATA_SAVER -> 100
+                else -> 50
+            }
+            tierScore + (stream.bitDepth * 5) + stream.samplingRate.toInt()
+        }
     }
 
     private fun isNetworkException(error: Throwable): Boolean {
@@ -843,7 +924,11 @@ class LosslessMusicApi @Inject constructor(
                 val streamSampleRate = stream?.sampleRate ?: 0.0
                 val rawSampleRate = if (streamSampleRate > 1000.0) streamSampleRate else if (streamSampleRate > 0.0) streamSampleRate * 1000.0 else 44100.0
                 val effectiveSampleRate = manifestSampleRate?.toDouble() ?: rawSampleRate
-                val isHiResFlagged = candidate.isHiResFlagged() ||
+                val streamCodec = stream?.codec.orEmpty().lowercase()
+                val isLossyCodec = streamCodec.contains("mp4a") || streamCodec.contains("aac") || streamCodec.contains("mp3") || streamCodec.contains("opus")
+                val isLossyStream = isLossyCodec || stream?.quality.equals("high", ignoreCase = true) || stream?.quality.equals("low", ignoreCase = true) || q == "high" || q == "low"
+
+                val isHiResFlagged = !isLossyStream && (candidate.isHiResFlagged() ||
                     stream?.quality?.contains("HI_RES", ignoreCase = true) == true ||
                     stream?.quality?.contains("HI-RES", ignoreCase = true) == true ||
                     stream?.audioQuality?.contains("HI_RES", ignoreCase = true) == true ||
@@ -854,27 +939,33 @@ class LosslessMusicApi @Inject constructor(
                     stream?.bitDepth == 24 ||
                     (manifestDepth ?: 0) >= 24 ||
                     (wantsHiRes && q == "hi_res") ||
-                    effectiveSampleRate > 48000.0
+                    effectiveSampleRate > 48000.0)
                 // Depth precedence: manifest rendition id (ground truth for
                 // these bytes) > addon numbers > hi-res inference. 0 stays
                 // unknown — never fabricate 16 for an unmeasured depth.
-                val reportedDepth = manifestDepth
+                // Lossy audio streams (AAC/MP3) have NO integer bit depth.
+                val reportedDepth = if (isLossyStream) null else (manifestDepth
                     ?: stream?.bitDepth?.takeIf { it > 0 }
-                    ?: candidate.bitDepth?.takeIf { it > 0 }
+                    ?: candidate.bitDepth?.takeIf { it > 0 })
                 val effectiveBitDepth = when {
+                    isLossyStream -> null
                     (reportedDepth ?: 0) > 0 -> reportedDepth
                     effectiveSampleRate > 192000.0 -> 32
                     isHiResFlagged -> 24
                     else -> null
                 }
-                val streamCodec = stream?.codec.orEmpty()
                 val formatId = when {
                     isStreamAtmos -> QUALITY_DOLBY_ATMOS
+                    // 96k / Low / Data Saver tier:
+                    q == "low" || stream?.quality.equals("low", ignoreCase = true) || stream?.audioQuality.equals("low", ignoreCase = true) ||
+                        (isLossyCodec && (stream?.bitrate ?: 0) in 1..160_000) -> QUALITY_DATA_SAVER
+                    // 320k / High tier:
+                    q == "high" || stream?.quality.equals("high", ignoreCase = true) || stream?.audioQuality.equals("high", ignoreCase = true) ||
+                        (isLossyCodec && (stream?.bitrate ?: 0) > 160_000) -> QUALITY_MP3_320
                     (effectiveBitDepth ?: 0) > 16 || effectiveSampleRate > 48000.0 || isHiResFlagged -> {
                         if (effectiveSampleRate > 96000.0) QUALITY_MAX_HI_RES else QUALITY_HI_RES_96
                     }
                     streamCodec.equals("flac", ignoreCase = true) || effectiveBitDepth == 16 -> QUALITY_CD_LOSSLESS
-                    stream?.quality?.equals("high", ignoreCase = true) == true -> QUALITY_MP3_320
                     else -> QUALITY_CD_LOSSLESS
                 }
 
@@ -906,18 +997,27 @@ class LosslessMusicApi @Inject constructor(
                     else -> "application/dash+xml"
                 }
 
+                val resolvedBitrateKbps = stream?.bitrate?.let { if (it > 10_000) it / 1000 else it }
+                    ?: when (formatId) {
+                        QUALITY_MP3_320 -> 320
+                        QUALITY_DATA_SAVER -> 96
+                        else -> null
+                    }
+
                 return LosslessAudioStream(
                     url = rawUrl,
                     mimeType = streamMimeType,
-                    bitDepth = effectiveBitDepth ?: (if (isHiResFlagged || effectiveSampleRate > 48000.0) 24 else 0),
+                    bitDepth = if (isLossyStream) 0 else (effectiveBitDepth ?: (if (isHiResFlagged || effectiveSampleRate > 48000.0) 24 else 0)),
                     samplingRate = effectiveSampleRate / 1000.0,
                     formatId = formatId,
-                    bitrateKbps = stream?.bitrate?.let { if (it > 10_000) it / 1000 else it },
+                    bitrateKbps = resolvedBitrateKbps,
                     trackId = candidate.id,
                     durationSeconds = candidate.duration,
                     audioCodecOverride = when {
                         isStreamAtmos -> "DOLBY ATMOS"
-                        streamCodec.equals("mp3", ignoreCase = true) -> "MP3 320k"
+                        formatId == QUALITY_MP3_320 -> "320 kbps"
+                        formatId == QUALITY_DATA_SAVER -> "96 kbps"
+                        streamCodec.equals("mp3", ignoreCase = true) -> "320 kbps"
                         else -> null
                     },
                 )

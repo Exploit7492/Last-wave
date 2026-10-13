@@ -22,6 +22,18 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
+
+@Serializable
+data class HttpAddonConfig(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val url: String = "",
+    val name: String = "",
+    val enabled: Boolean = true,
+)
 
 enum class LyricsUiVersion(val id: String, val title: String) {
     CLASSIC("classic", "Classic"),
@@ -166,6 +178,8 @@ data class MiscSettings(
     val addonName: String = "",
     /** When true, the addon is active for search, streaming, and downloads. */
     val addonEnabled: Boolean = true,
+    /** Configured HTTP addons supporting multiple concurrent servers. */
+    val httpAddons: List<HttpAddonConfig> = emptyList(),
     /** Ids of Home tab sections the user hid ([HomeSection.id]).
      *  Empty = everything visible. Unknown ids are dropped on read. */
     val hiddenHomeSections: Set<String> = emptySet(),
@@ -279,6 +293,7 @@ class SettingsPreferences @Inject constructor(
         val ADDON_URL = stringPreferencesKey("lw_addon_url")
         val ADDON_NAME = stringPreferencesKey("lw_addon_name")
         val ADDON_ENABLED = booleanPreferencesKey("lw_addon_enabled")
+        val HTTP_ADDONS_JSON = stringPreferencesKey("lw_http_addons_json")
         val CANVAS_ENABLED = booleanPreferencesKey("lw_canvas_enabled")
         val CANVAS_FULL_BLEED = booleanPreferencesKey("lw_canvas_full_bleed")
         val CANVAS_OVER_CELLULAR = booleanPreferencesKey("lw_canvas_over_cellular")
@@ -287,6 +302,31 @@ class SettingsPreferences @Inject constructor(
     val settings: Flow<MiscSettings> = dataStore.data
         .recoverPreferences("SettingsPreferences")
         .map { p ->
+            val rawAddonsJson = p.readSafely(Keys.HTTP_ADDONS_JSON)
+            val parsedAddons = if (!rawAddonsJson.isNullOrBlank()) {
+                runCatching {
+                    Json { ignoreUnknownKeys = true; isLenient = true }.decodeFromString<List<HttpAddonConfig>>(rawAddonsJson)
+                }.getOrDefault(emptyList())
+            } else emptyList()
+
+            val legacyUrl = p.readSafely(Keys.ADDON_URL)?.trim().orEmpty()
+            val legacyName = p.readSafely(Keys.ADDON_NAME)?.trim().orEmpty()
+            val legacyEnabled = p.readSafely(Keys.ADDON_ENABLED) ?: true
+
+            val resolvedAddons = when {
+                parsedAddons.isNotEmpty() -> parsedAddons
+                legacyUrl.isNotBlank() -> listOf(
+                    HttpAddonConfig(
+                        id = "default_legacy",
+                        url = legacyUrl,
+                        name = legacyName.ifBlank { "HTTP Addon" },
+                        enabled = legacyEnabled
+                    )
+                )
+                else -> emptyList()
+            }
+            val primaryAddon = resolvedAddons.firstOrNull { it.enabled } ?: resolvedAddons.firstOrNull()
+
             MiscSettings(
                 dynamicNowPlayingEnabled = p.readSafely(Keys.DYNAMIC_NOW_PLAYING) ?: false,
                 useCustomFont = p.readSafely(Keys.USE_CUSTOM_FONT) ?: true,
@@ -323,9 +363,10 @@ class SettingsPreferences @Inject constructor(
                 hiddenHomeSections = p.readSafely(Keys.HIDDEN_HOME_SECTIONS)
                     ?.filter { id -> HomeSection.entries.any { it.id == id } }?.toSet()
                     ?: emptySet(),
-                addonUrl = p.readSafely(Keys.ADDON_URL)?.trim().orEmpty(),
-                addonName = p.readSafely(Keys.ADDON_NAME)?.trim().orEmpty(),
-                addonEnabled = p.readSafely(Keys.ADDON_ENABLED) ?: true,
+                addonUrl = primaryAddon?.url ?: legacyUrl,
+                addonName = primaryAddon?.name ?: legacyName,
+                addonEnabled = primaryAddon?.enabled ?: legacyEnabled,
+                httpAddons = resolvedAddons,
                 canvasEnabled = p.readSafely(Keys.CANVAS_ENABLED) ?: true,
                 canvasFullBleed = p.readSafely(Keys.CANVAS_FULL_BLEED) ?: true,
                 canvasOverCellular = p.readSafely(Keys.CANVAS_OVER_CELLULAR) ?: true,
@@ -344,22 +385,138 @@ class SettingsPreferences @Inject constructor(
         .map { it.addonEnabled }
         .stateIn(CoroutineScope(Dispatchers.IO + SupervisorJob()), SharingStarted.Eagerly, true)
 
+    val httpAddons: StateFlow<List<HttpAddonConfig>> = settings
+        .map { it.httpAddons }
+        .stateIn(CoroutineScope(Dispatchers.IO + SupervisorJob()), SharingStarted.Eagerly, emptyList())
+
+    suspend fun addHttpAddon(url: String, name: String): HttpAddonConfig {
+        val trimmedUrl = url.trim()
+        val trimmedName = name.trim().ifBlank { "HTTP Addon" }
+        val newEntry = HttpAddonConfig(
+            id = java.util.UUID.randomUUID().toString(),
+            url = trimmedUrl,
+            name = trimmedName,
+            enabled = true,
+        )
+        dataStore.edit { prefs ->
+            val current = getCurrentAddons(prefs)
+            val updated = current + newEntry
+            prefs[Keys.HTTP_ADDONS_JSON] = Json.encodeToString(updated)
+            syncLegacyAddonKeys(prefs, updated)
+        }
+        return newEntry
+    }
+
+    suspend fun updateHttpAddon(id: String, url: String, name: String?) {
+        dataStore.edit { prefs ->
+            val current = getCurrentAddons(prefs)
+            val updated = current.map {
+                if (it.id == id) {
+                    it.copy(
+                        url = url.trim(),
+                        name = name?.trim()?.ifBlank { it.name } ?: it.name
+                    )
+                } else it
+            }
+            prefs[Keys.HTTP_ADDONS_JSON] = Json.encodeToString(updated)
+            syncLegacyAddonKeys(prefs, updated)
+        }
+    }
+
+    suspend fun toggleHttpAddon(id: String, enabled: Boolean) {
+        dataStore.edit { prefs ->
+            val current = getCurrentAddons(prefs)
+            val updated = current.map {
+                if (it.id == id) it.copy(enabled = enabled) else it
+            }
+            prefs[Keys.HTTP_ADDONS_JSON] = Json.encodeToString(updated)
+            syncLegacyAddonKeys(prefs, updated)
+        }
+    }
+
+    suspend fun removeHttpAddon(id: String) {
+        dataStore.edit { prefs ->
+            val current = getCurrentAddons(prefs)
+            val updated = current.filterNot { it.id == id }
+            prefs[Keys.HTTP_ADDONS_JSON] = Json.encodeToString(updated)
+            syncLegacyAddonKeys(prefs, updated)
+        }
+    }
+
+    private fun getCurrentAddons(prefs: Preferences): List<HttpAddonConfig> {
+        val raw = prefs.readSafely(Keys.HTTP_ADDONS_JSON)
+        if (!raw.isNullOrBlank()) {
+            val parsed = runCatching {
+                Json { ignoreUnknownKeys = true; isLenient = true }.decodeFromString<List<HttpAddonConfig>>(raw)
+            }.getOrNull()
+            if (!parsed.isNullOrEmpty()) return parsed
+        }
+        val legacyUrl = prefs.readSafely(Keys.ADDON_URL)?.trim().orEmpty()
+        val legacyName = prefs.readSafely(Keys.ADDON_NAME)?.trim().orEmpty()
+        val legacyEnabled = prefs.readSafely(Keys.ADDON_ENABLED) ?: true
+        if (legacyUrl.isNotBlank()) {
+            return listOf(
+                HttpAddonConfig(
+                    id = "default_legacy",
+                    url = legacyUrl,
+                    name = legacyName.ifBlank { "HTTP Addon" },
+                    enabled = legacyEnabled
+                )
+            )
+        }
+        return emptyList()
+    }
+
+    private fun syncLegacyAddonKeys(prefs: androidx.datastore.preferences.core.MutablePreferences, list: List<HttpAddonConfig>) {
+        val primary = list.firstOrNull { it.enabled } ?: list.firstOrNull()
+        if (primary != null) {
+            prefs[Keys.ADDON_URL] = primary.url
+            prefs[Keys.ADDON_NAME] = primary.name
+            prefs[Keys.ADDON_ENABLED] = primary.enabled
+        } else {
+            prefs.remove(Keys.ADDON_URL)
+            prefs.remove(Keys.ADDON_NAME)
+            prefs.remove(Keys.ADDON_ENABLED)
+        }
+    }
+
     suspend fun setAddonUrl(url: String?) {
-        dataStore.edit {
-            if (url.isNullOrBlank()) it.remove(Keys.ADDON_URL)
-            else it[Keys.ADDON_URL] = url.trim()
+        dataStore.edit { prefs ->
+            val current = getCurrentAddons(prefs)
+            val updated = if (url.isNullOrBlank()) {
+                if (current.isNotEmpty()) current.drop(1) else emptyList()
+            } else {
+                if (current.isEmpty()) {
+                    listOf(HttpAddonConfig(url = url.trim(), name = "HTTP Addon", enabled = true))
+                } else {
+                    listOf(current.first().copy(url = url.trim())) + current.drop(1)
+                }
+            }
+            prefs[Keys.HTTP_ADDONS_JSON] = Json.encodeToString(updated)
+            syncLegacyAddonKeys(prefs, updated)
         }
     }
 
     suspend fun setAddonName(name: String?) {
-        dataStore.edit {
-            if (name.isNullOrBlank()) it.remove(Keys.ADDON_NAME)
-            else it[Keys.ADDON_NAME] = name.trim()
+        dataStore.edit { prefs ->
+            val current = getCurrentAddons(prefs)
+            val updated = if (current.isNotEmpty()) {
+                listOf(current.first().copy(name = name?.trim().orEmpty())) + current.drop(1)
+            } else current
+            prefs[Keys.HTTP_ADDONS_JSON] = Json.encodeToString(updated)
+            syncLegacyAddonKeys(prefs, updated)
         }
     }
 
     suspend fun setAddonEnabled(enabled: Boolean) {
-        dataStore.edit { it[Keys.ADDON_ENABLED] = enabled }
+        dataStore.edit { prefs ->
+            val current = getCurrentAddons(prefs)
+            val updated = if (current.isNotEmpty()) {
+                listOf(current.first().copy(enabled = enabled)) + current.drop(1)
+            } else current
+            prefs[Keys.HTTP_ADDONS_JSON] = Json.encodeToString(updated)
+            syncLegacyAddonKeys(prefs, updated)
+        }
     }
 
     suspend fun setDynamicNowPlaying(enabled: Boolean) {

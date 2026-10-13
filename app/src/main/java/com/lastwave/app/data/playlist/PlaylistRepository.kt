@@ -84,9 +84,27 @@ class PlaylistRepository @Inject constructor(
     private val saveMutex = Mutex()
 
     val playlists: Flow<List<SavedPlaylist>> = flow {
-        emit(getAll())
-        changes.collect {
+        try {
             emit(getAll())
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.e(TAG, "Initial playlist read failed", error)
+            emit(emptyList())
+        }
+        changes.collect {
+            // A failed re-read must not tear down every collector (the UI plus
+            // the YT library projection collect this flow): keep serving the
+            // last good list until the next change event.
+            val updated = try {
+                getAll()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Log.e(TAG, "Playlist re-read failed", error)
+                null
+            }
+            if (updated != null) emit(updated)
         }
     }
 
@@ -156,21 +174,61 @@ class PlaylistRepository @Inject constructor(
      *  original reverses its append-ordered array before rendering). */
     suspend fun getAll(): List<SavedPlaylist> {
         return try {
-            dao.getAll().map { it.toDomain() }.sortedByDescending { it.createdAtMillis }
-                .also { backfillMissingVideoIdsOnce(it) }
+            dao.getAll().toDomainSorted()
         } catch (error: CancellationException) {
             throw error
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to read playlists from Room DAO", e)
-            val restored = runCatching { publicMirror.restoreIfDatabaseEmpty() }.getOrDefault(0)
-            if (restored > 0) {
-                runCatching { dao.getAll().map { it.toDomain() }.sortedByDescending { it.createdAtMillis } }
-                    .getOrDefault(emptyList())
-            } else {
-                loadPlaylistsFromPublicMirror()
+        } catch (error: Exception) {
+            Log.e(TAG, "Failed to read playlists from Room DAO", error)
+            // Transient failure (e.g. a sync write holding the database lock,
+            // a settling migration): retry the live read once before giving
+            // up on it.
+            val retried = try {
+                dao.getAll()
+            } catch (retryError: CancellationException) {
+                throw retryError
+            } catch (retryError: Exception) {
+                Log.w(TAG, "Playlist read retry failed", retryError)
+                null
             }
+            if (retried != null) return retried.toDomainSorted()
+            // Only a genuinely empty database may be repopulated from the
+            // public mirror — that is exactly what restoreIfDatabaseEmpty()
+            // checks. A non-empty database means the read itself failed.
+            val restored = try {
+                publicMirror.restoreIfDatabaseEmpty()
+            } catch (restoreError: CancellationException) {
+                throw restoreError
+            } catch (restoreError: Exception) {
+                Log.w(TAG, "Public mirror restore check failed", restoreError)
+                0
+            }
+            if (restored > 0) {
+                val recovered = try {
+                    dao.getAll()
+                } catch (recoveredError: CancellationException) {
+                    throw recoveredError
+                } catch (recoveredError: Exception) {
+                    Log.w(TAG, "Playlist read after mirror restore failed", recoveredError)
+                    null
+                }
+                if (recovered != null) return recovered.toDomainSorted()
+            }
+            // Never substitute the public mirror snapshot for a failed read.
+            // That file lags behind Room, and callers treat this list as
+            // authoritative: the YouTube sync's orphan sweep deletes the
+            // user's remote mirrors for every playlist merely missing from a
+            // stale snapshot, the Liked Songs bootstrap stacks a duplicate
+            // row, and save()'s dedupe stacks same-title siblings. Surface
+            // the failure instead so each caller skips the operation —
+            // display callers already catch a throwing read.
+            throw error
         }
     }
+
+    private fun List<SavedPlaylistEntity>.toDomainSorted(): List<SavedPlaylist> =
+        map { it.toDomain() }
+            .sortedByDescending { it.createdAtMillis }
+            .also { backfillMissingVideoIdsOnce(it) }
 
     suspend fun getById(id: Long): SavedPlaylist? {
         return try {
@@ -179,7 +237,14 @@ class PlaylistRepository @Inject constructor(
             throw error
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get playlist $id from Room DAO", e)
-            getAll().firstOrNull { it.id == id }
+            try {
+                getAll().firstOrNull { it.id == id }
+            } catch (fallbackError: CancellationException) {
+                throw fallbackError
+            } catch (fallbackError: Exception) {
+                Log.e(TAG, "Fallback playlist lookup failed for $id", fallbackError)
+                null
+            }
         }
     }
 
@@ -190,7 +255,10 @@ class PlaylistRepository @Inject constructor(
      * Returns the saved playlist, or the pre-existing duplicate if skipped.
      */
     suspend fun save(title: String, subtitle: String, mode: String, tracks: List<GeneratedTrack>, discoverSignature: String? = null): SavedPlaylist = saveMutex.withLock {
-        val existing = runCatching { getAll() }.getOrDefault(emptyList())
+        // A failed read must abort the save. Treating it as "no existing
+        // playlists" skipped the dedupe check and stacked a same-title sibling
+        // every time a read failed.
+        val existing = getAll()
         val playableTracks = if (mode == "custom" && tracks.isEmpty()) emptyList() else filterPlayable(tracks)
         existing.firstOrNull {
             it.mode == mode &&
@@ -529,32 +597,5 @@ class PlaylistRepository @Inject constructor(
             customCoverUri = customCoverUri,
             isPinned = isPinned,
         )
-    }
-
-    private suspend fun loadPlaylistsFromPublicMirror(): List<SavedPlaylist> {
-        return try {
-            val content = fileExportHelper.readPublicPlaylistMirror().getOrNull()
-                ?: fileExportHelper.readPublicPlaylistRecovery().getOrNull()
-                ?: return emptyList()
-            val mirror = json.decodeFromString<PlaylistMirrorFile>(content)
-            mirror.playlists.map { entry ->
-                SavedPlaylist(
-                    id = entry.id,
-                    title = entry.title,
-                    subtitle = entry.subtitle,
-                    mode = entry.mode,
-                    tracks = entry.tracks.map { it.toGenerated() },
-                    createdAtMillis = entry.createdAtMillis,
-                    discoverSignature = entry.discoverSignature,
-                    customCoverUri = entry.customCoverUri,
-                    isPinned = entry.isPinned,
-                )
-            }.sortedByDescending { it.createdAtMillis }
-        } catch (error: CancellationException) {
-            throw error
-        } catch (e: Exception) {
-            Log.e(TAG, "Fallback to public mirror failed", e)
-            emptyList()
-        }
     }
 }
