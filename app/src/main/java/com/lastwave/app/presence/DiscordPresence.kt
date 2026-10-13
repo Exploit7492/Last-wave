@@ -146,10 +146,35 @@ object DiscordPresence {
     }
 
     /**
+     * Whether the card must read "Playing".
+     *
+     * [MusicPlayerState.isPlaying] is the raw ExoPlayer flag, and ExoPlayer
+     * reports it false on every stall — the first buffer of a fresh track, a
+     * mid-track network hiccup, the re-prepare behind a quality upgrade —
+     * while `playWhenReady` stays true. The player publishes exactly that as
+     * [MusicPlayerState.isBuffering], which is `playWhenReady`-gated, so the
+     * user never paused and audio resumes on its own. Mapping the raw flag
+     * onto the card told Discord "Paused" for every stall on a streaming
+     * connection, which on a hi-res stream is most of the listen.
+     *
+     * `isPlaying || isBuffering` is therefore the user's intent at the state
+     * boundary: isBuffering only ever rides with playWhenReady, and both are
+     * cleared together by pause(), a fatal error, and cast teardown. The
+     * desktop client keys off the same intent — a paused player — rather than
+     * the rendered frames.
+     */
+    fun isPlayingForPresence(state: MusicPlayerState): Boolean =
+        state.isPlaying || state.isBuffering
+
+    /**
      * Everything the card renders that is not a position tick. Two states with
      * the same signature are visually identical, so a repush would be pure
      * cost — this is the dedupe that keeps a 16 Hz position stream off the
      * wire.
+     *
+     * The play state is [isPlayingForPresence], so a stall never looks like a
+     * change: a resume repushes nothing, and neither can a stall become a
+     * frame on its own.
      *
      * Identity is title + artist rather than the video id alone: two entries
      * can share a video id and still differ in the text the card shows (same
@@ -166,7 +191,7 @@ object DiscordPresence {
             // after playback starts, and its arrival must repush the card
             // instead of being deduped away as "unchanged".
             append(track.artworkUrl.orEmpty()).append('|')
-            append("playing=").append(state.isPlaying)
+            append("playing=").append(isPlayingForPresence(state))
             append("|dur=").append(durationMs(state) / 1000L)
             append("|br=").append(state.bitrateKbps)
             append("|q=").append(qualityLine(state))
@@ -190,7 +215,7 @@ object DiscordPresence {
         val track = requireNotNull(state.current) { "no current track" }
         val title = clip(track.title)
         val duration = durationMs(state)
-        val playing = state.isPlaying
+        val playing = isPlayingForPresence(state)
 
         val timestamps = if (playing && duration > 0L) {
             // A position past the end (a stale ticker on the last tick before

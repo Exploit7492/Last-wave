@@ -175,6 +175,11 @@ class DiscordPresenceManager @Inject constructor(
             }
             lastKey = key
             lastPushMs = now
+            // One line per frame actually handed to Discord: a card that never
+            // appears is then diagnosable as "no pushes at all" (observer /
+            // heartbeat dead), "pushes but refused" (WARN above), or "pushes
+            // fine, Discord drops it" (an app-side or rate-limit problem).
+            Log.d(TAG, "Discord presence pushed: $key")
         }
     }
 
