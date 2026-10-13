@@ -26,6 +26,15 @@ class LyricsRtlTest {
     }
 
     @Test
+    fun isRtlText_indicScriptsAreLeftToRight() {
+        // Gurmukhi, Devanagari and friends are bidi class L: treating one as
+        // RTL mirrors its layout direction and offsets the whole line.
+        assertThat(isRtlText("ਤੂੰ ਤੂਂ ਤੂ ਵਚਦੇ ਨੇੜੇ")).isFalse()
+        assertThat(isRtlText("मैं तेra नहीं हाँ")).isFalse()
+        assertThat(isRtlText("இதயம் thudikkuthu")).isFalse()
+    }
+
+    @Test
     fun isRtlText_arabicWithLeadingSymbolsAndPunctuation_returnsTrue() {
         assertThat(isRtlText("♪ حبيبي ♪")).isTrue()
         assertThat(isRtlText("(حبيبي يا نور العين)")).isTrue()

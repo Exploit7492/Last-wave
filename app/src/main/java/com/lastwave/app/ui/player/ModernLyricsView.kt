@@ -95,6 +95,7 @@ import com.lastwave.app.ui.theme.liquidGlassChrome
 import com.lastwave.app.ui.theme.liquidGlassContainerColor
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -543,7 +544,14 @@ private fun ModernWordByWordLine(
             )
         }
         val activeStyle = remember(fontStyle, isActive) {
-            if (isActive) fontStyle.copy(shadow = activeShadow) else fontStyle
+            // On S+ the glow comes from a blurred copy of the same Text
+            // (see LyricGlowText); the shadow stays only as the pre-S
+            // fallback where Modifier.blur is a no-op.
+            if (isActive && android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) {
+                fontStyle.copy(shadow = activeShadow)
+            } else {
+                fontStyle
+            }
         }
 
         if (!line.hasSyllables || !isActive) {
@@ -556,13 +564,18 @@ private fun ModernWordByWordLine(
                 modifier = modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.Start,
             ) {
-                Text(
-                    text = line.text.ifBlank { "♪" },
-                    style = activeStyle,
-                    color = animatedColor,
-                    textAlign = TextAlign.Start,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Box(Modifier.fillMaxWidth()) {
+                    if (isActive) {
+                        LyricGlowText(text = line.text.ifBlank { "♪" }, style = fontStyle)
+                    }
+                    Text(
+                        text = line.text.ifBlank { "♪" },
+                        style = activeStyle,
+                        color = animatedColor,
+                        textAlign = TextAlign.Start,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 if (!line.transliteration.isNullOrBlank() && isActive) {
                     Text(
                         text = line.transliteration,
@@ -615,6 +628,9 @@ private fun ModernWordByWordLine(
             // Karaoke fill: dim base text + bright copy clipped to the sung
             // extent with a smooth feathered gradient wipe.
             Box(modifier = Modifier.fillMaxWidth()) {
+                if (isActive) {
+                    LyricGlowText(text = fullText, style = fontStyle)
+                }
                 Text(
                     text = fullText,
                     style = fontStyle,
@@ -759,6 +775,37 @@ private fun ModernWordByWordLine(
             }
         }
     }
+}
+
+/** Radius/alpha of the active line's glow, kept in one place. */
+private val LYRIC_GLOW_RADIUS = 8.dp
+private const val LYRIC_GLOW_ALPHA = 0.5f
+
+/**
+ * The active line's glow: a blurred copy of the very Text drawn on top of it.
+ *
+ * A TextStyle.shadow is positioned by the platform's per-glyph shadow pass,
+ * which drifts off complex-script shaping — on Gurmukhi the halo lands offset
+ * from the glyphs and reads as a second, wrong image behind the line. A
+ * layout-identical duplicate (same text, style, direction and width) has the
+ * same bounds by construction, for every script.
+ *
+ * Below API 31 Modifier.blur is a no-op, so the caller keeps the shadow there
+ * and this draws nothing. clip = false keeps the halo unbounded instead of
+ * cutting it at the Text's own edges.
+ */
+@Composable
+private fun LyricGlowText(text: String, style: TextStyle) {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
+    Text(
+        text = text,
+        style = style,
+        color = Color.White.copy(alpha = LYRIC_GLOW_ALPHA),
+        textAlign = TextAlign.Start,
+        modifier = Modifier
+            .fillMaxWidth()
+            .blur(LYRIC_GLOW_RADIUS, clip = false),
+    )
 }
 
 @Composable
