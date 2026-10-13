@@ -1267,6 +1267,46 @@ class InnerTubeMusicApi @Inject constructor(
         }
     }
 
+    /**
+     * Likes a video on the connected YouTube Music account (the same
+     * `like/like` the web player posts). Best effort: a failure returns
+     * false for the caller to report, never throws.
+     */
+    suspend fun likeVideo(videoId: String): Boolean = setVideoLiked(videoId, liked = true)
+
+    /** Clears a like (unliking in the player removes it on YouTube too). */
+    suspend fun removeVideoLike(videoId: String): Boolean = setVideoLiked(videoId, liked = false)
+
+    private suspend fun setVideoLiked(videoId: String, liked: Boolean): Boolean =
+        withContext(Dispatchers.IO) {
+            if (videoId.isBlank()) return@withContext false
+            if (!ytAuth.connection.value.isConnected) return@withContext false
+            val config = getWebConfig()
+            val endpoint = if (liked) LIKE_ENDPOINT else REMOVE_LIKE_ENDPOINT
+            runCatching {
+                post(
+                    url = "$MUSIC_API/$endpoint?key=${config.apiKey}&prettyPrint=false",
+                    body = buildJsonObject {
+                        put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
+                        put("target", likeTargetBody(videoId))
+                    },
+                    clientName = "WEB_REMIX",
+                    clientVersion = config.clientVersion,
+                    userAgent = WEB_USER_AGENT,
+                    authenticated = true,
+                )
+                true
+            }.onFailure {
+                android.util.Log.w(PLAYLIST_LOG_TAG, "$endpoint failed for $videoId", it)
+            }.getOrDefault(false)
+        }
+
+    /** `{"videoId": …}` — the rate target shared by like and remove-like. */
+    internal fun likeTargetBody(videoId: String): kotlinx.serialization.json.JsonObject =
+        buildJsonObject {
+            put("videoId", videoId)
+        }
+
     /** Reads back an OWNED playlist with each item's setVideoId for diffs/removals. */
     suspend fun fetchOwnedPlaylist(
         playlistIdOrUrl: String,
@@ -3676,6 +3716,10 @@ class InnerTubeMusicApi @Inject constructor(
         const val YT_CHARTS_BROWSE_ID = "FEmusic_charts"
         const val MAX_CONTINUATION_PAGES = 600
         const val WRITE_ACTIONS_PER_REQUEST = 50
+
+        /** Rate endpoints: like, and clear a like (the web player's pair). */
+        internal const val LIKE_ENDPOINT = "like/like"
+        internal const val REMOVE_LIKE_ENDPOINT = "like/removelike"
 
         const val HEDGED_CLIENT_STAGGER_DELAY_MS = 300L
         /** Per-client bound for the direct-URL fast path (single POST, no extras). */

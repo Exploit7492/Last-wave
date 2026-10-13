@@ -703,6 +703,7 @@ class PlayerViewModel @Inject constructor(
                 return@launch
             }
             mirrorLastFmLove(track, loved)
+            mirrorYouTubeLove(track, loved)
         }
     }
 
@@ -718,6 +719,29 @@ class PlayerViewModel @Inject constructor(
                 return@launch
             }
             mirrorLastFmLove(track, loved = true)
+            mirrorYouTubeLove(track, loved = true)
+        }
+    }
+
+    /**
+     * YouTube Music mirror of the local like. The local state is the source of
+     * truth and already saved, so a failed mirror is reported and left alone —
+     * the next toggle can retry it.
+     */
+    private suspend fun mirrorYouTubeLove(track: PlayableTrack, loved: Boolean) {
+        val mirrored = try {
+            ytMusicLibraryManager.mirrorLikeToYouTube(track.toGeneratedTrack(), loved)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            android.util.Log.w("PlayerViewModel", "YouTube like mirror failed", error)
+            false
+        }
+        if (!mirrored) {
+            _toastMessage.tryEmit(
+                if (loved) "Couldn't like this song on YouTube Music"
+                else "Couldn't remove the like on YouTube Music",
+            )
         }
     }
 
