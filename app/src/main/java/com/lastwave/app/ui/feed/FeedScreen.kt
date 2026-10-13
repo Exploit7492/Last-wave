@@ -1,5 +1,6 @@
 package com.lastwave.app.ui.feed
 
+import com.lastwave.app.playback.toPlayableTrack
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -150,6 +151,7 @@ fun FeedScreen(
     artistAlbumNavigator: ArtistAlbumNavigator = hiltViewModel<ArtistAlbumNavBridgeFeed>().navigator,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val discoveryTracks by viewModel.discoveryTracks.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
@@ -407,6 +409,48 @@ fun FeedScreen(
                                 },
                             )
                         
+                                }
+                            }
+                        }
+                    }
+
+                    if (discoveryTracks.isNotEmpty()) {
+                        item(key = "discover_new_music") {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                                    FeedSectionHeader(
+                                        title = "Discover New Music",
+                                        subtitle = "Handpicked tracks matched to your taste",
+                                        actionText = "See all",
+                                        actionIcon = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                                        onActionClick = onOpenDiscover,
+                                    )
+                                    FeedMediaRow(
+                                        content = {
+                                            itemsIndexed(discoveryTracks) { index, track ->
+                                                val playable = track.toPlayableTrack()
+                                                FeedMediaCard(
+                                                    title = track.name,
+                                                    subtitle = ArtistHelper.primaryArtist(track.artist),
+                                                    artworkUrl = track.artworkUrl,
+                                                    fallbackIcon = Icons.Filled.Explore,
+                                                    badgeText = "DISCOVER",
+                                                    onClick = {
+                                                        val queue = discoveryTracks.map { it.toPlayableTrack() }
+                                                        musicPlayer.playDiscoverQueue(queue, index)
+                                                    },
+                                                    onPlayClick = {
+                                                        val queue = discoveryTracks.map { it.toPlayableTrack() }
+                                                        musicPlayer.playDiscoverQueue(queue, index)
+                                                    },
+                                                )
+                                            }
+                                        },
+                                    )
                                 }
                             }
                         }

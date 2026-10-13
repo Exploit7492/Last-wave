@@ -61,6 +61,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.lastwave.app.playback.toPlayableTrack
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.ui.text.style.TextOverflow
 import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.HeaderActionIcon
@@ -125,7 +129,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import com.lastwave.app.ui.shell.FloatingNavDefaults
 import coil.compose.SubcomposeAsyncImage
 import com.lastwave.app.data.repository.HomeAlbum
