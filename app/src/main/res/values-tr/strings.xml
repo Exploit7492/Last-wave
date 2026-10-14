@@ -397,4 +397,43 @@
     <string name="badge_mode_bit_perfect">Bit-perfect</string>
     <string name="badge_mode_direct">Doğrudan</string>
     <string name="badge_mode_mixer">Mikser</string>
+
+    <!-- Parça bilgileri sayfası -->
+    <string name="details_play_track">Parçayı Çal</string>
+    <string name="details_download">İndir</string>
+    <string name="details_downloading">İndiriliyor…</string>
+    <string name="details_downloaded">İndirildi</string>
+    <string name="details_not_downloaded">İndirilmedi</string>
+    <string name="details_listening_stats">Dinleme İstatistikleri</string>
+    <string name="details_your_scrobbles">Scrobble’larınız</string>
+    <string name="details_plays_count">%1$s dinlenme</string>
+    <string name="details_zero_plays">0 dinlenme</string>
+    <string name="details_last_played">Son Dinlenme</string>
+    <string name="details_in_library">Kütüphanede</string>
+    <string name="details_never">Hiç</string>
+    <string name="details_checking">Denetleniyor…</string>
+    <string name="details_global_plays">Toplam Dinlenme</string>
+    <string name="details_listeners">Dinleyici</string>
+    <string name="details_track_info">Parça Bilgisi</string>
+    <string name="details_genre">Tür</string>
+    <string name="details_composer">Besteci</string>
+    <string name="details_released">Yayınlanma</string>
+    <string name="details_label">Şirket</string>
+    <string name="details_track">Parça</string>
+    <string name="details_disc">Disk</string>
+    <string name="details_count_of">%1$d / %2$d</string>
+    <string name="details_rating">Puan</string>
+    <string name="details_about">Hakkında</string>
+    <string name="details_read_more">Devamını oku</string>
+    <string name="details_show_less">Daha az göster</string>
+    <string name="details_stream_specs">Akış ve Ses Özellikleri</string>
+    <string name="details_codec">Codec</string>
+    <string name="details_resolution">Çözünürlük</string>
+    <string name="details_bitrate">Bit hızı</string>
+    <string name="details_provider">Sağlayıcı</string>
+    <string name="details_duration">Süre</string>
+    <string name="details_offline_storage">Çevrimdışı Depolama</string>
+    <string name="details_status">Durum</string>
+    <string name="details_file_size">Dosya Boyutu</string>
+    <string name="details_file_path">Dosya Yolu</string>
 </resources>

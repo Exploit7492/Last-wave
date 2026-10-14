@@ -66,6 +66,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.lastwave.app.R
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -230,6 +232,7 @@ private fun describeLiveProvider(state: MusicPlayerState): String = when {
 
 @HiltViewModel
 class TrackDetailsViewModel @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val player: MusicPlayer,
     private val moduleResolver: ModulePlaybackResolver,
     private val innerTube: InnerTubeMusicApi,
@@ -404,8 +407,8 @@ class TrackDetailsViewModel @Inject constructor(
                     val lastPlayedDisplay = when {
                         lastPlayed != null -> lastPlayed
                         recentFallback != null -> recentFallback
-                        userPlays > 0 -> "In library"
-                        else -> "Never"
+                        userPlays > 0 -> appContext.getString(R.string.details_in_library)
+                        else -> appContext.getString(R.string.details_never)
                     }
 
                     _specs.value = _specs.value?.copy(
@@ -752,7 +755,7 @@ fun TrackDetailsSheet(
                     ) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Play Track", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.details_play_track), fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -780,9 +783,9 @@ fun TrackDetailsSheet(
                     Spacer(Modifier.width(6.dp))
                     Text(
                         when {
-                            currentSpecs.downloadedEntity != null -> "Downloaded"
-                            currentSpecs.isDownloading -> "Downloading..."
-                            else -> "Download"
+                            currentSpecs.downloadedEntity != null -> stringResource(R.string.details_downloaded)
+                            currentSpecs.isDownloading -> stringResource(R.string.details_downloading)
+                            else -> stringResource(R.string.details_download)
                         },
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -791,7 +794,7 @@ fun TrackDetailsSheet(
 
             // 3. Listening Stats 2x2 Grid
             Text(
-                text = "Listening Statistics",
+                text = stringResource(R.string.details_listening_stats),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -802,13 +805,16 @@ fun TrackDetailsSheet(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 StatCard(
-                    title = "Your Scrobbles",
-                    value = if (currentSpecs.userPlayCount > 0) "${numberFormatter.format(currentSpecs.userPlayCount)} plays" else if (currentSpecs.isScrobbleStatsLoaded) "0 plays" else "...",
+                    title = stringResource(R.string.details_your_scrobbles),
+                    value = if (currentSpecs.userPlayCount > 0) stringResource(
+                        R.string.details_plays_count,
+                        numberFormatter.format(currentSpecs.userPlayCount),
+                    ) else if (currentSpecs.isScrobbleStatsLoaded) stringResource(R.string.details_zero_plays) else "...",
                     modifier = Modifier.weight(1f),
                 )
                 StatCard(
-                    title = "Last Played",
-                    value = currentSpecs.lastPlayedText ?: "Checking...",
+                    title = stringResource(R.string.details_last_played),
+                    value = currentSpecs.lastPlayedText ?: stringResource(R.string.details_checking),
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -818,12 +824,12 @@ fun TrackDetailsSheet(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 StatCard(
-                    title = "Global Plays",
+                    title = stringResource(R.string.details_global_plays),
                     value = if (currentSpecs.globalPlayCount > 0) numberFormatter.format(currentSpecs.globalPlayCount) else "\u2014",
                     modifier = Modifier.weight(1f),
                 )
                 StatCard(
-                    title = "Listeners",
+                    title = stringResource(R.string.details_listeners),
                     value = if (currentSpecs.listenersCount > 0) numberFormatter.format(currentSpecs.listenersCount) else "\u2014",
                     modifier = Modifier.weight(1f),
                 )
@@ -847,28 +853,28 @@ fun TrackDetailsSheet(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.Info, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("Track Information", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.details_track_info), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         }
 
-                        currentSpecs.genre?.let { DetailRow(label = "Genre", value = it) }
-                        currentSpecs.composer?.let { DetailRow(label = "Composer", value = it) }
-                        currentSpecs.releaseDate?.let { DetailRow(label = "Released", value = it) }
-                        currentSpecs.label?.let { DetailRow(label = "Label", value = it) }
+                        currentSpecs.genre?.let { DetailRow(label = stringResource(R.string.details_genre), value = it) }
+                        currentSpecs.composer?.let { DetailRow(label = stringResource(R.string.details_composer), value = it) }
+                        currentSpecs.releaseDate?.let { DetailRow(label = stringResource(R.string.details_released), value = it) }
+                        currentSpecs.label?.let { DetailRow(label = stringResource(R.string.details_label), value = it) }
                         if (currentSpecs.trackNumber != null) {
                             val trackText = if (currentSpecs.trackCount != null && currentSpecs.trackCount > 0) {
-                                "${currentSpecs.trackNumber} of ${currentSpecs.trackCount}"
+                                context.getString(R.string.details_count_of, currentSpecs.trackNumber, currentSpecs.trackCount)
                             } else {
                                 "${currentSpecs.trackNumber}"
                             }
-                            DetailRow(label = "Track", value = trackText)
+                            DetailRow(label = stringResource(R.string.details_track), value = trackText)
                         }
                         if (currentSpecs.discNumber != null && (currentSpecs.discCount ?: 1) > 1) {
                             val discText = if (currentSpecs.discCount != null) {
-                                "${currentSpecs.discNumber} of ${currentSpecs.discCount}"
+                                context.getString(R.string.details_count_of, currentSpecs.discNumber, currentSpecs.discCount)
                             } else {
                                 "${currentSpecs.discNumber}"
                             }
-                            DetailRow(label = "Disc", value = discText)
+                            DetailRow(label = stringResource(R.string.details_disc), value = discText)
                         }
                         currentSpecs.contentRating?.let {
                             Row(
@@ -877,7 +883,7 @@ fun TrackDetailsSheet(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    text = "Rating",
+                                    text = stringResource(R.string.details_rating),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -918,7 +924,7 @@ fun TrackDetailsSheet(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.Album, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("About", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.details_about), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         }
                         Text(
                             text = currentSpecs.wikiSummary,
@@ -929,7 +935,7 @@ fun TrackDetailsSheet(
                         )
                         if (currentSpecs.wikiSummary.length > 200) {
                             Text(
-                                text = if (expanded) "Show less" else "Read more",
+                                text = if (expanded) stringResource(R.string.details_show_less) else stringResource(R.string.details_read_more),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.SemiBold,
@@ -950,17 +956,17 @@ fun TrackDetailsSheet(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.HighQuality, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Stream & Audio Specs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.details_stream_specs), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
 
-                    DetailRow(label = "Codec", value = currentSpecs.audioCodec)
-                    DetailRow(label = "Resolution", value = currentSpecs.bitDepthSampleRate)
+                    DetailRow(label = stringResource(R.string.details_codec), value = currentSpecs.audioCodec)
+                    DetailRow(label = stringResource(R.string.details_resolution), value = currentSpecs.bitDepthSampleRate)
                     currentSpecs.bitrate?.takeIf { it.isNotBlank() }?.let {
-                        DetailRow(label = "Bitrate", value = it)
+                        DetailRow(label = stringResource(R.string.details_bitrate), value = it)
                     }
-                    DetailRow(label = "Provider", value = currentSpecs.provider)
+                    DetailRow(label = stringResource(R.string.details_provider), value = currentSpecs.provider)
                     if (currentSpecs.durationText != "--:--") {
-                        DetailRow(label = "Duration", value = currentSpecs.durationText)
+                        DetailRow(label = stringResource(R.string.details_duration), value = currentSpecs.durationText)
                     }
                 }
             }
@@ -975,20 +981,20 @@ fun TrackDetailsSheet(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Offline Storage", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.details_offline_storage), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
 
                     DetailRow(
-                        label = "Status",
-                        value = if (currentSpecs.downloadedEntity != null) "Downloaded" else "Not downloaded",
+                        label = stringResource(R.string.details_status),
+                        value = if (currentSpecs.downloadedEntity != null) stringResource(R.string.details_downloaded) else stringResource(R.string.details_not_downloaded),
                     )
                     if (currentSpecs.downloadedEntity != null) {
                         DetailRow(
-                            label = "File Size",
+                            label = stringResource(R.string.details_file_size),
                             value = "%.1f MB".format(currentSpecs.downloadedEntity.fileSizeBytes / (1024.0 * 1024.0)),
                         )
                         DetailRow(
-                            label = "File Path",
+                            label = stringResource(R.string.details_file_path),
                             value = currentSpecs.downloadedEntity.filePath,
                         )
                     }

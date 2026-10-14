@@ -400,4 +400,43 @@
     <string name="signal_internal_backend_direct">DIRECT output</string>
     <string name="signal_usb_diag_copy">Copy USB diagnostic</string>
     <string name="signal_usb_diag_copied">USB diagnostic copied — paste it in a message</string>
+
+    <!-- Track details sheet -->
+    <string name="details_play_track">Play Track</string>
+    <string name="details_download">Download</string>
+    <string name="details_downloading">Downloading…</string>
+    <string name="details_downloaded">Downloaded</string>
+    <string name="details_not_downloaded">Not downloaded</string>
+    <string name="details_listening_stats">Listening Statistics</string>
+    <string name="details_your_scrobbles">Your Scrobbles</string>
+    <string name="details_plays_count">%1$s plays</string>
+    <string name="details_zero_plays">0 plays</string>
+    <string name="details_last_played">Last Played</string>
+    <string name="details_in_library">In library</string>
+    <string name="details_never">Never</string>
+    <string name="details_checking">Checking…</string>
+    <string name="details_global_plays">Global Plays</string>
+    <string name="details_listeners">Listeners</string>
+    <string name="details_track_info">Track Information</string>
+    <string name="details_genre">Genre</string>
+    <string name="details_composer">Composer</string>
+    <string name="details_released">Released</string>
+    <string name="details_label">Label</string>
+    <string name="details_track">Track</string>
+    <string name="details_disc">Disc</string>
+    <string name="details_count_of">%1$d of %2$d</string>
+    <string name="details_rating">Rating</string>
+    <string name="details_about">About</string>
+    <string name="details_read_more">Read more</string>
+    <string name="details_show_less">Show less</string>
+    <string name="details_stream_specs">Stream &amp; Audio Specs</string>
+    <string name="details_codec">Codec</string>
+    <string name="details_resolution">Resolution</string>
+    <string name="details_bitrate">Bitrate</string>
+    <string name="details_provider">Provider</string>
+    <string name="details_duration">Duration</string>
+    <string name="details_offline_storage">Offline Storage</string>
+    <string name="details_status">Status</string>
+    <string name="details_file_size">File Size</string>
+    <string name="details_file_path">File Path</string>
 </resources>
