@@ -21,7 +21,7 @@ class YtMusicLikeTest {
 
     @Test
     fun likeTargetCarriesOnlyTheVideoId() {
-        val target = InnerTubeMusicApi.likeTargetBody("dQw4w9WgXcQ")
+        val target = likeTargetBody("dQw4w9WgXcQ")
         assertThat(target.keys).containsExactly("videoId")
         assertThat(target["videoId"]?.jsonPrimitive?.content).isEqualTo("dQw4w9WgXcQ")
     }
@@ -30,7 +30,7 @@ class YtMusicLikeTest {
     fun likeTargetSurvivesASerializationRoundTrip() {
         // The body is inlined into the request JSON, so it must encode cleanly.
         val frame = """
-            {"target":${InnerTubeMusicApi.likeTargetBody("dQw4w9WgXcQ")}}
+            {"target":${likeTargetBody("dQw4w9WgXcQ")}}
         """.trimIndent()
         val parsed = Json.parseToJsonElement(frame).jsonObject
         assertThat(parsed["target"]?.jsonObject?.get("videoId")?.jsonPrimitive?.content)
