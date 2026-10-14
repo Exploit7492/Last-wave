@@ -161,6 +161,12 @@ data class YtAccountInfo(
 internal const val LIKE_ENDPOINT = "like/like"
 internal const val REMOVE_LIKE_ENDPOINT = "like/removelike"
 
+/** `{"videoId": …}` — the rate target shared by like and remove-like. */
+internal fun likeTargetBody(videoId: String): kotlinx.serialization.json.JsonObject =
+    buildJsonObject {
+        put("videoId", videoId)
+    }
+
 /**
  * One switchable YouTube channel within the signed-in session. Selection is
  * applied per-request, never via cookies: [pageId] (brand-channel delegation
@@ -1303,12 +1309,6 @@ class InnerTubeMusicApi @Inject constructor(
             }.onFailure {
                 android.util.Log.w(PLAYLIST_LOG_TAG, "$endpoint failed for $videoId", it)
             }.getOrDefault(false)
-        }
-
-    /** `{"videoId": …}` — the rate target shared by like and remove-like. */
-    internal fun likeTargetBody(videoId: String): kotlinx.serialization.json.JsonObject =
-        buildJsonObject {
-            put("videoId", videoId)
         }
 
     /** Reads back an OWNED playlist with each item's setVideoId for diffs/removals. */
