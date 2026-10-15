@@ -75,3 +75,6 @@ credentials_backup*
 # Isolated git worktrees (never commit their contents)
 .worktrees/
 
+# Standalone Telemetry Repository (separated to Clash-Projects/LastWave-Telemetry)
+lastwave-live/
+

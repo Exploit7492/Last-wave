@@ -155,6 +155,7 @@ fun LyricsPanel(
     val progress by (progressState ?: player.progressState).collectAsStateWithLifecycle(
         initialValue = PlaybackProgressState(positionMs = state.positionMs, durationMs = state.durationMs),
     )
+    var effectiveFontScale by remember(lyricsFontScale) { mutableFloatStateOf(lyricsFontScale) }
 
 
     Column(
@@ -216,7 +217,7 @@ fun LyricsPanel(
                                 lines = targetState.lines,
                                 currentPositionMs = { progress.positionMs + lyricsOffsetMs },
                                 lyricsOffsetMs = lyricsOffsetMs,
-                                lyricsFontScale = lyricsFontScale,
+                                lyricsFontScale = effectiveFontScale,
                                 isPlaying = state.isPlaying,
                                 onSeek = player::seekTo,
                                 animationStyle = lyricsAnimation,
@@ -226,7 +227,7 @@ fun LyricsPanel(
                         } else if (!targetState.plainLyrics.isNullOrBlank()) {
                             PlainLyricsView(
                                 plainLyrics = targetState.plainLyrics,
-                                lyricsFontScale = lyricsFontScale,
+                                lyricsFontScale = effectiveFontScale,
                                 modifier = Modifier.fillMaxSize(),
                             )
                         } else {
@@ -254,8 +255,14 @@ fun LyricsPanel(
             isFullscreen = isFullscreen,
             lyricsOffsetMs = lyricsOffsetMs,
             onOpenLyricsOffset = onOpenLyricsOffset,
-            lyricsFontScale = lyricsFontScale,
-            onLyricsFontScaleChange = onLyricsFontScaleChange,
+            lyricsFontScale = effectiveFontScale,
+            onLyricsFontScaleChange = { newScale ->
+                effectiveFontScale = newScale
+                onLyricsFontScaleChange(newScale)
+            },
+            onLyricsFontScalePreview = { previewScale ->
+                effectiveFontScale = previewScale
+            },
             primaryColor = primaryColor,
             secondaryColor = secondaryColor,
             tertiaryColor = tertiaryColor,
@@ -912,12 +919,16 @@ private fun LyricsPlaybackControls(
     onOpenLyricsOffset: (() -> Unit)? = null,
     lyricsFontScale: Float = 1.0f,
     onLyricsFontScaleChange: (Float) -> Unit = {},
+    onLyricsFontScalePreview: (Float) -> Unit = {},
     primaryColor: Color = MaterialTheme.colorScheme.primary,
     secondaryColor: Color = MaterialTheme.colorScheme.secondary,
     tertiaryColor: Color = MaterialTheme.colorScheme.tertiary,
     modifier: Modifier = Modifier,
 ) {
     var showFontSlider by rememberSaveable { mutableStateOf(false) }
+    var sliderPosition by remember(lyricsFontScale) { mutableFloatStateOf(lyricsFontScale) }
+    var isDragging by remember { mutableStateOf(false) }
+    val currentDisplayScale = if (isDragging) sliderPosition else lyricsFontScale
 
     // This Column performs layout only. It intentionally draws no container.
     Column(
@@ -948,14 +959,19 @@ private fun LyricsPlaybackControls(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = "Lyrics size: ${(lyricsFontScale * 100).roundToInt()}%",
+                            text = "Lyrics size: ${(currentDisplayScale * 100).roundToInt()}%",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = Color.White.copy(alpha = 0.90f),
                         )
-                        if (lyricsFontScale != 1.0f) {
+                        if (currentDisplayScale != 1.0f) {
                             TextButton(
-                                onClick = { onLyricsFontScaleChange(1.0f) },
+                                onClick = {
+                                    sliderPosition = 1.0f
+                                    isDragging = false
+                                    onLyricsFontScalePreview(1.0f)
+                                    onLyricsFontScaleChange(1.0f)
+                                },
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                                 modifier = Modifier.height(26.dp),
                             ) {
@@ -979,8 +995,16 @@ private fun LyricsPlaybackControls(
                             color = Color.White.copy(alpha = 0.70f),
                         )
                         Slider(
-                            value = lyricsFontScale,
-                            onValueChange = onLyricsFontScaleChange,
+                            value = currentDisplayScale,
+                            onValueChange = {
+                                isDragging = true
+                                sliderPosition = it
+                                onLyricsFontScalePreview(it)
+                            },
+                            onValueChangeFinished = {
+                                isDragging = false
+                                onLyricsFontScaleChange(sliderPosition)
+                            },
                             valueRange = 0.7f..1.5f,
                             modifier = Modifier.weight(1f),
                         )

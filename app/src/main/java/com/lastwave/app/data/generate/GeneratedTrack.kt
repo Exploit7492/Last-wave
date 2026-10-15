@@ -60,6 +60,7 @@ fun GeneratedTrack.sameSongAs(other: GeneratedTrack): Boolean {
     val mine = youtubeVideoIdOrNull()
     val theirs = other.youtubeVideoIdOrNull()
     if (mine != null && mine == theirs) return true
+    if (name.isBlank() && other.name.isBlank()) return false
     if (key == other.key) return true
     return name.trim().equals(other.name.trim(), ignoreCase = true) &&
         artist.trim().equals(other.artist.trim(), ignoreCase = true)
@@ -116,20 +117,57 @@ suspend fun List<GeneratedTrack>.pinnedWithVideoIds(
     }.awaitAll().filterNotNull()
 }
 
+/**
+ * Resolves YouTube video IDs for tracks in a playlist, updating tracks that match
+ * while strictly PRESERVING all tracks (never dropping unresolvable or offline tracks).
+ */
+suspend fun List<GeneratedTrack>.pinnedWithVideoIdsPreserving(
+    innerTube: InnerTubeMusicApi,
+    concurrency: Int = 4,
+): List<GeneratedTrack> = coroutineScope {
+    if (isEmpty()) return@coroutineScope emptyList()
+    val limiter = Semaphore(concurrency)
+    map { track ->
+        async {
+            if (track.youtubeVideoIdOrNull() != null) return@async track
+            // Imported files play from disk; never swap them for a YouTube match.
+            if (track.isLocalFile()) return@async track
+            if (track.name.isBlank()) return@async track
+            limiter.withPermit {
+                try {
+                    innerTube.findBestMatchOrNull(track.name, track.artist, prefetchStreams = false)?.let { match ->
+                        track.copy(
+                            name = track.name.ifBlank { match.title },
+                            artist = track.artist.ifBlank { match.artist },
+                            album = track.album ?: match.album,
+                            artworkUrl = track.artworkUrl ?: match.artworkUrl,
+                            url = "https://music.youtube.com/watch?v=${match.videoId}",
+                        )
+                    } ?: track
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                    track
+                }
+            }
+        }
+    }.awaitAll()
+}
+
 /** Serializable form of [GeneratedTrack], used for Room-persisted playlists
  *  (JSON blob column) and Playlist screen export (CSV/M3U). */
 @Serializable
 @Immutable
 data class StoredTrack(
-    val name: String,
-    val artist: String,
-    val url: String = "",
+    val name: String? = "",
+    val artist: String? = "",
+    val url: String? = "",
     val image: String? = null,
     val album: String? = null,
 )
 
 fun GeneratedTrack.toStored() = StoredTrack(name = name, artist = artist, url = url, image = artworkUrl, album = album)
-fun StoredTrack.toGenerated() = GeneratedTrack(name = name, artist = artist, artworkUrl = image, url = url, album = album)
+fun StoredTrack.toGenerated() = GeneratedTrack(name = name.orEmpty(), artist = artist.orEmpty(), artworkUrl = image, url = url.orEmpty(), album = album)
 
 fun GeneratedTrack.youtubeVideoIdOrNull(): String? {
     val value = url.trim()

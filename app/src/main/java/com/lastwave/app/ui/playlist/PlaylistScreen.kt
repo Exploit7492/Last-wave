@@ -281,7 +281,10 @@ fun PlaylistScreen(
                         // animateItem() crashes Lazy layout at the scroll edge
                         // ("key was already used" / anchor OOB). Ids are unique
                         // Room PKs so they are stable across reorder.
-                        itemsIndexed(state.playlists, key = { _, playlist -> playlist.id }) { index, playlist ->
+                        itemsIndexed(
+                            items = state.playlists,
+                            key = { _, playlist -> "pl_${playlist.id}_${playlist.remotePlaylistId ?: "local"}" },
+                        ) { index, playlist ->
                             val isNewest = playlist.id == state.newestId
                             Box(Modifier.animateItem()) {
                                 PlaylistCard(

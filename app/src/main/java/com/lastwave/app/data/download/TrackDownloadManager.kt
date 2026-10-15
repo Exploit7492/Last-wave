@@ -858,9 +858,13 @@ class TrackDownloadManager @Inject constructor(
                                 extension = when {
                                     mimeType.contains("mp3", ignoreCase = true) -> "mp3"
                                     isAtmosStream || mimeType.contains("mp4", ignoreCase = true) || mimeType.contains("m4a", ignoreCase = true) -> "m4a"
+                                    mimeType.contains("aac", ignoreCase = true) -> "m4a"
+                                    mimeType.contains("opus", ignoreCase = true) || mimeType.contains("ogg", ignoreCase = true) -> "opus"
                                     else -> "flac"
                                 }
                                 isLossless = !extension.equals("mp3", ignoreCase = true) &&
+                                    !extension.equals("m4a", ignoreCase = true) &&
+                                    !extension.equals("opus", ignoreCase = true) &&
                                     losslessStream.formatId != LosslessMusicApi.QUALITY_MP3_320 &&
                                     losslessStream.formatId != LosslessMusicApi.QUALITY_DATA_SAVER &&
                                     !mimeType.contains("aac", ignoreCase = true)
@@ -2238,9 +2242,9 @@ class TrackDownloadManager @Inject constructor(
         }
         if (count <= 0) {
             val durationMatch = Regex("""mediaPresentationDuration=["']PT(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?["']""", RegexOption.IGNORE_CASE).find(xmlStr)
-            val segTemplateMatch = Regex("""<SegmentTemplate\b[^>]*>""", RegexOption.IGNORE_CASE).find(xmlStr)?.value
-            val segDuration = segTemplateMatch?.let { Regex("""\bduration=["'](\d+)["']""", RegexOption.IGNORE_CASE).find(it)?.groupValues?.get(1)?.toDoubleOrNull() } ?: 1.0
-            val timescale = segTemplateMatch?.let { Regex("""\btimescale=["'](\d+)["']""", RegexOption.IGNORE_CASE).find(it)?.groupValues?.get(1)?.toDoubleOrNull() } ?: 1.0
+            val segTemplateMatch = Regex("""<(?:SegmentTemplate|SegmentList)\b[^>]*>""", RegexOption.IGNORE_CASE).find(xmlStr)?.value
+            val segDuration = segTemplateMatch?.let { Regex("""\bduration=["']([0-9.]+)["']""", RegexOption.IGNORE_CASE).find(it)?.groupValues?.get(1)?.toDoubleOrNull() } ?: 1.0
+            val timescale = segTemplateMatch?.let { Regex("""\btimescale=["']([0-9.]+)["']""", RegexOption.IGNORE_CASE).find(it)?.groupValues?.get(1)?.toDoubleOrNull() } ?: 1.0
             if (durationMatch != null) {
                 val hours = durationMatch.groupValues.getOrNull(1)?.toDoubleOrNull() ?: 0.0
                 val min = durationMatch.groupValues.getOrNull(2)?.toDoubleOrNull() ?: 0.0

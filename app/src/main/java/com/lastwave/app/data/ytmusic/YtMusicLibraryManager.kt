@@ -88,7 +88,12 @@ class YtMusicLibraryManager @Inject constructor(
         val localIds = local.mapTo(mutableSetOf()) { it.id }
         val linkedRemoteIds = mappings.filterKeys { it in localIds }.values
             .mapTo(mutableSetOf()) { it.remotePlaylistId.removePrefix("VL") }
-        account.filterNot { it.id in hiddenIds || it.id.removePrefix("VL") in linkedRemoteIds }.map { summary ->
+        val localHasLiked = local.any { it.mode == com.lastwave.app.data.playlist.LIKED_SONGS_MODE }
+        account.filterNot {
+            it.id in hiddenIds ||
+            it.id.removePrefix("VL") in linkedRemoteIds ||
+            (localHasLiked && (it.id == "LM" || it.id == "FEmusic_liked_videos" || it.id.removePrefix("VL") == "LM"))
+        }.map { summary ->
             summaryToPlaylist(summary).copy(isPinned = summary.id in pinnedIds)
         }
     }.stateIn(applicationScope, SharingStarted.Eagerly, emptyList())
@@ -374,7 +379,11 @@ class YtMusicLibraryManager @Inject constructor(
             )
             details[localId] = partialPlaylist
             onUpdate?.invoke(partialPlaylist)
-        } ?: return@withContext details[localId]
+        } ?: run {
+            val fallback = details[localId] ?: readFromDiskCache(localId)
+            if (fallback != null) onUpdate?.invoke(fallback)
+            return@withContext fallback
+        }
 
         val title = if (result.title.isNotBlank() && result.title != "Imported Playlist") {
             result.title
@@ -556,8 +565,11 @@ class YtMusicLibraryManager @Inject constructor(
         val targetVideoId = target.youtubeVideoIdOrNull() ?: return@withContext playlist
         val owned = getOwnedPlaylist(localId, remoteId, targetVideoId) ?: return@withContext playlist
         val item = owned.items.firstOrNull { it.videoId == targetVideoId && it.setVideoId != null }
-            ?: return@withContext playlist
-        if (!innerTube.removeVideosFromRemotePlaylist(remoteId, listOf(item.setVideoId!! to item.videoId))) {
+        if (item != null) {
+            if (!innerTube.removeVideosFromRemotePlaylist(remoteId, listOf(item.setVideoId!! to item.videoId))) {
+                return@withContext playlist
+            }
+        } else if (!owned.complete) {
             return@withContext playlist
         }
         val remainingTracks = playlist.tracks.filterIndexed { i, _ -> i != index }
@@ -565,7 +577,9 @@ class YtMusicLibraryManager @Inject constructor(
             tracks = remainingTracks,
             remoteTrackCount = playlist.remoteTrackCount?.let { maxOf(0, it - 1) },
         )
-        ownedPlaylistCache[localId] = System.currentTimeMillis() to owned.copy(items = owned.items.filterNot { it.setVideoId == item.setVideoId })
+        ownedPlaylistCache[localId] = System.currentTimeMillis() to owned.copy(
+            items = if (item != null) owned.items.filterNot { it.setVideoId == item.setVideoId } else owned.items,
+        )
         details[localId] = updatedPlaylist
         writeToDiskCache(localId, updatedPlaylist)
         updatedPlaylist.remoteTrackCount?.let { updateRemoteTrackCount(remoteId, it) }

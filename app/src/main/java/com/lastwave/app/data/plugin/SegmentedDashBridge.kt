@@ -43,9 +43,11 @@ class SegmentedDashBridge @Inject constructor(
     fun mpdUriForBase(descriptor: SegmentedStreamDescriptor, baseUrl: String): Uri {
         val mpd = when {
             baseUrl.startsWith("data:application/dash+xml;base64,") -> {
-                String(android.util.Base64.decode(baseUrl.substringAfter("base64,"), android.util.Base64.DEFAULT), Charsets.UTF_8)
+                SegmentedMpdBuilder.sanitizeMpdXml(
+                    String(android.util.Base64.decode(baseUrl.substringAfter("base64,"), android.util.Base64.DEFAULT), Charsets.UTF_8)
+                )
             }
-            baseUrl.startsWith("<?xml") -> baseUrl
+            baseUrl.startsWith("<?xml") -> SegmentedMpdBuilder.sanitizeMpdXml(baseUrl)
             else -> SegmentedMpdBuilder.build(descriptor, baseUrl)
         }
         val digest = MessageDigest.getInstance("SHA-256")
