@@ -65,7 +65,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import com.lastwave.app.R
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -137,12 +139,12 @@ fun FriendProfileScreen(
                 actions = {
                     HeaderActionIcon(
                         icon = Icons.Filled.PushPin,
-                        contentDescription = if (uiState.isPinned) "Unpin friend" else "Pin friend",
+                        contentDescription = if (uiState.isPinned) stringResource(R.string.fr_unpin_cd) else stringResource(R.string.fr_pin_cd),
                         onClick = viewModel::togglePinned,
                     )
                     HeaderActionIcon(
                         icon = Icons.Filled.OpenInNew,
-                        contentDescription = "Open Last.fm profile",
+                        contentDescription = stringResource(R.string.fr_open_lfm_cd),
                         onClick = {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.last.fm/user/$username"))
                             context.startActivity(intent)
@@ -166,7 +168,7 @@ fun FriendProfileScreen(
                         modifier = Modifier.fillMaxSize().padding(32.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        ExpressiveLoadingIndicator(message = "Loading $displayTitle's profile")
+                        ExpressiveLoadingIndicator(message = stringResource(R.string.fr_loading, displayTitle))
                     }
                 } else if (uiState.error != null && uiState.recentTracks.isEmpty() && uiState.topTracksOverall.isEmpty()) {
                     Box(
@@ -175,14 +177,14 @@ fun FriendProfileScreen(
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                text = uiState.error ?: "Unable to load friend's profile",
+                                text = uiState.error ?: stringResource(R.string.fr_load_fail),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.error,
                                 textAlign = TextAlign.Center,
                             )
                             Spacer(Modifier.height(12.dp))
                             Button(onClick = viewModel::refresh) {
-                                Text("Retry")
+                                Text(stringResource(R.string.set_yt_retry))
                             }
                         }
                     }
@@ -283,7 +285,7 @@ fun FriendProfileScreen(
                             FriendProfileTab.RECENT -> {
                                 if (uiState.recentTracks.isEmpty()) {
                                     item(key = "empty_recents") {
-                                        EmptyStateText("No recent scrobbles found for this friend.")
+                                        EmptyStateText(stringResource(R.string.fr_empty_recent))
                                     }
                                 } else {
                                     itemsIndexed(
@@ -292,7 +294,7 @@ fun FriendProfileScreen(
                                     ) { index, track ->
                                         FriendTrackRow(
                                             track = track,
-                                            badge = formatRelativeTime(track.timestampMillis),
+                                            badge = formatRelativeTime(context, track.timestampMillis),
                                             onClick = { viewModel.playQueue(uiState.recentTracks, index) },
                                             onLongClick = {
                                                 addToPlaylist(
@@ -318,7 +320,7 @@ fun FriendProfileScreen(
                                 }
                                 if (tracks.isEmpty()) {
                                     item(key = "empty_top_tracks") {
-                                        EmptyStateText("No top tracks available for this period.")
+                                        EmptyStateText(stringResource(R.string.fr_empty_tracks))
                                     }
                                 } else {
                                     itemsIndexed(
@@ -327,7 +329,7 @@ fun FriendProfileScreen(
                                     ) { index, track ->
                                         FriendTrackRow(
                                             track = track,
-                                            badge = if (track.playCount > 0) "${track.playCount} plays" else null,
+                                            badge = if (track.playCount > 0) context.getString(R.string.fr_badge_plays, track.playCount) else null,
                                             rank = index + 1,
                                             onClick = { viewModel.playQueue(tracks, index) },
                                             onLongClick = {
@@ -349,7 +351,7 @@ fun FriendProfileScreen(
                             FriendProfileTab.TOP_ARTISTS -> {
                                 if (uiState.topArtists.isEmpty()) {
                                     item(key = "empty_top_artists") {
-                                        EmptyStateText("No top artists available for this friend.")
+                                        EmptyStateText(stringResource(R.string.fr_empty_artists))
                                     }
                                 } else {
                                     itemsIndexed(
@@ -463,7 +465,7 @@ private fun FriendHeroCard(
                             )
                             Spacer(Modifier.width(4.dp))
                             Text(
-                                "Last.fm Friend",
+                                stringResource(R.string.fr_badge_lfm),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -554,7 +556,7 @@ private fun FriendNowPlayingBanner(
                 IconButton(onClick = onMenuClick, modifier = Modifier.size(28.dp)) {
                     Icon(
                         Icons.Filled.MoreVert,
-                        contentDescription = "Menu",
+                        contentDescription = stringResource(R.string.home_menu_cd),
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.size(18.dp),
                     )
@@ -616,7 +618,7 @@ private fun FriendNowPlayingBanner(
                 ) {
                     Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Listen Along", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.fr_listen_along), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                 }
                 OutlinedButton(
                     onClick = onStartMix,
@@ -626,7 +628,7 @@ private fun FriendNowPlayingBanner(
                 ) {
                     Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Start Mix", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.fr_start_mix), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -735,7 +737,7 @@ private fun FriendTabSelector(
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
-                        text = tab.label,
+                        text = stringResource(tab.labelRes),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                         color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -751,14 +753,14 @@ private fun PeriodFilterChips(
     selectedPeriod: String,
     onPeriodSelect: (String) -> Unit,
 ) {
-    val periods = listOf("overall" to "Overall", "7day" to "7 Days", "1month" to "30 Days")
+    val periods = listOf("overall" to R.string.fr_period_all, "7day" to R.string.fr_period_7d, "1month" to R.string.fr_period_30d)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        periods.forEach { (key, label) ->
+        periods.forEach { (key, labelRes) ->
             val isSelected = key == selectedPeriod
             Surface(
                 onClick = { onPeriodSelect(key) },
@@ -771,7 +773,7 @@ private fun PeriodFilterChips(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = label,
+                        text = stringResource(labelRes),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                         color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -871,7 +873,7 @@ private fun FriendTrackRow(
             IconButton(onClick = onMenuClick, modifier = Modifier.size(32.dp)) {
                 Icon(
                     Icons.Filled.MoreVert,
-                    contentDescription = "Options",
+                    contentDescription = stringResource(R.string.dl_options_cd),
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1003,7 +1005,7 @@ private fun formatDuration(totalSeconds: Long): String {
     }
 }
 
-private fun formatRelativeTime(millis: Long?): String {
+private fun formatRelativeTime(context: android.content.Context, millis: Long?): String {
     if (millis == null || millis <= 0) return ""
     val now = System.currentTimeMillis()
     val diff = now - millis
@@ -1011,15 +1013,24 @@ private fun formatRelativeTime(millis: Long?): String {
     val hours = minutes / 60
     val days = hours / 24
     return when {
-        diff < 60_000L -> "Just now"
-        minutes < 60 -> "${minutes}m ago"
-        hours < 24 -> "${hours}h ago"
-        days == 1L -> "Yesterday"
-        days < 7 -> "${days}d ago"
+        diff < 60_000L -> context.getString(R.string.fr_time_now)
+        minutes < 60 -> context.getString(R.string.fr_time_min, minutes.toInt())
+        hours < 24 -> context.getString(R.string.fr_time_hour, hours.toInt())
+        days == 1L -> context.getString(R.string.fr_time_yesterday)
+        days < 7 -> context.getString(R.string.fr_time_day, days.toInt())
         else -> {
             val cal = java.util.Calendar.getInstance().apply { timeInMillis = millis }
-            val months = arrayOf("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
-            "${cal.get(java.util.Calendar.DAY_OF_MONTH)} ${months[cal.get(java.util.Calendar.MONTH)]}"
+            val months = intArrayOf(
+                R.string.fr_month_jan, R.string.fr_month_feb, R.string.fr_month_mar,
+                R.string.fr_month_apr, R.string.fr_month_may, R.string.fr_month_jun,
+                R.string.fr_month_jul, R.string.fr_month_aug, R.string.fr_month_sep,
+                R.string.fr_month_oct, R.string.fr_month_nov, R.string.fr_month_dec,
+            )
+            context.getString(
+                R.string.fr_date,
+                cal.get(java.util.Calendar.DAY_OF_MONTH),
+                context.getString(months[cal.get(java.util.Calendar.MONTH)]),
+            )
         }
     }
 }

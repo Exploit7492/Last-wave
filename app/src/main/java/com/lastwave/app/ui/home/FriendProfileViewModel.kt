@@ -23,10 +23,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-enum class FriendProfileTab(val label: String) {
-    RECENT("Recent"),
-    TOP_TRACKS("Top Tracks"),
-    TOP_ARTISTS("Top Artists"),
+enum class FriendProfileTab(val labelRes: Int) {
+    RECENT(com.lastwave.app.R.string.fr_tab_recent),
+    TOP_TRACKS(com.lastwave.app.R.string.fr_tab_tracks),
+    TOP_ARTISTS(com.lastwave.app.R.string.fr_tab_artists),
 }
 
 @Immutable
@@ -51,6 +51,7 @@ data class FriendProfileUiState(
 
 @HiltViewModel
 class FriendProfileViewModel @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val homeRepository: HomeRepository,
     private val settingsPreferences: SettingsPreferences,
     private val musicPlayer: MusicPlayer,
@@ -122,7 +123,7 @@ class FriendProfileViewModel @Inject constructor(
                         it.copy(
                             isLoading = false,
                             isRefreshing = false,
-                            error = err.message ?: "Failed to load friend's profile",
+                            error = err.message ?: appContext.getString(com.lastwave.app.R.string.fr_load_error),
                         )
                     }
                 }

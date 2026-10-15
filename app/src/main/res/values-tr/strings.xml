@@ -98,6 +98,8 @@
     <string name="settings_force_sw_volume_off">Mümkünse DAC donanım sesi, yoksa yazılım</string>
     <string name="settings_crossfade">Geçiş (Crossfade)</string>
     <string name="settings_crossfade_sub">Parça sonunu sonraki parçayla yumuşakça birleştir</string>
+    <string name="settings_keep_lyrics_screen_awake">Şarkı Sözlerinde Ekranı Açık Tut</string>
+    <string name="settings_keep_lyrics_screen_awake_desc">Şarkı sözlerine bakarken ekranın kapanmasını engelle</string>
     <string name="settings_download_lyrics">Eşitlenmiş Şarkı Sözlerini İndir</string>
     <string name="settings_download_lyrics_on">.lrc dosyalarını kaydet ve sözleri indirmelere göm</string>
     <string name="settings_download_lyrics_off">İndirirken sözleri alma veya kaydetme</string>
@@ -966,4 +968,101 @@
     <string name="ytimp_fail">İçe aktarma başarısız: %1$s</string>
     <string name="ytimp_type_fail">%1$s içe aktarma başarısız: %2$s</string>
     <string name="ytimp_type_rom">%1$s içe aktarma bu ROM’da desteklenmiyor</string>
+
+    <!-- Arkadaş profili -->
+    <string name="fr_open_lfm_cd">Last.fm profilini aç</string>
+    <string name="fr_pin_cd">Arkadaşı sabitle</string>
+    <string name="fr_unpin_cd">Arkadaş sabitini kaldır</string>
+    <string name="fr_loading">%1$s profili yükleniyor</string>
+    <string name="fr_load_fail">Arkadaş profili yüklenemedi</string>
+    <string name="fr_load_error">Arkadaş profili yüklenemedi</string>
+    <string name="fr_tab_recent">Son</string>
+    <string name="fr_tab_tracks">En İyi Parçalar</string>
+    <string name="fr_tab_artists">En İyi Sanatçılar</string>
+    <string name="fr_empty_recent">Bu arkadaş için son scrobble bulunamadı.</string>
+    <string name="fr_empty_tracks">Bu dönem için en iyi parça yok.</string>
+    <string name="fr_empty_artists">Bu arkadaş için en iyi sanatçı yok.</string>
+    <string name="fr_period_all">Genel</string>
+    <string name="fr_period_7d">7 Gün</string>
+    <string name="fr_period_30d">30 Gün</string>
+    <string name="fr_badge_plays">%1$d dinlenme</string>
+    <string name="fr_badge_lfm">Last.fm Arkadaşı</string>
+    <string name="fr_listen_along">Birlikte Dinle</string>
+    <string name="fr_start_mix">Mix Başlat</string>
+    <string name="fr_time_now">Az önce</string>
+    <string name="fr_time_min">%1$d dk önce</string>
+    <string name="fr_time_hour">%1$d sa önce</string>
+    <string name="fr_time_yesterday">Dün</string>
+    <string name="fr_time_day">%1$d gün önce</string>
+    <string name="fr_date">%1$d %2$s</string>
+    <string name="fr_month_jan">Oca</string>
+    <string name="fr_month_feb">Şub</string>
+    <string name="fr_month_mar">Mar</string>
+    <string name="fr_month_apr">Nis</string>
+    <string name="fr_month_may">May</string>
+    <string name="fr_month_jun">Haz</string>
+    <string name="fr_month_jul">Tem</string>
+    <string name="fr_month_aug">Ağu</string>
+    <string name="fr_month_sep">Eyl</string>
+    <string name="fr_month_oct">Eki</string>
+    <string name="fr_month_nov">Kas</string>
+    <string name="fr_month_dec">Ara</string>
+
+    <!-- Şarkı sözü görünümleri -->
+    <string name="ly_word_sync">KELİME EŞİTLEME</string>
+    <string name="ly_line_sync">SATIR EŞİTLEME</string>
+    <string name="ly_provider_fallback">Şarkı Sözleri</string>
+    <string name="ly_sync_badge">%1$s • %2$s</string>
+    <string name="ly_not_synced">Şarkı sözleri zaman eşitlemeli değil</string>
+    <string name="ly_instrumental">Enstrümantal</string>
+    <string name="ly_none">Şarkı sözü yok</string>
+    <string name="ly_no_vocals">Bu parçada vokal sözü yok.</string>
+    <string name="ly_no_synced">Bu parça için eşitlenmiş söz bulunamadı.</string>
+    <string name="ly_retry">Tekrar dene</string>
+    <string name="ly_size_cd">Şarkı sözü metin boyutunu ayarla</string>
+
+    <!-- Sanatçı detayı -->
+    <string name="art_verified_cd">Onaylı Sanatçı</string>
+    <string name="art_shuffle_cd">Sanatçıyı karıştır</string>
+    <string name="art_radio_cd">Sanatçı Radyosu</string>
+    <string name="art_play_cd">Sanatçıyı çal</string>
+    <string name="art_about">Hakkında</string>
+    <string name="art_read_more">… Devamını oku</string>
+    <string name="art_show_less_songs">Daha az göster</string>
+    <string name="art_show_all_songs">Tüm şarkıları göster</string>
+    <string name="art_albums">Albümler</string>
+    <string name="art_fans_like">Hayranlar Ayrıca Beğendi</string>
+    <string name="art_load_fail">Sanatçı bilgileri yüklenemedi</string>
+
+    <!-- Albüm detayı -->
+    <string name="alb_shuffle_cd">Albümü karıştır</string>
+    <string name="alb_play_cd">Albümü çal</string>
+    <string name="alb_tracks">Parçalar</string>
+    <string name="alb_empty">Bu albümde şu an parça listelenmiyor — sonra tekrar deneyin.</string>
+    <string name="alb_load_fail">Albüm bilgileri yüklenemedi</string>
+    <string name="alb_save_fail">Albüm kaydedilemedi. Tekrar deneyin.</string>
+
+    <!-- Yeni çıkanlar -->
+    <string name="nr_title">Yeni çıkanlar</string>
+    <string name="nr_sub">Taze çıkanları bulun</string>
+    <string name="nr_load_fail">Yeni çıkanlar yüklenemedi</string>
+    <string name="nr_empty">Yeni çıkan bulunamadı</string>
+    <string name="nr_empty_hint">Tekrar denetlemek için aşağı çekin veya yenileye dokunun.</string>
+    <string name="nr_more_fail">Daha fazla çıkan yüklenemedi. Tekrar deneyin</string>
+
+    <!-- Türler -->
+    <string name="ge_title">Türleriniz</string>
+    <string name="ge_sub">Dinleme geçmişinize göre</string>
+    <string name="ge_empty">Henüz tür verisi yok</string>
+    <string name="ge_tracks">Parçalarınız</string>
+    <string name="ge_discover">Daha Fazla Keşfet</string>
+    <string name="ge_no_tracks">Parça bulunamadı</string>
+
+    <!-- Giriş -->
+    <string name="login_tagline">Müziğiniz, sizin tarzınız — YouTube Music destekli</string>
+    <string name="login_yt">YouTube Music ile Giriş Yap</string>
+    <string name="login_guest">Misafir Olarak Devam Et</string>
+    <string name="login_guest_desc">Misafir modu yerel önerilerle tamamen çevrimdışı çalışır. Scrobble’ları eşitlemek için Ayarlardan istediğiniz zaman Last.fm bağlayın.</string>
+    <string name="login_restore">Yedeği geri yükle</string>
+    <string name="login_downloads">Çevrimdışı İndirilenleri Aç</string>
 </resources>

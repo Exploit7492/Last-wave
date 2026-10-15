@@ -33,6 +33,7 @@ sealed interface ArtistUiState {
 
 @HiltViewModel
 class ArtistViewModel @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val repository: ArtistRepository,
     private val musicPlayer: MusicPlayer,
     private val mixLauncher: MixLauncher,
@@ -72,7 +73,7 @@ class ArtistViewModel @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 if (_uiState.value !is ArtistUiState.Success) {
-                    _uiState.value = ArtistUiState.Error(e.message ?: "Failed to load artist details")
+                    _uiState.value = ArtistUiState.Error(e.message ?: appContext.getString(com.lastwave.app.R.string.art_load_fail))
                 }
             }
         }

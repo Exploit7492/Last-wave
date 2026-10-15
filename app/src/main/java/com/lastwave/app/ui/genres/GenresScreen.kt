@@ -43,9 +43,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.lastwave.app.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.generate.GeneratedTrack
@@ -91,8 +93,8 @@ fun GenresScreen(
                 .adaptiveContentWidth(maxWidth = 860.dp),
         ) {
             ExpressiveHeader(
-                title = "Your Genres",
-                subtitle = "Based on your listening history",
+                title = stringResource(R.string.ge_title),
+                subtitle = stringResource(R.string.ge_sub),
                 onBack = onBack,
                 actions = { PeriodDropdown(state.period, viewModel::setPeriod) },
             )
@@ -106,7 +108,7 @@ fun GenresScreen(
                     Modifier.fillMaxSize().safeHorizontalContentPadding(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("No genre data yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.ge_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 else -> LazyColumn(
                     contentPadding = PaddingValues(
@@ -238,15 +240,15 @@ private fun GenreDetailSheet(
 
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 androidx.compose.material3.Button(onClick = onStartMix, modifier = Modifier.weight(1f)) {
-                    Text("Start Mix")
+                    Text(stringResource(R.string.fr_start_mix))
                 }
                 if (state.isDiscoverMode) {
                     androidx.compose.material3.OutlinedButton(onClick = onShowYourTracks, modifier = Modifier.weight(1f)) {
-                        Text("Your Tracks")
+                        Text(stringResource(R.string.ge_tracks))
                     }
                 } else {
                     androidx.compose.material3.OutlinedButton(onClick = onDiscoverMore, modifier = Modifier.weight(1f)) {
-                        Text("Discover More")
+                        Text(stringResource(R.string.ge_discover))
                     }
                 }
             }
@@ -271,7 +273,7 @@ private fun GenreDetailSheet(
                 if (!state.detailLoading && state.detailTracks.isEmpty()) {
                     item {
                         Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                            Text("No tracks found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.ge_no_tracks), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
