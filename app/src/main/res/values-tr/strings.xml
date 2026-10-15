@@ -730,4 +730,48 @@
     <string name="fpd_loading_more">Kalan parçalar yükleniyor…</string>
     <string name="fpd_incomplete">Liste eksik · Tekrar dene</string>
     <string name="fpd_track_options_cd">Parça seçenekleri</string>
+
+    <!-- İndirilenler ekranı -->
+    <string name="dl_cancel_all">Tümünü İptal Et (%1$d)</string>
+    <string name="dl_options_cd">Seçenekler</string>
+    <string name="dl_cancel_all_confirm">Tüm indirmeleri iptal et (%1$d)</string>
+    <string name="dl_lyrics_row">Şarkı Sözlerini İndir</string>
+    <string name="dl_offline_cd">Çevrimdışı Mod</string>
+    <string name="dl_offline_banner">Çevrimdışı Mod • İndirilen yerel parçalar çalınıyor</string>
+    <string name="dl_delete_title">“%1$s” silinsin mi?</string>
+    <string name="dl_delete_text">Depolama alanı açmak için yerel ses dosyasını silebilir veya yalnızca geçmişten kaldırabilirsiniz.</string>
+    <string name="dl_delete_file">Dosyayı Sil</string>
+    <string name="dl_history_only">Yalnızca Geçmiş</string>
+    <string name="dl_filter_all">Tümü</string>
+    <string name="dl_filter_lossless">Kayıpsız / FLAC</string>
+    <string name="dl_filter_lyrics">Sözlü (LRC)</string>
+    <string name="dl_shuffle_cd">Karıştır</string>
+    <string name="dl_play_all_cd">Tümünü çal</string>
+    <string name="dl_play_cd">Çal</string>
+    <string name="dl_shuffle_all_cd">Tümünü karıştır</string>
+    <string name="dl_shuffle_all">Tümünü Karıştır</string>
+    <string name="dl_play_artist_cd">Sanatçıyı çal</string>
+    <string name="dl_play_album_cd">Albümü çal</string>
+    <string name="dl_play_all_btn">Tümünü Çal</string>
+    <string name="dl_play_album_btn">Albümü Çal</string>
+    <string name="dl_cancel_dl_cd">İndirmeyi iptal et</string>
+    <string name="dl_play_offline_cd">Çevrimdışı parçayı çal</string>
+    <string name="dl_song_options_cd">Şarkı seçenekleri</string>
+    <string name="dl_play_next">Sonraki Çal</string>
+    <string name="dl_add_queue">Sıraya Ekle</string>
+    <string name="dl_view_artist">Sanatçıyı Gör (%1$s)</string>
+    <string name="dl_view_album">Albümü Gör (%1$s)</string>
+
+    <!-- Sağlayıcı modülleri ekranı -->
+    <string name="mod_addon_url">Eklenti Adresi</string>
+    <string name="mod_test_cd">Bağlantıyı sına</string>
+    <string name="mod_edit_cd">Eklenti Adresini Düzenle</string>
+    <string name="mod_remove_cd">Eklentiyi Kaldır</string>
+
+    <!-- Dış liste içe aktarma -->
+    <string name="imp_clear_cd">Temizle</string>
+    <string name="imp_paste_cd">Yapıştır</string>
+    <string name="imp_reading">Liste okunuyor…</string>
+    <string name="imp_preview">Önizleme</string>
+    <string name="dl_albums_count">Albümler (%1$d)</string>
 </resources>

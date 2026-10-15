@@ -734,4 +734,48 @@
     <string name="player_show_lyrics_cd">Show lyrics</string>
     <string name="player_delete_cd">Delete</string>
     <string name="player_menu_cd">Menu</string>
+
+    <!-- Downloads screen -->
+    <string name="dl_cancel_all">Cancel All (%1$d)</string>
+    <string name="dl_options_cd">Options</string>
+    <string name="dl_cancel_all_confirm">Cancel all downloads (%1$d)</string>
+    <string name="dl_lyrics_row">Download Lyrics</string>
+    <string name="dl_offline_cd">Offline Mode</string>
+    <string name="dl_offline_banner">Offline Mode • Playing downloaded local tracks</string>
+    <string name="dl_delete_title">Delete “%1$s”?</string>
+    <string name="dl_delete_text">You can delete the local audio file to free storage space, or remove it from history only.</string>
+    <string name="dl_delete_file">Delete File</string>
+    <string name="dl_history_only">History Only</string>
+    <string name="dl_filter_all">All</string>
+    <string name="dl_filter_lossless">Lossless / FLAC</string>
+    <string name="dl_filter_lyrics">With Lyrics (LRC)</string>
+    <string name="dl_shuffle_cd">Shuffle</string>
+    <string name="dl_play_all_cd">Play all</string>
+    <string name="dl_play_cd">Play</string>
+    <string name="dl_shuffle_all_cd">Shuffle all</string>
+    <string name="dl_shuffle_all">Shuffle All</string>
+    <string name="dl_play_artist_cd">Play artist</string>
+    <string name="dl_play_album_cd">Play album</string>
+    <string name="dl_play_all_btn">Play All</string>
+    <string name="dl_play_album_btn">Play Album</string>
+    <string name="dl_cancel_dl_cd">Cancel download</string>
+    <string name="dl_play_offline_cd">Play offline track</string>
+    <string name="dl_song_options_cd">Song options</string>
+    <string name="dl_play_next">Play Next</string>
+    <string name="dl_add_queue">Add to Queue</string>
+    <string name="dl_view_artist">View Artist (%1$s)</string>
+    <string name="dl_view_album">View Album (%1$s)</string>
+
+    <!-- Provider modules screen -->
+    <string name="mod_addon_url">Addon URL</string>
+    <string name="mod_test_cd">Test connection</string>
+    <string name="mod_edit_cd">Edit Addon URL</string>
+    <string name="mod_remove_cd">Remove Addon</string>
+
+    <!-- External playlist import -->
+    <string name="imp_clear_cd">Clear</string>
+    <string name="imp_paste_cd">Paste</string>
+    <string name="imp_reading">Reading Playlist…</string>
+    <string name="imp_preview">Preview</string>
+    <string name="dl_albums_count">Albums (%1$d)</string>
 </resources>

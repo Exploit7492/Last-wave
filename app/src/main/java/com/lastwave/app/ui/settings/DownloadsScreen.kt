@@ -333,7 +333,7 @@ fun DownloadsScreen(
                         ) {
                             Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Cancel All (${activeDownloads.size})", style = MaterialTheme.typography.labelSmall)
+                            Text(stringResource(com.lastwave.app.R.string.dl_cancel_all, activeDownloads.size), style = MaterialTheme.typography.labelSmall)
                         }
                         Spacer(Modifier.width(6.dp))
                     }
@@ -345,7 +345,7 @@ fun DownloadsScreen(
                             },
                             modifier = Modifier.size(40.dp),
                         ) {
-                            Icon(Icons.Filled.MoreVert, contentDescription = "Options")
+                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(com.lastwave.app.R.string.dl_options_cd))
                         }
                         DropdownMenu(
                             expanded = showOptionsMenu,
@@ -353,7 +353,7 @@ fun DownloadsScreen(
                         ) {
                             if (activeDownloads.isNotEmpty()) {
                                 DropdownMenuItem(
-                                    text = { Text("Cancel all downloads (${activeDownloads.size})", color = MaterialTheme.colorScheme.error) },
+                                    text = { Text(stringResource(com.lastwave.app.R.string.dl_cancel_all_confirm, activeDownloads.size), color = MaterialTheme.colorScheme.error) },
                                     leadingIcon = { Icon(Icons.Filled.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
                                     onClick = {
                                         showOptionsMenu = false
@@ -368,7 +368,7 @@ fun DownloadsScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        Text("Download Lyrics")
+                                        Text(stringResource(com.lastwave.app.R.string.dl_lyrics_row))
                                         Switch(
                                             checked = downloadLyrics,
                                             onCheckedChange = { viewModel.setDownloadLyrics(it) },
@@ -499,12 +499,12 @@ fun DownloadsScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.CloudOff,
-                            contentDescription = "Offline Mode",
+                            contentDescription = stringResource(com.lastwave.app.R.string.dl_offline_cd),
                             tint = MaterialTheme.colorScheme.onSecondaryContainer,
                             modifier = Modifier.size(18.dp),
                         )
                         Text(
-                            text = "Offline Mode \u2022 Playing downloaded local tracks",
+                            text = stringResource(com.lastwave.app.R.string.dl_offline_banner),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -716,10 +716,10 @@ fun DownloadsScreen(
     trackToDelete?.let { track ->
         AlertDialog(
             onDismissRequest = { trackToDelete = null },
-            title = { Text("Delete \"${track.title}\"?") },
+            title = { Text(stringResource(com.lastwave.app.R.string.dl_delete_title, track.title)) },
             text = {
                 Text(
-                    "You can delete the local audio file to free storage space, or remove it from history only.",
+                    stringResource(com.lastwave.app.R.string.dl_delete_text),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             },
@@ -730,7 +730,7 @@ fun DownloadsScreen(
                         trackToDelete = null
                     },
                 ) {
-                    Text("Delete File", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(com.lastwave.app.R.string.dl_delete_file), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
@@ -741,9 +741,9 @@ fun DownloadsScreen(
                             trackToDelete = null
                         },
                     ) {
-                        Text("History Only")
+                        Text(stringResource(com.lastwave.app.R.string.dl_history_only))
                     }
-                    TextButton(onClick = { trackToDelete = null }) { Text("Cancel") }
+                    TextButton(onClick = { trackToDelete = null }) { Text(stringResource(com.lastwave.app.R.string.common_cancel)) }
                 }
             },
         )
@@ -1151,12 +1151,12 @@ private fun DownloadFilterControls(
                     )
                 },
                 leadingIcon = {
-                    Icon(Icons.Filled.Search, contentDescription = "Search", modifier = Modifier.size(20.dp))
+                    Icon(Icons.Filled.Search, contentDescription = stringResource(com.lastwave.app.R.string.search_cd), modifier = Modifier.size(20.dp))
                 },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
                         IconButton(onClick = { onSearchQueryChange("") }) {
-                            Icon(Icons.Filled.Clear, contentDescription = "Clear search", modifier = Modifier.size(18.dp))
+                            Icon(Icons.Filled.Clear, contentDescription = stringResource(com.lastwave.app.R.string.pd_clear_search_cd), modifier = Modifier.size(18.dp))
                         }
                     }
                 },
@@ -1183,7 +1183,7 @@ private fun DownloadFilterControls(
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.Sort,
-                        contentDescription = "Sort",
+                        contentDescription = stringResource(com.lastwave.app.R.string.pl_sort_label),
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -1263,19 +1263,19 @@ private fun DownloadFilterControls(
                         if (filterLossless) onToggleLossless()
                         if (filterLyrics) onToggleLyrics()
                     },
-                    label = { Text("All") },
+                    label = { Text(stringResource(com.lastwave.app.R.string.dl_filter_all)) },
                     shape = RoundedCornerShape(12.dp),
                 )
                 FilterChip(
                     selected = filterLossless,
                     onClick = onToggleLossless,
-                    label = { Text("Lossless / FLAC") },
+                    label = { Text(stringResource(com.lastwave.app.R.string.dl_filter_lossless)) },
                     shape = RoundedCornerShape(12.dp),
                 )
                 FilterChip(
                     selected = filterLyrics,
                     onClick = onToggleLyrics,
-                    label = { Text("With Lyrics (LRC)") },
+                    label = { Text(stringResource(com.lastwave.app.R.string.dl_filter_lyrics)) },
                     shape = RoundedCornerShape(12.dp),
                 )
             }
@@ -1431,9 +1431,9 @@ private fun DownloadedSongsList(
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                             modifier = Modifier.height(32.dp),
                         ) {
-                            Icon(Icons.Filled.Shuffle, contentDescription = "Shuffle", modifier = Modifier.size(16.dp))
+                            Icon(Icons.Filled.Shuffle, contentDescription = stringResource(com.lastwave.app.R.string.dl_shuffle_cd), modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Shuffle", style = MaterialTheme.typography.labelMedium)
+                            Text(stringResource(com.lastwave.app.R.string.dl_shuffle_cd), style = MaterialTheme.typography.labelMedium)
                         }
                         FilledTonalButton(
                             onClick = {
@@ -1444,9 +1444,9 @@ private fun DownloadedSongsList(
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                             modifier = Modifier.height(32.dp),
                         ) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = "Play all", modifier = Modifier.size(16.dp))
+                            Icon(Icons.Filled.PlayArrow, contentDescription = stringResource(com.lastwave.app.R.string.dl_play_all_cd), modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Play", style = MaterialTheme.typography.labelMedium)
+                            Text(stringResource(com.lastwave.app.R.string.dl_play_cd), style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }
@@ -1555,9 +1555,9 @@ private fun DownloadedArtistsList(
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                         modifier = Modifier.height(32.dp),
                     ) {
-                        Icon(Icons.Filled.Shuffle, contentDescription = "Shuffle all", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Filled.Shuffle, contentDescription = stringResource(com.lastwave.app.R.string.dl_shuffle_all_cd), modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Shuffle All", style = MaterialTheme.typography.labelMedium)
+                        Text(stringResource(com.lastwave.app.R.string.dl_shuffle_all), style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
@@ -1622,7 +1622,7 @@ private fun DownloadedArtistsList(
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     Icons.Filled.PlayArrow,
-                                    contentDescription = "Play artist",
+                                    contentDescription = stringResource(com.lastwave.app.R.string.dl_play_artist_cd),
                                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                     modifier = Modifier.size(20.dp),
                                 )
@@ -1692,7 +1692,7 @@ private fun DownloadedAlbumsList(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "Albums (${albums.size})",
+                        stringResource(com.lastwave.app.R.string.dl_albums_count, albums.size),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1706,9 +1706,9 @@ private fun DownloadedAlbumsList(
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                         modifier = Modifier.height(32.dp),
                     ) {
-                        Icon(Icons.Filled.Shuffle, contentDescription = "Shuffle all", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Filled.Shuffle, contentDescription = stringResource(com.lastwave.app.R.string.dl_shuffle_all_cd), modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Shuffle All", style = MaterialTheme.typography.labelMedium)
+                        Text(stringResource(com.lastwave.app.R.string.dl_shuffle_all), style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
@@ -1774,7 +1774,7 @@ private fun DownloadedAlbumsList(
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     Icons.Filled.PlayArrow,
-                                    contentDescription = "Play album",
+                                    contentDescription = stringResource(com.lastwave.app.R.string.dl_play_album_cd),
                                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                     modifier = Modifier.size(20.dp),
                                 )
@@ -1901,7 +1901,7 @@ private fun ArtistDetailView(
                         ) {
                             Icon(Icons.Filled.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Shuffle")
+                            Text(stringResource(com.lastwave.app.R.string.feed_shuffle))
                         }
                         FilledTonalButton(
                             onClick = {
@@ -1912,7 +1912,7 @@ private fun ArtistDetailView(
                         ) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Play All")
+                            Text(stringResource(com.lastwave.app.R.string.dl_play_all_btn))
                         }
                     }
                 }
@@ -1923,7 +1923,7 @@ private fun ArtistDetailView(
         if (albums.isNotEmpty()) {
             item {
                 Text(
-                    text = "Albums (${albums.size})",
+                    text = stringResource(com.lastwave.app.R.string.dl_albums_count, albums.size),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
@@ -2116,7 +2116,7 @@ private fun AlbumDetailView(
                         ) {
                             Icon(Icons.Filled.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Shuffle")
+                            Text(stringResource(com.lastwave.app.R.string.feed_shuffle))
                         }
                         FilledTonalButton(
                             onClick = {
@@ -2127,7 +2127,7 @@ private fun AlbumDetailView(
                         ) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Play Album")
+                            Text(stringResource(com.lastwave.app.R.string.dl_play_album_btn))
                         }
                     }
                 }
@@ -2229,7 +2229,7 @@ private fun ActiveDownloadCard(
                     )
                 }
                 IconButton(onClick = onCancel, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Filled.Close, contentDescription = "Cancel download", tint = MaterialTheme.colorScheme.error)
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(com.lastwave.app.R.string.dl_cancel_dl_cd), tint = MaterialTheme.colorScheme.error)
                 }
             }
 
@@ -2399,7 +2399,7 @@ private fun DownloadedTrackCard(
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         Icons.Filled.PlayArrow,
-                        contentDescription = "Play offline track",
+                        contentDescription = stringResource(com.lastwave.app.R.string.dl_play_offline_cd),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -2415,7 +2415,7 @@ private fun DownloadedTrackCard(
                 ) {
                     Icon(
                         Icons.Filled.MoreVert,
-                        contentDescription = "Song options",
+                        contentDescription = stringResource(com.lastwave.app.R.string.dl_song_options_cd),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp),
                     )
@@ -2426,7 +2426,7 @@ private fun DownloadedTrackCard(
                     onDismissRequest = { menuExpanded = false },
                 ) {
                     DropdownMenuItem(
-                        text = { Text("Play") },
+                        text = { Text(stringResource(com.lastwave.app.R.string.dl_play_cd)) },
                         leadingIcon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) },
                         onClick = {
                             menuExpanded = false
@@ -2434,7 +2434,7 @@ private fun DownloadedTrackCard(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("Play Next") },
+                        text = { Text(stringResource(com.lastwave.app.R.string.dl_play_next)) },
                         leadingIcon = { Icon(Icons.Filled.PlaylistAdd, contentDescription = null) },
                         onClick = {
                             menuExpanded = false
@@ -2442,7 +2442,7 @@ private fun DownloadedTrackCard(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("Add to Queue") },
+                        text = { Text(stringResource(com.lastwave.app.R.string.dl_add_queue)) },
                         leadingIcon = { Icon(Icons.Filled.QueueMusic, contentDescription = null) },
                         onClick = {
                             menuExpanded = false
@@ -2450,7 +2450,7 @@ private fun DownloadedTrackCard(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("View Artist (${track.artist})") },
+                        text = { Text(stringResource(com.lastwave.app.R.string.dl_view_artist, track.artist)) },
                         leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null) },
                         onClick = {
                             menuExpanded = false
@@ -2459,7 +2459,7 @@ private fun DownloadedTrackCard(
                     )
                     if (track.album.isNotBlank()) {
                         DropdownMenuItem(
-                            text = { Text("View Album (${track.album})") },
+                            text = { Text(stringResource(com.lastwave.app.R.string.dl_view_album, track.album)) },
                             leadingIcon = { Icon(Icons.Filled.Album, contentDescription = null) },
                             onClick = {
                                 menuExpanded = false
@@ -2468,7 +2468,7 @@ private fun DownloadedTrackCard(
                         )
                     }
                     DropdownMenuItem(
-                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                        text = { Text(stringResource(com.lastwave.app.R.string.common_delete), color = MaterialTheme.colorScheme.error) },
                         leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
                         onClick = {
                             menuExpanded = false
