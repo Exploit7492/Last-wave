@@ -373,51 +373,59 @@ private fun Modifier.settingHighlightGlow(
 enum class SettingsTab(
     @androidx.annotation.StringRes val titleRes: Int,
     @androidx.annotation.StringRes val subtitleRes: Int,
+    val title: String,
+    val subtitle: String,
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
 ) {
     AUDIO(
         titleRes = R.string.set_cat_audio,
         subtitleRes = R.string.set_cat_audio_sub,
+        title = "Audio & Playback",
+        subtitle = "Streaming quality, Audio engine, Equalizer, Output & Loudness",
         icon = Icons.Filled.GraphicEq,
     ),
     APPEARANCE(
         titleRes = R.string.set_cat_appear,
         subtitleRes = R.string.set_cat_appear_sub,
+        title = "Appearance & Visuals",
+        subtitle = "Themes, Colors, Artwork, Lyrics",
         icon = Icons.Filled.Palette,
     ),
     YOUTUBE(
         titleRes = R.string.set_cat_yt,
         subtitleRes = R.string.set_cat_yt_sub,
+        title = "YouTube & Sync",
+        subtitle = "Account connection, 24/7 Library sync, Channels, History",
         icon = Icons.Filled.CloudSync,
     ),
     LAST_FM(
         titleRes = R.string.set_cat_lfm,
         subtitleRes = R.string.set_cat_lfm_sub,
+        title = "Last.fm",
+        subtitle = "Account connection, Scrobbling sync & API credentials",
         icon = Icons.Filled.Album,
     ),
     LIBRARY(
         titleRes = R.string.set_cat_lib,
         subtitleRes = R.string.set_cat_lib_sub,
+        title = "Library & Content",
+        subtitle = "Home layout, Playlist imports, Downloads, Exclusions",
         icon = Icons.Filled.QueueMusic,
     ),
     DATA_BACKUP(
         titleRes = R.string.set_cat_data,
         subtitleRes = R.string.set_cat_data_sub,
+        title = "Data Management",
+        subtitle = "Cache cleanup, Export & Import settings, Database tools",
         icon = Icons.Filled.Backup,
     ),
     ABOUT(
         titleRes = R.string.set_cat_about,
         subtitleRes = R.string.set_cat_about_sub,
+        title = "About & Community",
+        subtitle = "Version info, Telegram community, GitHub repository",
         icon = Icons.Filled.AutoAwesome,
-    );
-
-    val title: String
-        @Composable
-        get() = stringResource(titleRes)
-
-    val subtitle: String
-        @Composable
-        get() = stringResource(subtitleRes)
+    ),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
