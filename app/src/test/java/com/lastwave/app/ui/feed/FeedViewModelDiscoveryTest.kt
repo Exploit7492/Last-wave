@@ -36,6 +36,7 @@ class FeedViewModelDiscoveryTest {
 
     private val testDispatcher = UnconfinedTestDispatcher()
 
+    private val context: android.content.Context = mockk(relaxed = true)
     private val feedRepository: FeedRepository = mockk(relaxed = true)
     private val sessionPreferences: SessionPreferences = mockk(relaxed = true)
     private val settingsPreferences: SettingsPreferences = mockk(relaxed = true)
@@ -65,6 +66,7 @@ class FeedViewModelDiscoveryTest {
         coEvery { discoverRepository.allowedCachedFeed() } returns listOf(mockTrack)
 
         val viewModel = FeedViewModel(
+            context,
             feedRepository,
             sessionPreferences,
             settingsPreferences,
@@ -84,6 +86,7 @@ class FeedViewModelDiscoveryTest {
         coEvery { discoverRepository.nextBatch(any()) } throws RuntimeException("Network error")
 
         val viewModel = FeedViewModel(
+            context,
             feedRepository,
             sessionPreferences,
             settingsPreferences,

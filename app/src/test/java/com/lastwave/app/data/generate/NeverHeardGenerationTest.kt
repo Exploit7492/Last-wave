@@ -35,9 +35,9 @@ class NeverHeardGenerationTest {
     @Test
     fun generateMode_neverHeard_hasCorrectMetadata() {
         val mode = GenerateMode.NEVER_HEARD
-        assertThat(mode.label).isEqualTo("Never Heard")
+        assertThat(mode.labelRes).isEqualTo(com.lastwave.app.R.string.gen_mode_never)
         assertThat(mode.storageValue).isEqualTo("never-heard")
-        assertThat(mode.description).isNotEmpty()
+        assertThat(mode.descriptionRes).isEqualTo(com.lastwave.app.R.string.gen_mode_never_desc)
     }
 
     @Test
