@@ -89,6 +89,8 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
+import com.lastwave.app.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -130,19 +132,19 @@ fun YouTubePlaylistImportScreen(
     ) { uri: Uri? ->
         if (uri != null) {
             try {
-                val filename = queryFileName(context, uri) ?: "Imported Playlist.csv"
+                val filename = queryFileName(context, uri) ?: context.getString(R.string.ytimp_default_csv)
                 val stream = context.contentResolver.openInputStream(uri)
                 if (stream != null) {
                     viewModel.importCsv(stream, filename) { saved ->
                         onImportSuccess(listOf(saved))
                     }
                 } else {
-                    viewModel.showError("The selected file could not be opened")
+                    viewModel.showError(context.getString(R.string.ytimp_file_open_fail))
                 }
             } catch (error: Exception) {
-                viewModel.showError("The selected file is unavailable on this device")
+                viewModel.showError(context.getString(R.string.ytimp_file_gone))
             } catch (error: LinkageError) {
-                viewModel.showError("File import isn't supported by this ROM")
+                viewModel.showError(context.getString(R.string.ytimp_file_rom))
             }
         }
     }
@@ -155,8 +157,8 @@ fun YouTubePlaylistImportScreen(
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
         ) {
             ExpressiveHeader(
-                title = "Import Playlist",
-                subtitle = "YouTube Music, Links & CSV Files",
+                title = stringResource(R.string.ytimp_title),
+                subtitle = stringResource(R.string.ytimp_sub),
                 onBack = onBack,
                 actions = {
                     val activeList = when (state.selectedTab) {
@@ -169,7 +171,7 @@ fun YouTubePlaylistImportScreen(
                         TextButton(onClick = {
                             viewModel.selectAll(!allSelected)
                         }) {
-                            Text(if (allSelected) "Deselect All" else "Select All")
+                            Text(if (allSelected) stringResource(R.string.ytimp_deselect_all) else stringResource(R.string.ytimp_select_all))
                         }
                     }
                 },
@@ -219,7 +221,7 @@ fun YouTubePlaylistImportScreen(
                             ) {
                                 Icon(
                                     imageVector = icon,
-                                    contentDescription = tab.title,
+                                    contentDescription = stringResource(tab.titleRes),
                                     modifier = Modifier.size(22.dp),
                                 )
                             }
@@ -278,18 +280,18 @@ fun YouTubePlaylistImportScreen(
                                         modifier = Modifier.size(36.dp),
                                     )
                                     Text(
-                                        "No library playlists found",
+                                        stringResource(R.string.ytimp_no_library),
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold,
                                     )
                                     Text(
-                                        "Create a playlist in YouTube Music (or refresh) and it will show up here.",
+                                        stringResource(R.string.ytimp_no_library_sub),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         textAlign = TextAlign.Center,
                                     )
                                     FilledTonalButton(onClick = { viewModel.loadLibrary(force = true) }) {
-                                        Text("Refresh")
+                                        Text(stringResource(R.string.ytimp_refresh))
                                     }
                                 }
                             }
@@ -336,7 +338,7 @@ fun YouTubePlaylistImportScreen(
                         OutlinedTextField(
                             value = state.query,
                             onValueChange = viewModel::onQueryChange,
-                            placeholder = { Text("Search YouTube Music playlists...") },
+                            placeholder = { Text(stringResource(R.string.ytimp_search_hint)) },
                             leadingIcon = {
                                 Icon(Icons.Filled.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             },
@@ -344,7 +346,7 @@ fun YouTubePlaylistImportScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     if (state.query.isNotBlank()) {
                                         IconButton(onClick = { viewModel.onQueryChange("") }) {
-                                            Icon(Icons.Filled.Clear, contentDescription = "Clear")
+                                            Icon(Icons.Filled.Clear, contentDescription = stringResource(R.string.imp_clear_cd))
                                         }
                                     } else {
                                         IconButton(onClick = {
@@ -354,7 +356,7 @@ fun YouTubePlaylistImportScreen(
                                                 viewModel.search(text)
                                             }
                                         }) {
-                                            Icon(Icons.Filled.ContentPaste, contentDescription = "Paste", tint = MaterialTheme.colorScheme.primary)
+                                            Icon(Icons.Filled.ContentPaste, contentDescription = stringResource(R.string.imp_paste_cd), tint = MaterialTheme.colorScheme.primary)
                                         }
                                     }
                                 }
@@ -408,7 +410,7 @@ fun YouTubePlaylistImportScreen(
                                     verticalArrangement = Arrangement.spacedBy(12.dp),
                                 ) {
                                     CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                                    Text("Searching YouTube Music playlists...", style = MaterialTheme.typography.bodyMedium)
+                                    Text(stringResource(R.string.ytimp_searching), style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
                         }
@@ -480,7 +482,7 @@ fun YouTubePlaylistImportScreen(
                                     trailingIcon = {
                                         if (state.directLink.isNotBlank()) {
                                             IconButton(onClick = { viewModel.onDirectLinkChange("") }) {
-                                                Icon(Icons.Filled.Clear, contentDescription = "Clear")
+                                                Icon(Icons.Filled.Clear, contentDescription = stringResource(R.string.imp_clear_cd))
                                             }
                                         } else {
                                             IconButton(onClick = {
@@ -490,7 +492,7 @@ fun YouTubePlaylistImportScreen(
                                                     viewModel.resolveDirectLink(text)
                                                 }
                                             }) {
-                                                Icon(Icons.Filled.ContentPaste, contentDescription = "Paste", tint = MaterialTheme.colorScheme.primary)
+                                                Icon(Icons.Filled.ContentPaste, contentDescription = stringResource(R.string.imp_paste_cd), tint = MaterialTheme.colorScheme.primary)
                                             }
                                         }
                                     },
@@ -512,11 +514,11 @@ fun YouTubePlaylistImportScreen(
                                     if (state.isPreviewLoading) {
                                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
                                         Spacer(Modifier.width(8.dp))
-                                        Text("Resolving Playlist...")
+                                        Text(stringResource(R.string.ytimp_resolving))
                                     } else {
                                         Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(Modifier.width(8.dp))
-                                        Text("Preview & Import Link", fontWeight = FontWeight.Bold)
+                                        Text(stringResource(R.string.ytimp_preview_import), fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -574,9 +576,9 @@ fun YouTubePlaylistImportScreen(
                                         try {
                                             csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/csv", "audio/x-mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "*/*"))
                                         } catch (error: Exception) {
-                                            viewModel.showError("No file picker is available")
+                                            viewModel.showError(context.getString(R.string.ytimp_no_picker))
                                         } catch (error: LinkageError) {
-                                            viewModel.showError("File picking isn't supported by this ROM")
+                                            viewModel.showError(context.getString(R.string.ytimp_pick_rom))
                                         }
                                     },
                                     enabled = !state.isCsvImporting,
@@ -586,11 +588,11 @@ fun YouTubePlaylistImportScreen(
                                     if (state.isCsvImporting) {
                                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
                                         Spacer(Modifier.width(8.dp))
-                                        Text(state.importProgress ?: "Importing Playlist...")
+                                        Text(state.importProgress ?: stringResource(R.string.ytimp_importing))
                                     } else {
                                         Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(20.dp))
                                         Spacer(Modifier.width(8.dp))
-                                        Text("Select playlist file", fontWeight = FontWeight.Bold)
+                                        Text(stringResource(R.string.ytimp_select_file), fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -654,7 +656,7 @@ fun YouTubePlaylistImportScreen(
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        state.importProgress ?: "Importing Playlists...",
+                        state.importProgress ?: stringResource(R.string.ytimp_importing),
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold,
                     )
@@ -749,7 +751,7 @@ private fun YouTubePlaylistCard(
             IconButton(onClick = onPreview, modifier = Modifier.size(36.dp)) {
                 Icon(
                     Icons.Filled.Visibility,
-                    contentDescription = "Preview tracks",
+                    contentDescription = stringResource(R.string.ytimp_preview_cd),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(20.dp),
                 )
@@ -865,7 +867,7 @@ private fun PlaylistPreviewModal(
             ) {
                 Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Import \"${preview.title}\"", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.ytimp_import_btn, preview.title), fontWeight = FontWeight.Bold)
             }
         }
     }

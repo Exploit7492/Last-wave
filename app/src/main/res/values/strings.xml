@@ -939,4 +939,35 @@
     <string name="set_yt_shown_partial">%1$d of %2$d account playlists shown</string>
     <string name="set_selected_cd">Selected</string>
     <string name="set_disconnect_cd">Disconnect</string>
+
+    <!-- YouTube playlist import -->
+    <string name="ytimp_title">Import Playlist</string>
+    <string name="ytimp_sub">YouTube Music, Links &amp; CSV Files</string>
+    <string name="ytimp_tab_library">Your Library</string>
+    <string name="ytimp_tab_search">YouTube Music</string>
+    <string name="ytimp_tab_link">Direct Link</string>
+    <string name="ytimp_tab_csv">CSV File</string>
+    <string name="ytimp_select_all">Select All</string>
+    <string name="ytimp_deselect_all">Deselect All</string>
+    <string name="ytimp_default_csv">Imported Playlist.csv</string>
+    <string name="ytimp_file_open_fail">The selected file could not be opened</string>
+    <string name="ytimp_file_gone">The selected file is unavailable on this device</string>
+    <string name="ytimp_file_rom">File import isn\'t supported by this ROM</string>
+    <string name="ytimp_no_picker">No file picker is available</string>
+    <string name="ytimp_pick_rom">File picking isn\'t supported by this ROM</string>
+    <string name="ytimp_refresh">Refresh</string>
+    <string name="ytimp_no_library">No library playlists found</string>
+    <string name="ytimp_no_library_sub">Create a playlist in YouTube Music (or refresh) and it will show up here.</string>
+    <string name="ytimp_search_hint">Search YouTube Music playlists…</string>
+    <string name="ytimp_searching">Searching YouTube Music playlists…</string>
+    <string name="ytimp_resolving">Resolving Playlist…</string>
+    <string name="ytimp_preview_import">Preview &amp; Import Link</string>
+    <string name="ytimp_select_file">Select playlist file</string>
+    <string name="ytimp_importing">Importing Playlist…</string>
+    <string name="ytimp_import_btn">Import “%1$s”</string>
+    <string name="ytimp_preview_cd">Preview tracks</string>
+    <string name="ytimp_load_fail">Couldn\'t load your YouTube Music playlists: %1$s</string>
+    <string name="ytimp_fail">Import failed: %1$s</string>
+    <string name="ytimp_type_fail">%1$s import failed: %2$s</string>
+    <string name="ytimp_type_rom">%1$s import isn\'t supported by this ROM</string>
 </resources>

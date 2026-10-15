@@ -935,4 +935,35 @@
     <string name="set_yt_shown_partial">%2$d hesap listesinden %1$d gösteriliyor</string>
     <string name="set_selected_cd">Seçildi</string>
     <string name="set_disconnect_cd">Bağlantıyı kes</string>
+
+    <!-- YouTube liste içe aktarma -->
+    <string name="ytimp_title">Liste İçe Aktar</string>
+    <string name="ytimp_sub">YouTube Music, Bağlantılar ve CSV Dosyaları</string>
+    <string name="ytimp_tab_library">Kitaplığınız</string>
+    <string name="ytimp_tab_search">YouTube Music</string>
+    <string name="ytimp_tab_link">Doğrudan Bağlantı</string>
+    <string name="ytimp_tab_csv">CSV Dosyası</string>
+    <string name="ytimp_select_all">Tümünü Seç</string>
+    <string name="ytimp_deselect_all">Seçimi Bırak</string>
+    <string name="ytimp_default_csv">İçe Aktarılan Liste.csv</string>
+    <string name="ytimp_file_open_fail">Seçilen dosya açılamadı</string>
+    <string name="ytimp_file_gone">Seçilen dosya bu cihazda yok</string>
+    <string name="ytimp_file_rom">Bu ROM dosya içe aktarmayı desteklemiyor</string>
+    <string name="ytimp_no_picker">Dosya seçici yok</string>
+    <string name="ytimp_pick_rom">Bu ROM dosya seçmeyi desteklemiyor</string>
+    <string name="ytimp_refresh">Yenile</string>
+    <string name="ytimp_no_library">Kitaplık listesi bulunamadı</string>
+    <string name="ytimp_no_library_sub">YouTube Music’te liste oluşturun (veya yenileyin), burada görünür.</string>
+    <string name="ytimp_search_hint">YouTube Music listelerinde ara…</string>
+    <string name="ytimp_searching">YouTube Music listeleri aranıyor…</string>
+    <string name="ytimp_resolving">Liste çözümleniyor…</string>
+    <string name="ytimp_preview_import">Önizle ve Bağlantıyı İçe Aktar</string>
+    <string name="ytimp_select_file">Liste dosyası seç</string>
+    <string name="ytimp_importing">Liste içe aktarılıyor…</string>
+    <string name="ytimp_import_btn">“%1$s” içe aktar</string>
+    <string name="ytimp_preview_cd">Parçaları önizle</string>
+    <string name="ytimp_load_fail">YouTube Music listeleriniz yüklenemedi: %1$s</string>
+    <string name="ytimp_fail">İçe aktarma başarısız: %1$s</string>
+    <string name="ytimp_type_fail">%1$s içe aktarma başarısız: %2$s</string>
+    <string name="ytimp_type_rom">%1$s içe aktarma bu ROM’da desteklenmiyor</string>
 </resources>
