@@ -18,11 +18,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-enum class ImportTab(val title: String) {
-    LIBRARY("Your Library"),
-    SEARCH("YouTube Music"),
-    LINK("Direct Link"),
-    CSV("CSV File"),
+enum class ImportTab(val titleRes: Int) {
+    LIBRARY(com.lastwave.app.R.string.ytimp_tab_library),
+    SEARCH(com.lastwave.app.R.string.ytimp_tab_search),
+    LINK(com.lastwave.app.R.string.ytimp_tab_link),
+    CSV(com.lastwave.app.R.string.ytimp_tab_csv),
 }
 
 data class YouTubeImportUiState(
@@ -49,6 +49,7 @@ data class YouTubeImportUiState(
 
 @HiltViewModel
 class YouTubePlaylistImportViewModel @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val innerTube: InnerTubeMusicApi,
     private val importManager: PlaylistImportManager,
     private val ytAuthManager: YtMusicAuthManager,
@@ -123,7 +124,7 @@ class YouTubePlaylistImportViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isLoadingLibrary = false,
-                        errorMessage = "Couldn't load your YouTube Music playlists: ${e.localizedMessage ?: e.message}",
+                        errorMessage = appContext.getString(com.lastwave.app.R.string.ytimp_load_fail, e.localizedMessage ?: e.message),
                     )
                 }
             }
@@ -297,7 +298,7 @@ class YouTubePlaylistImportViewModel @Inject constructor(
                     it.copy(
                         isImporting = false,
                         importProgress = null,
-                        errorMessage = "Import failed: ${e.localizedMessage ?: e.message}",
+                        errorMessage = appContext.getString(com.lastwave.app.R.string.ytimp_fail, e.localizedMessage ?: e.message),
                     )
                 }
             }
@@ -338,7 +339,7 @@ class YouTubePlaylistImportViewModel @Inject constructor(
                     it.copy(
                         isCsvImporting = false,
                         importProgress = null,
-                        errorMessage = "$fileType import failed: ${e.localizedMessage ?: e.message}",
+                        errorMessage = appContext.getString(com.lastwave.app.R.string.ytimp_type_fail, fileType, e.localizedMessage ?: e.message),
                     )
                 }
             } catch (error: LinkageError) {
@@ -346,7 +347,7 @@ class YouTubePlaylistImportViewModel @Inject constructor(
                     it.copy(
                         isCsvImporting = false,
                         importProgress = null,
-                        errorMessage = "$fileType import isn't supported by this ROM",
+                        errorMessage = appContext.getString(com.lastwave.app.R.string.ytimp_type_rom, fileType),
                     )
                 }
             }

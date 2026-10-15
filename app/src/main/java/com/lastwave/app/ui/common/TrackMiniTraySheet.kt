@@ -101,7 +101,7 @@ fun TrackMiniTraySheet(
     val playable = remember(data) { data.toPlayable() }
     val activeDownloads by downloadViewModel.activeDownloads.collectAsStateWithLifecycle()
     val downloadQuality by downloadViewModel.downloadQuality.collectAsStateWithLifecycle()
-    val downloadLabel = remember(downloadQuality) { downloadLabelForQuality(downloadQuality) }
+    val downloadLabel = remember(downloadQuality) { downloadLabelForQuality(context, downloadQuality) }
     var isDownloaded by remember(data) { mutableStateOf(false) }
 
     LaunchedEffect(data) {

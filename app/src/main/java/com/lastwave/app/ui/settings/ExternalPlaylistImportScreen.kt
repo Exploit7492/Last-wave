@@ -53,6 +53,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
+import com.lastwave.app.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -151,7 +153,7 @@ fun ExternalPlaylistImportScreen(
                                 trailingIcon = {
                                     if (state.link.isNotBlank()) {
                                         IconButton(onClick = { viewModel.onLinkChange("") }) {
-                                            Icon(Icons.Filled.Clear, contentDescription = "Clear")
+                                            Icon(Icons.Filled.Clear, contentDescription = stringResource(R.string.imp_clear_cd))
                                         }
                                     } else {
                                         IconButton(onClick = {
@@ -160,7 +162,7 @@ fun ExternalPlaylistImportScreen(
                                                 viewModel.onLinkChange(text)
                                             }
                                         }) {
-                                            Icon(Icons.Filled.ContentPaste, contentDescription = "Paste", tint = MaterialTheme.colorScheme.primary)
+                                            Icon(Icons.Filled.ContentPaste, contentDescription = stringResource(R.string.imp_paste_cd), tint = MaterialTheme.colorScheme.primary)
                                         }
                                     }
                                 },
@@ -195,11 +197,11 @@ fun ExternalPlaylistImportScreen(
                                         color = MaterialTheme.colorScheme.onPrimary,
                                     )
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Reading Playlist...")
+                                    Text(stringResource(R.string.imp_reading))
                                 } else {
                                     Icon(Icons.Filled.QueueMusic, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Preview", fontWeight = FontWeight.Bold)
+                                    Text(stringResource(R.string.imp_preview), fontWeight = FontWeight.Bold)
                                 }
                             }
                         }

@@ -108,7 +108,7 @@ fun ModulesScreen(
                     OutlinedTextField(
                         value = addonInputText,
                         onValueChange = { addonInputText = it },
-                        label = { Text("Addon URL") },
+                        label = { Text(stringResource(R.string.mod_addon_url)) },
                         placeholder = { Text("https://example.com/a/...") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
@@ -130,7 +130,7 @@ fun ModulesScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showAddonDialog = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.common_cancel))
                 }
             },
         )
@@ -238,7 +238,7 @@ fun ModulesScreen(
                                     onClick = { viewModel.testAddon(addon.id) },
                                     enabled = !busy,
                                 ) {
-                                    Icon(Icons.Filled.Refresh, contentDescription = "Test connection")
+                                    Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.mod_test_cd))
                                 }
                                 IconButton(
                                     onClick = {
@@ -247,12 +247,12 @@ fun ModulesScreen(
                                         showAddonDialog = true
                                     },
                                 ) {
-                                    Icon(Icons.Filled.Edit, contentDescription = "Edit Addon URL")
+                                    Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.mod_edit_cd))
                                 }
                                 IconButton(
                                     onClick = { viewModel.removeAddon(addon.id) },
                                 ) {
-                                    Icon(Icons.Filled.Delete, contentDescription = "Remove Addon")
+                                    Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.mod_remove_cd))
                                 }
                             }
                         }

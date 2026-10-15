@@ -27,26 +27,26 @@ private const val GENERATION_TIMEOUT_MS = 60_000L
 
 /** Generator modes. YouTube Music is the primary engine; Last.fm only fills
  *  gaps when connected, and guest/offline falls back to local + charts. */
-enum class GenerateMode(val label: String, val description: String, val storageValue: String) {
-    TOP("Top Tracks", "Your most played tracks of all time", "top"),
-    RECENT("Recent Tracks", "What you've been listening to lately", "recent"),
-    SIMILAR_TRACKS("Song Radio", "YouTube Music radio from any song", "similar-tracks"),
-    SIMILAR_ARTISTS("Similar Artists", "YouTube-first artist discovery", "similar-artists"),
-    TAG("By Tag / Genre", "YouTube-first genre picks", "tag"),
-    MIX("My Mix", "Your taste, mixes & local favorites", "mix"),
-    RECOMMENDATIONS("My Recommendation", "35 YouTube-first discoveries", "recommendations"),
-    NEVER_HEARD("Never Heard", "Fresh discoveries you've never listened to before", "never-heard"),
-    LIBRARY("My Library", "Re-discover the sounds of your past", "library"),
+enum class GenerateMode(val labelRes: Int, val descriptionRes: Int, val storageValue: String) {
+    TOP(com.lastwave.app.R.string.gen_mode_top, com.lastwave.app.R.string.gen_mode_top_desc, "top"),
+    RECENT(com.lastwave.app.R.string.gen_mode_recent, com.lastwave.app.R.string.gen_mode_recent_desc, "recent"),
+    SIMILAR_TRACKS(com.lastwave.app.R.string.gen_mode_song_radio, com.lastwave.app.R.string.gen_mode_song_radio_desc, "similar-tracks"),
+    SIMILAR_ARTISTS(com.lastwave.app.R.string.gen_mode_sim_artists, com.lastwave.app.R.string.gen_mode_sim_artists_desc, "similar-artists"),
+    TAG(com.lastwave.app.R.string.gen_mode_tag, com.lastwave.app.R.string.gen_mode_tag_desc, "tag"),
+    MIX(com.lastwave.app.R.string.gen_mode_mix, com.lastwave.app.R.string.gen_mode_mix_desc, "mix"),
+    RECOMMENDATIONS(com.lastwave.app.R.string.gen_mode_reco, com.lastwave.app.R.string.gen_mode_reco_desc, "recommendations"),
+    NEVER_HEARD(com.lastwave.app.R.string.gen_mode_never, com.lastwave.app.R.string.gen_mode_never_desc, "never-heard"),
+    LIBRARY(com.lastwave.app.R.string.gen_mode_library, com.lastwave.app.R.string.gen_mode_library_desc, "library"),
 }
 
 /** Exact 6 period chips shared by Top Tracks + My Library. */
 val GENERATE_PERIODS = listOf(
-    "overall" to "All Time",
-    "12month" to "12 Months",
-    "6month" to "6 Months",
-    "3month" to "3 Months",
-    "1month" to "1 Month",
-    "7day" to "7 Days",
+    "overall" to com.lastwave.app.R.string.gen_period_all,
+    "12month" to com.lastwave.app.R.string.gen_period_12mo,
+    "6month" to com.lastwave.app.R.string.gen_period_6mo,
+    "3month" to com.lastwave.app.R.string.gen_period_3mo,
+    "1month" to com.lastwave.app.R.string.gen_period_1mo,
+    "7day" to com.lastwave.app.R.string.gen_period_7d,
 )
 
 /** Exact 12 quick-select genre chips from generator.html's tag-suggestions. */

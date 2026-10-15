@@ -37,7 +37,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import com.lastwave.app.R
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -94,7 +96,7 @@ fun FeedPlaylistDetailScreen(
         when (val current = state) {
             FeedPlaylistDetailUiState.Loading -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    ExpressiveLoadingIndicator(message = "Opening playlist…")
+                    ExpressiveLoadingIndicator(message = stringResource(R.string.fpd_opening))
                 }
             }
 
@@ -121,18 +123,18 @@ fun FeedPlaylistDetailScreen(
                     )
                     Spacer(Modifier.height(18.dp))
                     FilledTonalButton(onClick = { viewModel.load(playlistId) }) {
-                        Text("Try again")
+                        Text(stringResource(R.string.fpd_retry))
                     }
                 }
             }
 
             is FeedPlaylistDetailUiState.Success -> {
                 if (current.isLoadingMore) {
-                    Text("Loading remaining tracks…", modifier = Modifier.padding(horizontal = 16.dp))
+                    Text(stringResource(R.string.fpd_loading_more), modifier = Modifier.padding(horizontal = 16.dp))
                 }
                 if (current.loadError != null) {
                     FilledTonalButton(onClick = { viewModel.load(playlistId, force = true) }) {
-                        Text("Playlist incomplete · Retry")
+                        Text(stringResource(R.string.fpd_incomplete))
                     }
                 }
                 PlaylistContent(
@@ -216,7 +218,7 @@ private fun PlaylistContent(
                     ) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Play")
+                        Text(stringResource(R.string.home_play))
                     }
                     FilledTonalButton(
                         onClick = onShuffle,
@@ -224,7 +226,7 @@ private fun PlaylistContent(
                     ) {
                         Icon(Icons.Filled.Shuffle, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Shuffle")
+                        Text(stringResource(R.string.feed_shuffle))
                     }
                 }
                 Spacer(Modifier.height(18.dp))
@@ -294,7 +296,7 @@ private fun PlaylistContent(
                         ) {
                             Icon(
                                 Icons.Filled.MoreVert,
-                                contentDescription = "Track options",
+                                contentDescription = stringResource(R.string.fpd_track_options_cd),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp),
                             )

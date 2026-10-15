@@ -37,6 +37,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
+import com.lastwave.app.R
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -385,7 +387,7 @@ fun HomeScreen(
                                     Modifier.fillMaxWidth().padding(vertical = 48.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Text("No tracks yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(stringResource(R.string.home_no_tracks), color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
@@ -468,7 +470,7 @@ private fun HeaderRow(
                     Spacer(Modifier.width(6.dp))
                     Icon(
                         Icons.Filled.People,
-                        contentDescription = "Switch profile",
+                        contentDescription = stringResource(R.string.home_switch_profile_cd),
                         modifier = Modifier.size(15.dp),
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
@@ -497,7 +499,7 @@ private fun LiveListenTimer(viewModel: HomeViewModel) {
         ) {
             Icon(
                 Icons.Filled.Headset,
-                contentDescription = "Estimated lifetime listening time",
+                contentDescription = stringResource(R.string.home_listen_time_cd),
                 modifier = Modifier.size(18.dp),
                 tint = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -796,7 +798,7 @@ private fun StatsCard(
                                 IconButton(onClick = onOpenGenres) {
                                     Icon(
                                         Icons.AutoMirrored.Filled.ArrowForward,
-                                        contentDescription = "View genres",
+                                        contentDescription = stringResource(R.string.home_view_genres_cd),
                                         tint = MaterialTheme.colorScheme.onPrimary,
                                     )
                                 }
@@ -1253,7 +1255,7 @@ private fun HomeNowPlayingBanner(
                 IconButton(onClick = onMenuClick, modifier = Modifier.size(28.dp)) {
                     Icon(
                         Icons.Filled.MoreVert,
-                        contentDescription = "Menu",
+                        contentDescription = stringResource(R.string.home_menu_cd),
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.size(18.dp),
                     )
@@ -1315,7 +1317,7 @@ private fun HomeNowPlayingBanner(
                 ) {
                     Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Play", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.home_play), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                 }
                 androidx.compose.material3.OutlinedButton(
                     onClick = onStartMix,
@@ -1325,7 +1327,7 @@ private fun HomeNowPlayingBanner(
                 ) {
                     Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Mix", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.home_mix), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                 }
             }
         }
