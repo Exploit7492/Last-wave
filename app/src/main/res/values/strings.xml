@@ -574,6 +574,62 @@
     <string name="pd_sync_yt">Sync to YouTube Music</string>
     <string name="pd_syncing_yt">Syncing to YouTube Music</string>
     <string name="pd_delete_item">Delete playlist</string>
+
+    <!-- Feed -->
+    <string name="feed_home">Home</string>
+    <string name="feed_greeting_morning">Good morning</string>
+    <string name="feed_greeting_afternoon">Good afternoon</string>
+    <string name="feed_greeting_evening">Good evening</string>
+    <string name="feed_greeting_night">Good night</string>
+    <string name="feed_retry">Retry</string>
+    <string name="feed_update_error">Couldn\'t update your feed. Please try again.</string>
+    <string name="feed_quick_access">Quick access</string>
+    <string name="feed_your_sound">Your Sound</string>
+    <string name="feed_your_sound_sub">Tap a vibe to start instant radio</string>
+    <string name="feed_picked_you">Picked for you</string>
+    <string name="feed_quick_picks">Quick picks</string>
+    <string name="feed_from_listening">From your listening - refreshed for you</string>
+    <string name="feed_matched_taste">Matched to your taste profile</string>
+    <string name="feed_trending_worth">Trending songs worth playing now</string>
+    <string name="feed_play_all">Play all</string>
+    <string name="feed_see_all">See all</string>
+    <string name="feed_discover">Discover New Music</string>
+    <string name="feed_discover_sub">Handpicked tracks matched to your taste</string>
+    <string name="feed_fresh">Fresh finds</string>
+    <string name="feed_fresh_sub">New tracks beyond your usual rotation</string>
+    <string name="feed_jump">Jump back in</string>
+    <string name="feed_jump_sub">From your listening history</string>
+    <string name="feed_mixes">Mixes to explore</string>
+    <string name="feed_mixes_sub">Familiar favorites, fresh combinations</string>
+    <string name="feed_shuffle">Shuffle</string>
+    <string name="feed_endless_radio">Endless artist radio</string>
+    <string name="feed_artists">Artists for you</string>
+    <string name="feed_artists_sub">Worth another listen</string>
+    <string name="feed_favorites">Favorites to revisit</string>
+    <string name="feed_favorites_sub">From your listening profile</string>
+    <string name="feed_albums">Albums for you</string>
+    <string name="feed_albums_sub">Real albums from your taste — Last.fm tops + YT Music picks</string>
+    <string name="feed_trending">Trending now</string>
+    <string name="feed_trending_sub">Most popular right now · tap a rank to play</string>
+    <string name="feed_releases">New releases</string>
+    <string name="feed_releases_sub">Fresh drops and new albums</string>
+    <string name="feed_friends">Your friends</string>
+    <string name="feed_friends_sub">People in your listening circle</string>
+    <string name="feed_footer_default">Made for you from your taste</string>
+    <string name="feed_footer_updated">Updated %1$s · Made for you from your taste</string>
+    <string name="feed_ago_min">%1$dm ago</string>
+    <string name="feed_ago_hour">%1$dh ago</string>
+    <string name="feed_ago_day">%1$dd ago</string>
+    <string name="feed_ago_week">%1$dw ago</string>
+    <string name="feed_ago_month">%1$dmo ago</string>
+    <string name="feed_play_cd">Play</string>
+    <string name="feed_start_radio_cd">Starting radio</string>
+    <string name="feed_more_cd">More options for %1$s</string>
+    <string name="feed_play_title_cd">Play %1$s</string>
+    <string name="feed_open_artist_cd">Open %1$s</string>
+    <string name="feed_artist_radio">Artist radio</string>
+    <string name="feed_shuffle_title_cd">Shuffle %1$s</string>
+    <string name="feed_search_music">Search music</string>
 </resources>
 
     <!-- Add-to-playlist duplicate dialogs -->

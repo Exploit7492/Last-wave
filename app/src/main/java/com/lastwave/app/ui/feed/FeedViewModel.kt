@@ -49,6 +49,7 @@ data class FeedUiState(
 
 @HiltViewModel
 class FeedViewModel @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val repository: FeedRepository,
     private val sessionPreferences: SessionPreferences,
     private val settingsPreferences: SettingsPreferences,
@@ -174,7 +175,7 @@ class FeedViewModel @Inject constructor(
             } catch (_: Exception) {
                 ensureActive()
                 _uiState.update {
-                    it.copy(isLoading = false, isRefreshing = false, error = "Couldn't update your feed. Please try again.")
+                    it.copy(isLoading = false, isRefreshing = false, error = appContext.getString(com.lastwave.app.R.string.feed_update_error))
                 }
             } finally {
                 // Every exit above the success path — cancellation mid-load
