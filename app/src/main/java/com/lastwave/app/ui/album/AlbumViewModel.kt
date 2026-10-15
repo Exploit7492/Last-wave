@@ -39,6 +39,7 @@ data class AlbumSaveUiState(
 
 @HiltViewModel
 class AlbumViewModel @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val repository: AlbumRepository,
     private val playlistRepository: PlaylistRepository,
     private val musicPlayer: MusicPlayer,
@@ -84,7 +85,7 @@ class AlbumViewModel @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 if (_uiState.value !is AlbumUiState.Success) {
-                    _uiState.value = AlbumUiState.Error(e.message ?: "Failed to load album details")
+                    _uiState.value = AlbumUiState.Error(e.message ?: appContext.getString(com.lastwave.app.R.string.alb_load_fail))
                 }
             }
         }
@@ -164,7 +165,7 @@ class AlbumViewModel @Inject constructor(
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: Exception) {
-                _saveUiState.value = AlbumSaveUiState(saveError = "Couldn't save album. Try again.")
+                _saveUiState.value = AlbumSaveUiState(saveError = appContext.getString(com.lastwave.app.R.string.alb_save_fail))
             }
         }
     }

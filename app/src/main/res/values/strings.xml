@@ -1024,4 +1024,25 @@
     <string name="ly_no_synced">No synced lyrics found for this track.</string>
     <string name="ly_retry">Try again</string>
     <string name="ly_size_cd">Adjust lyrics text size</string>
+
+    <!-- Artist detail -->
+    <string name="art_verified_cd">Verified Artist</string>
+    <string name="art_shuffle_cd">Shuffle Artist</string>
+    <string name="art_radio_cd">Artist Radio</string>
+    <string name="art_play_cd">Play Artist</string>
+    <string name="art_about">About</string>
+    <string name="art_read_more">… Read more</string>
+    <string name="art_show_less_songs">Show less</string>
+    <string name="art_show_all_songs">Show all songs</string>
+    <string name="art_albums">Albums</string>
+    <string name="art_fans_like">Fans Also Like</string>
+    <string name="art_load_fail">Failed to load artist details</string>
+
+    <!-- Album detail -->
+    <string name="alb_shuffle_cd">Shuffle Album</string>
+    <string name="alb_play_cd">Play Album</string>
+    <string name="alb_tracks">Tracks</string>
+    <string name="alb_empty">No tracks listed for this album right now — try again later.</string>
+    <string name="alb_load_fail">Failed to load album details</string>
+    <string name="alb_save_fail">Couldn\'t save album. Try again.</string>
 </resources>

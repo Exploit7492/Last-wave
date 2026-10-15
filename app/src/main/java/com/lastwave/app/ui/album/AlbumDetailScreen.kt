@@ -73,7 +73,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import com.lastwave.app.R
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -148,7 +150,7 @@ fun AlbumDetailScreen(
                         )
                         Spacer(Modifier.height(16.dp))
                         Button(onClick = { viewModel.loadAlbum(albumTitle, artistName, browseId) }) {
-                            Text("Retry")
+                            Text(stringResource(R.string.ly_retry))
                         }
                     }
                 }
@@ -330,7 +332,7 @@ fun AlbumDetailScreen(
                                 ) {
                                     Icon(
                                         Icons.Filled.Shuffle,
-                                        contentDescription = "Shuffle Album",
+                                        contentDescription = stringResource(R.string.alb_shuffle_cd),
                                         modifier = Modifier.size(22.dp),
                                         tint = MaterialTheme.colorScheme.primary,
                                     )
@@ -352,7 +354,7 @@ fun AlbumDetailScreen(
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             if (isAlbumPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                            contentDescription = "Play Album",
+                                            contentDescription = stringResource(R.string.alb_play_cd),
                                             tint = MaterialTheme.colorScheme.onPrimary,
                                             modifier = Modifier.size(30.dp),
                                         )
@@ -409,7 +411,7 @@ fun AlbumDetailScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                text = "Tracks",
+                                text = stringResource(R.string.alb_tracks),
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                             )
@@ -427,7 +429,7 @@ fun AlbumDetailScreen(
                     if (data.tracks.isEmpty()) {
                         item(key = "tracklist_empty") {
                             Text(
-                                text = "No tracks listed for this album right now — try again later.",
+                                text = stringResource(R.string.alb_empty),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(vertical = 8.dp),
@@ -521,7 +523,7 @@ fun AlbumDetailScreen(
                                 ) {
                                     Icon(
                                         Icons.Filled.MoreVert,
-                                        contentDescription = "Options",
+                                        contentDescription = stringResource(R.string.dl_options_cd),
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(20.dp),
                                     )
@@ -612,7 +614,7 @@ fun AlbumDetailScreen(
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
+                        contentDescription = stringResource(R.string.pd_back_cd),
                         tint = MaterialTheme.colorScheme.onSurface,
                     )
                 }
@@ -654,7 +656,7 @@ fun AlbumDetailScreen(
                         ),
                         modifier = Modifier.size(38.dp),
                     ) {
-                        Icon(Icons.Filled.PlayArrow, contentDescription = "Play", modifier = Modifier.size(22.dp))
+                        Icon(Icons.Filled.PlayArrow, contentDescription = stringResource(R.string.dl_play_cd), modifier = Modifier.size(22.dp))
                     }
                 }
             }

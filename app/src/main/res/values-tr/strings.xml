@@ -1018,4 +1018,25 @@
     <string name="ly_no_synced">Bu parça için eşitlenmiş söz bulunamadı.</string>
     <string name="ly_retry">Tekrar dene</string>
     <string name="ly_size_cd">Şarkı sözü metin boyutunu ayarla</string>
+
+    <!-- Sanatçı detayı -->
+    <string name="art_verified_cd">Onaylı Sanatçı</string>
+    <string name="art_shuffle_cd">Sanatçıyı karıştır</string>
+    <string name="art_radio_cd">Sanatçı Radyosu</string>
+    <string name="art_play_cd">Sanatçıyı çal</string>
+    <string name="art_about">Hakkında</string>
+    <string name="art_read_more">… Devamını oku</string>
+    <string name="art_show_less_songs">Daha az göster</string>
+    <string name="art_show_all_songs">Tüm şarkıları göster</string>
+    <string name="art_albums">Albümler</string>
+    <string name="art_fans_like">Hayranlar Ayrıca Beğendi</string>
+    <string name="art_load_fail">Sanatçı bilgileri yüklenemedi</string>
+
+    <!-- Albüm detayı -->
+    <string name="alb_shuffle_cd">Albümü karıştır</string>
+    <string name="alb_play_cd">Albümü çal</string>
+    <string name="alb_tracks">Parçalar</string>
+    <string name="alb_empty">Bu albümde şu an parça listelenmiyor — sonra tekrar deneyin.</string>
+    <string name="alb_load_fail">Albüm bilgileri yüklenemedi</string>
+    <string name="alb_save_fail">Albüm kaydedilemedi. Tekrar deneyin.</string>
 </resources>
