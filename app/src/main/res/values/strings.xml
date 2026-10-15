@@ -439,4 +439,45 @@
     <string name="details_status">Status</string>
     <string name="details_file_size">File Size</string>
     <string name="details_file_path">File Path</string>
+
+    <!-- Track context menu + sleep timer -->
+    <string name="menu_custom_sleep_timer">Custom sleep timer</string>
+    <string name="menu_minutes">Minutes</string>
+    <string name="menu_positive_number">Enter a positive whole number</string>
+    <string name="menu_set_timer">Set timer</string>
+    <string name="menu_sleep_timer">Sleep timer</string>
+    <string name="menu_custom_timer">Custom Timer</string>
+    <string name="menu_timer_off">Off</string>
+    <string name="menu_timer_minutes">%1$d minutes</string>
+    <string name="menu_add_queue">Add to queue</string>
+    <string name="menu_open_lastfm">Open in Last.fm</string>
+    <string name="menu_refresh_artwork">Refresh Cover Art</string>
+    <string name="menu_copy_song">Copy Song</string>
+    <string name="menu_details_specs">Details &amp; Audio Specs</string>
+    <string name="menu_dont_recommend">Don\'t recommend again</string>
+    <string name="menu_remove_from_playlist">Remove from Playlist</string>
+    <string name="menu_remove_from_queue">Remove from Queue</string>
+    <string name="menu_view_artist">View Artist Page</string>
+    <string name="menu_view_artist_name">View Artist (%1$s)</string>
+    <string name="menu_view_album">View Album Page</string>
+    <string name="menu_go_artist">Go to Artist (%1$s)</string>
+    <string name="menu_go_album">Go to Album (%1$s)</string>
+    <string name="menu_downloaded">Downloaded</string>
+    <string name="menu_downloading">Downloading…</string>
+    <string name="menu_already_downloaded">Track is already downloaded</string>
+    <string name="menu_download_progress">Download is in progress</string>
+    <string name="menu_download_tier">Download (%1$s)</string>
+    <string name="menu_quality_atmos">Dolby Atmos</string>
+    <string name="menu_quality_hires">Hi-Res</string>
+    <string name="menu_quality_cd">CD Lossless</string>
+    <string name="menu_quality_standard">Standard</string>
+    <string name="menu_quality_saver">Data Saver</string>
+    <string name="menu_quality_youtube">YouTube</string>
+    <string name="menu_resolving_genre">Resolving genre…</string>
+    <string name="menu_genre_value">Genre: %1$s</string>
+    <string name="menu_genre_unknown">Unknown</string>
+    <string name="menu_start_mix">Start Mix with this Song</string>
+    <string name="menu_quick_play">Play</string>
+    <string name="menu_quick_play_next">Play next</string>
+    <string name="menu_quick_add_playlist">Add to playlist</string>
 </resources>
