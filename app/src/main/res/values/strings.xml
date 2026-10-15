@@ -639,6 +639,53 @@
     <string name="home_menu_cd">Menu</string>
     <string name="home_play">Play</string>
     <string name="home_mix">Mix</string>
+
+    <!-- Generate -->
+    <string name="gen_mode_top">Top Tracks</string>
+    <string name="gen_mode_top_desc">Your most played tracks of all time</string>
+    <string name="gen_mode_recent">Recent Tracks</string>
+    <string name="gen_mode_recent_desc">What you\'ve been listening to lately</string>
+    <string name="gen_mode_song_radio">Song Radio</string>
+    <string name="gen_mode_song_radio_desc">YouTube Music radio from any song</string>
+    <string name="gen_mode_sim_artists">Similar Artists</string>
+    <string name="gen_mode_sim_artists_desc">YouTube-first artist discovery</string>
+    <string name="gen_mode_tag">By Tag / Genre</string>
+    <string name="gen_mode_tag_desc">YouTube-first genre picks</string>
+    <string name="gen_mode_mix">My Mix</string>
+    <string name="gen_mode_mix_desc">Your taste, mixes &amp; local favorites</string>
+    <string name="gen_mode_reco">My Recommendation</string>
+    <string name="gen_mode_reco_desc">35 YouTube-first discoveries</string>
+    <string name="gen_mode_never">Never Heard</string>
+    <string name="gen_mode_never_desc">Fresh discoveries you\'ve never listened to before</string>
+    <string name="gen_mode_library">My Library</string>
+    <string name="gen_mode_library_desc">Re-discover the sounds of your past</string>
+    <string name="gen_period_all">All Time</string>
+    <string name="gen_period_12mo">12 Months</string>
+    <string name="gen_period_6mo">6 Months</string>
+    <string name="gen_period_3mo">3 Months</string>
+    <string name="gen_period_1mo">1 Month</string>
+    <string name="gen_period_7d">7 Days</string>
+    <string name="gen_options">Options</string>
+    <string name="gen_hint_recent">Uses your most recent scrobbles</string>
+    <string name="gen_hint_mix">Top tracks, recent plays, deep cuts and accountless YouTube radio.</string>
+    <string name="gen_hint_reco">%1$d dual-engine tracks, respecting your exclusions</string>
+    <string name="gen_hint_never">Fresh discoveries tailored to your taste, strictly excluding songs you\'ve heard before across listening history, library, and likes.</string>
+    <string name="gen_track_count">Track count: %1$d</string>
+    <string name="gen_track_count_fixed">Track count: %1$d (fixed)</string>
+    <string name="gen_build_radio">Build Song Radio</string>
+    <string name="gen_generate">Generate Playlist</string>
+    <string name="gen_dismiss">Dismiss</string>
+    <string name="gen_period_label">Time Period</string>
+    <string name="gen_tag_label">Genre or Tag</string>
+    <string name="gen_tag_hint">e.g. rock, lofi, jazz…</string>
+    <string name="gen_seed_track">Seed Track</string>
+    <string name="gen_seed_track_desc">Pick any song; its accountless YouTube radio is blended with Last.fm similarity.</string>
+    <string name="gen_track_name_hint">Track name…</string>
+    <string name="gen_search">Search</string>
+    <string name="gen_seed_artist">Seed Artist</string>
+    <string name="gen_artist_name_hint">Artist name…</string>
+    <string name="gen_load_top_tracks">Load My Top Tracks</string>
+    <string name="gen_load_top_artists">Load My Top Artists</string>
 </resources>
 
     <!-- Add-to-playlist duplicate dialogs -->

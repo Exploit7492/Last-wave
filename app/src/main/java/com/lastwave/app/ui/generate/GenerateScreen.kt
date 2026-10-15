@@ -65,9 +65,11 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.lastwave.app.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.generate.RECOMMENDATION_TRACK_COUNT
@@ -143,8 +145,8 @@ fun GenerateScreen(
                     val (badgeContainer, badgeTint) = badgeColorsFor(iconFor(mode))
                     ExpressiveGroupSelectRow(
                         icon = iconFor(mode),
-                        title = mode.label,
-                        subtitle = mode.description,
+                        title = stringResource(mode.labelRes),
+                        subtitle = stringResource(mode.descriptionRes),
                         selected = state.selectedMode == mode,
                         position = position,
                         onClick = { if (!state.isGenerating) viewModel.selectMode(mode) },
@@ -179,34 +181,34 @@ fun GenerateScreen(
                                         )
                                     }
                                     Spacer(Modifier.width(10.dp))
-                                    Text("Options", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    Text(stringResource(R.string.gen_options), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                 }
                                 Spacer(Modifier.height(16.dp))
 
                                 when (mode) {
                                     GenerateMode.TOP, GenerateMode.LIBRARY -> PeriodOptions(state.period, viewModel::setPeriod)
-                                    GenerateMode.RECENT -> HintText("Uses your most recent scrobbles")
+                                    GenerateMode.RECENT -> HintText(stringResource(R.string.gen_hint_recent))
                                     GenerateMode.SIMILAR_TRACKS -> SimilarTrackSeedOptions(state, viewModel)
                                     GenerateMode.SIMILAR_ARTISTS -> SimilarArtistSeedOptions(state, viewModel)
                                     GenerateMode.TAG -> TagOptions(state.tagInput, viewModel::setTagInput, viewModel::setGenreChip)
-                                    GenerateMode.MIX -> HintText("Top tracks, recent plays, deep cuts and accountless YouTube radio.")
+                                    GenerateMode.MIX -> HintText(stringResource(R.string.gen_hint_mix))
                                     GenerateMode.RECOMMENDATIONS -> HintText(
-                                        "$RECOMMENDATION_TRACK_COUNT dual-engine tracks, respecting your exclusions",
+                                        stringResource(R.string.gen_hint_reco, RECOMMENDATION_TRACK_COUNT),
                                     )
                                     GenerateMode.NEVER_HEARD -> HintText(
-                                        "Fresh discoveries tailored to your taste, strictly excluding songs you've heard before across listening history, library, and likes.",
+                                        stringResource(R.string.gen_hint_never),
                                     )
                                 }
 
                                 Spacer(Modifier.height(20.dp))
                                 if (mode == GenerateMode.RECOMMENDATIONS) {
                                     Text(
-                                        "Track count: $RECOMMENDATION_TRACK_COUNT (fixed)",
+                                        stringResource(R.string.gen_track_count_fixed, RECOMMENDATION_TRACK_COUNT),
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.Medium,
                                     )
                                 } else {
-                                    Text("Track count: ${state.trackCount}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+                                    Text(stringResource(R.string.gen_track_count, state.trackCount), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
                                     Slider(
                                         value = state.trackCount.toFloat(),
                                         onValueChange = { viewModel.setTrackCount(it.toInt()) },
@@ -225,7 +227,7 @@ fun GenerateScreen(
                                     Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(8.dp))
                                     Text(
-                                        if (mode == GenerateMode.SIMILAR_TRACKS) "Build Song Radio" else "Generate Playlist",
+                                        if (mode == GenerateMode.SIMILAR_TRACKS) stringResource(R.string.gen_build_radio) else stringResource(R.string.gen_generate),
                                         fontWeight = FontWeight.Medium,
                                     )
                                 }
@@ -252,7 +254,7 @@ fun GenerateScreen(
                                 Spacer(Modifier.width(10.dp))
                                 Text(error, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
                             }
-                            TextButton(onClick = viewModel::dismissError) { Text("Dismiss") }
+                            TextButton(onClick = viewModel::dismissError) { Text(stringResource(R.string.gen_dismiss)) }
                         }
                     }
                 }
@@ -297,23 +299,23 @@ private fun HintText(text: String) {
 
 @Composable
 private fun PeriodOptions(period: String, onPeriodChange: (String) -> Unit) {
-    Text("Time Period", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+    Text(stringResource(R.string.gen_period_label), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
     Spacer(Modifier.height(8.dp))
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(GENERATE_PERIODS, key = { it.first }) { (value, label) ->
-            FilterChip(selected = period == value, onClick = { onPeriodChange(value) }, label = { Text(label) })
+        items(GENERATE_PERIODS, key = { it.first }) { (value, labelRes) ->
+            FilterChip(selected = period == value, onClick = { onPeriodChange(value) }, label = { Text(stringResource(labelRes)) })
         }
     }
 }
 
 @Composable
 private fun TagOptions(tag: String, onTagChange: (String) -> Unit, onChipPick: (String) -> Unit) {
-    Text("Genre or Tag", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+    Text(stringResource(R.string.gen_tag_label), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
     Spacer(Modifier.height(8.dp))
     OutlinedTextField(
         value = tag,
         onValueChange = onTagChange,
-        placeholder = { Text("e.g. rock, lofi, jazz\u2026") },
+        placeholder = { Text(stringResource(R.string.gen_tag_hint)) },
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth(),
     )
@@ -327,9 +329,9 @@ private fun TagOptions(tag: String, onTagChange: (String) -> Unit, onChipPick: (
 
 @Composable
 private fun SimilarTrackSeedOptions(state: GenerateUiState, viewModel: GenerateViewModel) {
-    Text("Seed Track", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+    Text(stringResource(R.string.gen_seed_track), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
     Text(
-        "Pick any song; its accountless YouTube radio is blended with Last.fm similarity.",
+        stringResource(R.string.gen_seed_track_desc),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -338,27 +340,27 @@ private fun SimilarTrackSeedOptions(state: GenerateUiState, viewModel: GenerateV
         OutlinedTextField(
             value = state.seedTrackName,
             onValueChange = viewModel::setSeedTrackName,
-            placeholder = { Text("Track name\u2026") },
+            placeholder = { Text(stringResource(R.string.gen_track_name_hint)) },
             singleLine = true,
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(8.dp))
-        TextButton(onClick = viewModel::searchSeedTrack) { Text("Search") }
+        TextButton(onClick = viewModel::searchSeedTrack) { Text(stringResource(R.string.gen_search)) }
     }
     Spacer(Modifier.height(10.dp))
-    Text("Seed Artist", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+    Text(stringResource(R.string.gen_seed_artist), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
     Spacer(Modifier.height(8.dp))
     OutlinedTextField(
         value = state.seedArtistName,
         onValueChange = viewModel::setSeedArtistName,
-        placeholder = { Text("Artist name\u2026") },
+        placeholder = { Text(stringResource(R.string.gen_artist_name_hint)) },
         singleLine = true,
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth(),
     )
     Spacer(Modifier.height(10.dp))
-    TextButton(onClick = viewModel::loadTopTracksForSeed) { Text("Load My Top Tracks") }
+    TextButton(onClick = viewModel::loadTopTracksForSeed) { Text(stringResource(R.string.gen_load_top_tracks)) }
     if (state.seedTrackResults.isNotEmpty()) {
         Column(Modifier.height(160.dp)) {
             LazyColumn {
@@ -377,22 +379,22 @@ private fun SimilarTrackSeedOptions(state: GenerateUiState, viewModel: GenerateV
 
 @Composable
 private fun SimilarArtistSeedOptions(state: GenerateUiState, viewModel: GenerateViewModel) {
-    Text("Seed Artist", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+    Text(stringResource(R.string.gen_seed_artist), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
     Spacer(Modifier.height(8.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
             value = state.seedArtistQuery,
             onValueChange = viewModel::setSeedArtistQuery,
-            placeholder = { Text("Artist name\u2026") },
+            placeholder = { Text(stringResource(R.string.gen_artist_name_hint)) },
             singleLine = true,
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(8.dp))
-        TextButton(onClick = viewModel::searchSeedArtist) { Text("Search") }
+        TextButton(onClick = viewModel::searchSeedArtist) { Text(stringResource(R.string.gen_search)) }
     }
     Spacer(Modifier.height(10.dp))
-    TextButton(onClick = viewModel::loadTopArtistsForSeed) { Text("Load My Top Artists") }
+    TextButton(onClick = viewModel::loadTopArtistsForSeed) { Text(stringResource(R.string.gen_load_top_artists)) }
     if (state.seedArtistResults.isNotEmpty()) {
         Column(Modifier.height(160.dp)) {
             LazyColumn {
