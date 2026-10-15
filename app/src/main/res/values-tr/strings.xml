@@ -966,4 +966,43 @@
     <string name="ytimp_fail">İçe aktarma başarısız: %1$s</string>
     <string name="ytimp_type_fail">%1$s içe aktarma başarısız: %2$s</string>
     <string name="ytimp_type_rom">%1$s içe aktarma bu ROM’da desteklenmiyor</string>
+
+    <!-- Arkadaş profili -->
+    <string name="fr_open_lfm_cd">Last.fm profilini aç</string>
+    <string name="fr_pin_cd">Arkadaşı sabitle</string>
+    <string name="fr_unpin_cd">Arkadaş sabitini kaldır</string>
+    <string name="fr_loading">%1$s profili yükleniyor</string>
+    <string name="fr_load_fail">Arkadaş profili yüklenemedi</string>
+    <string name="fr_load_error">Arkadaş profili yüklenemedi</string>
+    <string name="fr_tab_recent">Son</string>
+    <string name="fr_tab_tracks">En İyi Parçalar</string>
+    <string name="fr_tab_artists">En İyi Sanatçılar</string>
+    <string name="fr_empty_recent">Bu arkadaş için son scrobble bulunamadı.</string>
+    <string name="fr_empty_tracks">Bu dönem için en iyi parça yok.</string>
+    <string name="fr_empty_artists">Bu arkadaş için en iyi sanatçı yok.</string>
+    <string name="fr_period_all">Genel</string>
+    <string name="fr_period_7d">7 Gün</string>
+    <string name="fr_period_30d">30 Gün</string>
+    <string name="fr_badge_plays">%1$d dinlenme</string>
+    <string name="fr_badge_lfm">Last.fm Arkadaşı</string>
+    <string name="fr_listen_along">Birlikte Dinle</string>
+    <string name="fr_start_mix">Mix Başlat</string>
+    <string name="fr_time_now">Az önce</string>
+    <string name="fr_time_min">%1$d dk önce</string>
+    <string name="fr_time_hour">%1$d sa önce</string>
+    <string name="fr_time_yesterday">Dün</string>
+    <string name="fr_time_day">%1$d gün önce</string>
+    <string name="fr_date">%1$d %2$s</string>
+    <string name="fr_month_jan">Oca</string>
+    <string name="fr_month_feb">Şub</string>
+    <string name="fr_month_mar">Mar</string>
+    <string name="fr_month_apr">Nis</string>
+    <string name="fr_month_may">May</string>
+    <string name="fr_month_jun">Haz</string>
+    <string name="fr_month_jul">Tem</string>
+    <string name="fr_month_aug">Ağu</string>
+    <string name="fr_month_sep">Eyl</string>
+    <string name="fr_month_oct">Eki</string>
+    <string name="fr_month_nov">Kas</string>
+    <string name="fr_month_dec">Ara</string>
 </resources>
