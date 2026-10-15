@@ -1045,4 +1045,28 @@
     <string name="alb_empty">No tracks listed for this album right now — try again later.</string>
     <string name="alb_load_fail">Failed to load album details</string>
     <string name="alb_save_fail">Couldn\'t save album. Try again.</string>
+
+    <!-- New releases -->
+    <string name="nr_title">New releases</string>
+    <string name="nr_sub">Find fresh drops</string>
+    <string name="nr_load_fail">Couldn\'t load new releases</string>
+    <string name="nr_empty">No new releases found</string>
+    <string name="nr_empty_hint">Pull down or tap refresh to check again.</string>
+    <string name="nr_more_fail">Couldn\'t load more releases. Retry</string>
+
+    <!-- Genres -->
+    <string name="ge_title">Your Genres</string>
+    <string name="ge_sub">Based on your listening history</string>
+    <string name="ge_empty">No genre data yet</string>
+    <string name="ge_tracks">Your Tracks</string>
+    <string name="ge_discover">Discover More</string>
+    <string name="ge_no_tracks">No tracks found</string>
+
+    <!-- Login -->
+    <string name="login_tagline">Your music, your way — powered by YouTube Music</string>
+    <string name="login_yt">Login with YouTube Music</string>
+    <string name="login_guest">Continue as Guest</string>
+    <string name="login_guest_desc">Guest mode works fully offline with local recommendations. Connect Last.fm anytime in Settings to sync scrobbles.</string>
+    <string name="login_restore">Restore backup</string>
+    <string name="login_downloads">Open Offline Downloads</string>
 </resources>

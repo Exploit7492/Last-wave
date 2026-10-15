@@ -54,9 +54,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.lastwave.app.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.music.YouTubeMusicTrack
@@ -119,8 +121,8 @@ fun NewReleasesScreen(
                 .adaptiveContentWidth(maxWidth = 860.dp),
         ) {
             ExpressiveHeader(
-                title = "New releases",
-                subtitle = "Find fresh drops",
+                title = stringResource(R.string.nr_title),
+                subtitle = stringResource(R.string.nr_sub),
                 onBack = onBack,
                 actions = {
                     HeaderActionIcon(Icons.Filled.Refresh, "Refresh", viewModel::refresh)
@@ -167,7 +169,7 @@ fun NewReleasesScreen(
                                         modifier = Modifier.size(48.dp),
                                     )
                                     Spacer(Modifier.height(16.dp))
-                                    Text("Couldn't load new releases", style = MaterialTheme.typography.titleMedium)
+                                    Text(stringResource(R.string.nr_load_fail), style = MaterialTheme.typography.titleMedium)
                                     Spacer(Modifier.height(6.dp))
                                     Text(
                                         state.error.orEmpty(),
@@ -177,7 +179,7 @@ fun NewReleasesScreen(
                                     )
                                     Spacer(Modifier.height(18.dp))
                                     TextButton(onClick = viewModel::loadInitial) {
-                                        Text("Retry")
+                                        Text(stringResource(R.string.ly_retry))
                                     }
                                 }
                             }
@@ -193,10 +195,10 @@ fun NewReleasesScreen(
                                         modifier = Modifier.size(44.dp),
                                     )
                                     Spacer(Modifier.height(16.dp))
-                                    Text("No new releases found", style = MaterialTheme.typography.titleMedium)
+                                    Text(stringResource(R.string.nr_empty), style = MaterialTheme.typography.titleMedium)
                                     Spacer(Modifier.height(6.dp))
                                     Text(
-                                        "Pull down or tap refresh to check again.",
+                                        stringResource(R.string.nr_empty_hint),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -229,7 +231,7 @@ fun NewReleasesScreen(
                                         ) {
                                             Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
                                             Spacer(Modifier.width(6.dp))
-                                            Text("Play all", fontWeight = FontWeight.Bold)
+                                            Text(stringResource(R.string.feed_play_all), fontWeight = FontWeight.Bold)
                                         }
                                         FilledTonalButton(
                                             onClick = viewModel::shuffle,
@@ -238,7 +240,7 @@ fun NewReleasesScreen(
                                         ) {
                                             Icon(Icons.Filled.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
                                             Spacer(Modifier.width(6.dp))
-                                            Text("Shuffle", fontWeight = FontWeight.SemiBold)
+                                            Text(stringResource(R.string.feed_shuffle), fontWeight = FontWeight.SemiBold)
                                         }
                                     }
                                 }
@@ -307,7 +309,7 @@ fun NewReleasesScreen(
                                                 ) {
                                                     Icon(
                                                         Icons.Filled.MoreVert,
-                                                        contentDescription = "Track options",
+                                                        contentDescription = stringResource(R.string.fpd_track_options_cd),
                                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                                         modifier = Modifier.size(18.dp),
                                                     )
@@ -320,7 +322,7 @@ fun NewReleasesScreen(
                                 if (state.error != null) {
                                     item(key = "load_more_error") {
                                         TextButton(onClick = viewModel::loadMore, modifier = Modifier.fillMaxWidth()) {
-                                            Text("Couldn't load more releases. Retry")
+                                            Text(stringResource(R.string.nr_more_fail))
                                         }
                                     }
                                 }

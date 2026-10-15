@@ -98,6 +98,8 @@
     <string name="settings_force_sw_volume_off">Mümkünse DAC donanım sesi, yoksa yazılım</string>
     <string name="settings_crossfade">Geçiş (Crossfade)</string>
     <string name="settings_crossfade_sub">Parça sonunu sonraki parçayla yumuşakça birleştir</string>
+    <string name="settings_keep_lyrics_screen_awake">Şarkı Sözlerinde Ekranı Açık Tut</string>
+    <string name="settings_keep_lyrics_screen_awake_desc">Şarkı sözlerine bakarken ekranın kapanmasını engelle</string>
     <string name="settings_download_lyrics">Eşitlenmiş Şarkı Sözlerini İndir</string>
     <string name="settings_download_lyrics_on">.lrc dosyalarını kaydet ve sözleri indirmelere göm</string>
     <string name="settings_download_lyrics_off">İndirirken sözleri alma veya kaydetme</string>
@@ -1039,4 +1041,28 @@
     <string name="alb_empty">Bu albümde şu an parça listelenmiyor — sonra tekrar deneyin.</string>
     <string name="alb_load_fail">Albüm bilgileri yüklenemedi</string>
     <string name="alb_save_fail">Albüm kaydedilemedi. Tekrar deneyin.</string>
+
+    <!-- Yeni çıkanlar -->
+    <string name="nr_title">Yeni çıkanlar</string>
+    <string name="nr_sub">Taze çıkanları bulun</string>
+    <string name="nr_load_fail">Yeni çıkanlar yüklenemedi</string>
+    <string name="nr_empty">Yeni çıkan bulunamadı</string>
+    <string name="nr_empty_hint">Tekrar denetlemek için aşağı çekin veya yenileye dokunun.</string>
+    <string name="nr_more_fail">Daha fazla çıkan yüklenemedi. Tekrar deneyin</string>
+
+    <!-- Türler -->
+    <string name="ge_title">Türleriniz</string>
+    <string name="ge_sub">Dinleme geçmişinize göre</string>
+    <string name="ge_empty">Henüz tür verisi yok</string>
+    <string name="ge_tracks">Parçalarınız</string>
+    <string name="ge_discover">Daha Fazla Keşfet</string>
+    <string name="ge_no_tracks">Parça bulunamadı</string>
+
+    <!-- Giriş -->
+    <string name="login_tagline">Müziğiniz, sizin tarzınız — YouTube Music destekli</string>
+    <string name="login_yt">YouTube Music ile Giriş Yap</string>
+    <string name="login_guest">Misafir Olarak Devam Et</string>
+    <string name="login_guest_desc">Misafir modu yerel önerilerle tamamen çevrimdışı çalışır. Scrobble’ları eşitlemek için Ayarlardan istediğiniz zaman Last.fm bağlayın.</string>
+    <string name="login_restore">Yedeği geri yükle</string>
+    <string name="login_downloads">Çevrimdışı İndirilenleri Aç</string>
 </resources>
