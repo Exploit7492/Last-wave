@@ -376,38 +376,38 @@ enum class SettingsTab(
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
 ) {
     AUDIO(
-        title = "Audio & Playback",
-        subtitle = "Streaming quality, Audio engine, Equalizer, Output & Loudness",
+        title = stringResource(R.string.set_cat_audio),
+        subtitle = stringResource(R.string.set_cat_audio_sub),
         icon = Icons.Filled.GraphicEq,
     ),
     APPEARANCE(
-        title = "Appearance & Visuals",
-        subtitle = "Themes, Colors, Artwork, Lyrics",
+        title = stringResource(R.string.set_cat_appear),
+        subtitle = stringResource(R.string.set_cat_appear_sub),
         icon = Icons.Filled.Palette,
     ),
     YOUTUBE(
-        title = "YouTube & Sync",
-        subtitle = "Account connection, 24/7 Library sync, Channels, History",
+        title = stringResource(R.string.set_cat_yt),
+        subtitle = stringResource(R.string.set_cat_yt_sub),
         icon = Icons.Filled.CloudSync,
     ),
     LAST_FM(
-        title = "Last.fm",
-        subtitle = "Account connection, Scrobbling sync & API credentials",
+        title = stringResource(R.string.set_cat_lfm),
+        subtitle = stringResource(R.string.set_cat_lfm_sub),
         icon = Icons.Filled.Album,
     ),
     LIBRARY(
-        title = "Library & Content",
-        subtitle = "Home layout, Playlist imports, Downloads, Exclusions",
+        title = stringResource(R.string.set_cat_lib),
+        subtitle = stringResource(R.string.set_cat_lib_sub),
         icon = Icons.Filled.QueueMusic,
     ),
     DATA_BACKUP(
-        title = "Data & Storage",
-        subtitle = "Backup & Restore, Cache clearing, CSV history, Reset data",
+        title = stringResource(R.string.set_cat_data),
+        subtitle = stringResource(R.string.set_cat_data_sub),
         icon = Icons.Filled.Backup,
     ),
     ABOUT(
-        title = "About & System",
-        subtitle = "App language, Updates, Community, Diagnostics, Source code",
+        title = stringResource(R.string.set_cat_about),
+        subtitle = stringResource(R.string.set_cat_about_sub),
         icon = Icons.Filled.AutoAwesome,
     ),
 }
@@ -466,7 +466,7 @@ fun SettingsScreen(
                 androidx.browser.customtabs.CustomTabsIntent.Builder().build()
                     .launchUrl(context, android.net.Uri.parse(url))
             }.onFailure {
-                viewModel.showToast("No browser available to connect Last.fm")
+                viewModel.showToast(context.getString(R.string.toast_no_browser_lfm))
                 viewModel.cancelLastFmConnect()
             }
         }
@@ -678,7 +678,7 @@ fun SettingsScreen(
                                             icon = Icons.Filled.Album,
                                             iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                             iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            title = "Last.fm",
+                                            title = stringResource(R.string.set_cat_lfm),
                                             subtitle = if (isLastFmConnected) "Connected as ${session.username} \u2022 Scrobbling active" else "Connect account, scrobbles & statistics sync",
                                             onClick = { activeTab = SettingsTab.LAST_FM },
                                             position = position,
@@ -687,7 +687,7 @@ fun SettingsScreen(
                                             icon = Icons.Filled.CloudSync,
                                             iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                             iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                            title = "YouTube & Sync",
+                                            title = stringResource(R.string.set_cat_yt),
                                             subtitle = if (ytConnection.isConnected) "Connected as ${ytConnection.accountName} \u2022 24/7 sync" else "Connect account, 24/7 playlist sync, channels",
                                             onClick = { activeTab = SettingsTab.YOUTUBE },
                                             position = position,
@@ -706,8 +706,8 @@ fun SettingsScreen(
                                             icon = Icons.Filled.GraphicEq,
                                             iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                             iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            title = "Audio & Playback",
-                                            subtitle = "Streaming quality, Audio engine, Equalizer, Output & Loudness",
+                                            title = stringResource(R.string.set_cat_audio),
+                                            subtitle = stringResource(R.string.set_cat_audio_sub),
                                             onClick = { activeTab = SettingsTab.AUDIO },
                                             position = position,
                                         )
@@ -715,8 +715,8 @@ fun SettingsScreen(
                                             icon = Icons.Filled.Palette,
                                             iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                             iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                            title = "Appearance & Visuals",
-                                            subtitle = "Themes, Colors, Artwork, Lyrics",
+                                            title = stringResource(R.string.set_cat_appear),
+                                            subtitle = stringResource(R.string.set_cat_appear_sub),
                                             onClick = { activeTab = SettingsTab.APPEARANCE },
                                             position = position,
                                         )
@@ -724,7 +724,7 @@ fun SettingsScreen(
                                             icon = Icons.Filled.QueueMusic,
                                             iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                             iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                            title = "Library & Content",
+                                            title = stringResource(R.string.set_cat_lib),
                                             subtitle = run {
                                                 val count = downloadCount
                                                 if (count > 0) "$count songs downloaded • Imports, Home layout" else "Home layout, Playlist imports, Downloads, Exclusions"
@@ -746,8 +746,8 @@ fun SettingsScreen(
                                             icon = Icons.Filled.Backup,
                                             iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                             iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                            title = "Data & Storage",
-                                            subtitle = "Backup & Restore, Cache clearing, CSV history, Reset data",
+                                            title = stringResource(R.string.set_cat_data),
+                                            subtitle = stringResource(R.string.set_cat_data_sub),
                                             onClick = { activeTab = SettingsTab.DATA_BACKUP },
                                             position = position,
                                         )
@@ -755,7 +755,7 @@ fun SettingsScreen(
                                             icon = Icons.Filled.AutoAwesome,
                                             iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                             iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            title = "About & System",
+                                            title = stringResource(R.string.set_cat_about),
                                             subtitle = if (updateInfo.isUpdateAvailable) "Update Available (${updateInfo.latestVersion}) \u2022 v${appVersionName(context)}" else "v${appVersionName(context)} \u2022 Language, Community, Source code",
                                             onClick = { activeTab = SettingsTab.ABOUT },
                                             position = position,
@@ -897,7 +897,7 @@ fun SettingsScreen(
                                     iconContainer = MaterialTheme.colorScheme.errorContainer,
                                     iconTint = MaterialTheme.colorScheme.onErrorContainer,
                                     title = stringResource(R.string.settings_battery_title),
-                                    subtitle = "Restricted \u2022 Tap to exempt from Samsung Device Care / sleeping apps",
+                                    subtitle = stringResource(R.string.set_battery_restricted),
                                     onClick = { BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context) },
                                     position = position,
                                     isHighlighted = (highlightedSettingId == "audio.battery_optimization"),
@@ -909,7 +909,7 @@ fun SettingsScreen(
                                     iconContainer = MaterialTheme.colorScheme.errorContainer,
                                     iconTint = MaterialTheme.colorScheme.onErrorContainer,
                                     title = stringResource(R.string.settings_battery_title),
-                                    subtitle = "Restricted \u2022 Tap to exempt from Samsung Device Care / sleeping apps",
+                                    subtitle = stringResource(R.string.set_battery_restricted),
                                     onClick = { BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context) },
                                     position = position,
                                     isHighlighted = (highlightedSettingId == "audio.battery_optimization"),
@@ -935,13 +935,13 @@ fun SettingsScreen(
                                 icon = Icons.Filled.Usb,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "USB Exclusive Output",
+                                title = stringResource(R.string.set_usb_title),
                                 subtitle = if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
-                                    "Requires Android 10 or newer"
+                                    stringResource(R.string.set_usb_old)
                                 } else if (usbExclusiveEnabled || misc.isBitPerfectEnabled) {
-                                    "Direct usbdevfs to the DAC \u2022 Bit-Perfect engages this automatically"
+                                    stringResource(R.string.set_usb_on)
                                 } else {
-                                    "Off \u2022 Needs a USB DAC and Bit-Perfect (or this toggle)"
+                                    stringResource(R.string.set_usb_off)
                                 },
                                 checked = usbExclusiveEnabled,
                                 onCheckedChange = viewModel::setUsbExclusiveEnabled,
@@ -994,7 +994,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.VolumeUp,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Loudness Normalization",
+                                title = stringResource(R.string.set_loud_title),
                                 subtitle = loudnessSubtitle,
                                 onClick = { showLoudnessDialog = true },
                                 position = position,
@@ -1006,9 +1006,9 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                                 title = stringResource(R.string.settings_equalizer),
                                 subtitle = if (misc.isBitPerfectEnabled && eq.enabled) {
-                                    "On • ${eq.presetName} (Bypassed by Bit-Perfect Mode)"
+                                    stringResource(R.string.set_eq_on_preset, eq.presetName)
                                 } else if (eq.enabled) {
-                                    "On • ${eq.presetName} • 15-band"
+                                    stringResource(R.string.set_eq_on_band, eq.presetName)
                                 } else {
                                     "Shape your sound across 15 frequencies"
                                 },
@@ -1020,11 +1020,11 @@ fun SettingsScreen(
                                 icon = Icons.Filled.VolumeUp,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                title = "System Audio Effects",
+                                title = stringResource(R.string.set_sys_fx_title),
                                 subtitle = if (misc.systemEffectsMode) {
-                                    "External effects active • in-app EQ bypassed"
+                                    stringResource(R.string.set_sys_fx_on)
                                 } else {
-                                    "Let Dolby / equalizer apps process playback"
+                                    stringResource(R.string.set_sys_fx_off)
                                 },
                                 checked = misc.systemEffectsMode,
                                 onCheckedChange = viewModel::setSystemEffectsMode,
@@ -1037,9 +1037,9 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                                 title = stringResource(R.string.settings_studio_clarity),
                                 subtitle = if (misc.isStudioMasterClarityEnabled) {
-                                    "Crystal-clear open sound • airy detail • deep clean separation"
+                                    stringResource(R.string.settings_studio_clarity_on)
                                 } else {
-                                    "Original unshaped output"
+                                    stringResource(R.string.settings_studio_clarity_off)
                                 },
                                 checked = misc.isStudioMasterClarityEnabled,
                                 onCheckedChange = viewModel::setStudioMasterClarity,
@@ -1050,8 +1050,12 @@ fun SettingsScreen(
                                 icon = Icons.Filled.Tune,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                title = "Clarity Output Preset",
-                                subtitle = "${clarityPreset.displayName} \u2022 ${clarityPreset.description}",
+                                title = stringResource(R.string.set_clarity_title),
+                                subtitle = stringResource(
+                                    R.string.set_clarity_row,
+                                    clarityPresetName(clarityPreset),
+                                    clarityPresetDescription(clarityPreset),
+                                ),
                                 onClick = { showClarityPresetDialog = true },
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "audio.clarity_preset"),
@@ -1060,7 +1064,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.GraphicEq,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Clarity Spatial Bypass",
+                                title = stringResource(R.string.set_clarity_bypass),
                                 subtitle = if (misc.clarityAtmosBypass) {
                                     "Clarity bypasses on multichannel/spatial sources"
                                 } else {
@@ -1259,11 +1263,15 @@ fun SettingsScreen(
                                 icon = Icons.Filled.Timer,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Lyrics sync offset",
+                                title = stringResource(R.string.set_lyrics_offset_title),
                                 subtitle = if (misc.lyricsOffsetMs == 0L) {
-                                    "Off \u2022 highlight follows the audio exactly"
+                                    stringResource(R.string.set_offset_off)
                                 } else {
-                                    "${if (misc.lyricsOffsetMs > 0) "+" else ""}${misc.lyricsOffsetMs} ms \u2022 + shows lyrics early, \u2212 delays them"
+                                    stringResource(
+                                        R.string.set_offset_value,
+                                        if (misc.lyricsOffsetMs > 0) "+" else "",
+                                        misc.lyricsOffsetMs,
+                                    )
                                 },
                                 onClick = { showLyricsOffsetDialog = true },
                                 position = position,
@@ -1273,15 +1281,17 @@ fun SettingsScreen(
                                 icon = Icons.Filled.FormatSize,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Lyrics text size",
-                                subtitle = "${(misc.lyricsFontScale * 100).roundToInt()}% \u2022 ${
+                                title = stringResource(R.string.set_lyrics_size_title),
+                                subtitle = stringResource(
+                                    R.string.set_size_value,
+                                    (misc.lyricsFontScale * 100).roundToInt(),
                                     when {
-                                        misc.lyricsFontScale < 0.85f -> "Small"
-                                        misc.lyricsFontScale in 0.85f..1.15f -> "Standard"
-                                        misc.lyricsFontScale in 1.16f..1.35f -> "Large"
-                                        else -> "Extra Large"
-                                    }
-                                }",
+                                        misc.lyricsFontScale < 0.85f -> stringResource(R.string.set_size_small)
+                                        misc.lyricsFontScale in 0.85f..1.15f -> stringResource(R.string.set_size_standard)
+                                        misc.lyricsFontScale in 1.16f..1.35f -> stringResource(R.string.set_size_large)
+                                        else -> stringResource(R.string.set_size_xlarge)
+                                    },
+                                ),
                                 onClick = { showLyricsSizeDialog = true },
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "appearance.lyrics_size"),
@@ -1399,8 +1409,8 @@ fun SettingsScreen(
                                     icon = Icons.Filled.SwitchAccount,
                                     iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                     iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    title = "YouTube channel",
-                                    subtitle = currentChannelName.ifBlank { "Default channel" },
+                                    title = stringResource(R.string.set_yt_channel_row),
+                                    subtitle = currentChannelName.ifBlank { stringResource(R.string.set_channel_default) },
                                     onClick = {
                                         viewModel.loadYtChannels()
                                         showYtChannelSheet = true
@@ -1412,9 +1422,9 @@ fun SettingsScreen(
                             3 -> if (ytConnected) {
                                 val selectedCount = syncedPlaylistIds?.size ?: allPlaylists.size
                                 val syncCountText = if (syncedPlaylistIds == null || selectedCount == allPlaylists.size) {
-                                    "All (${allPlaylists.size}) playlists syncing"
+                                    stringResource(R.string.set_sync_all, allPlaylists.size)
                                 } else {
-                                    "$selectedCount of ${allPlaylists.size} playlists selected"
+                                    stringResource(R.string.set_sync_partial, selectedCount, allPlaylists.size)
                                 }
                                 SettingsActionCard(
                                     icon = Icons.Filled.FormatListBulleted,
@@ -1431,8 +1441,8 @@ fun SettingsScreen(
                                     icon = Icons.Filled.QueueMusic,
                                     iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                     iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    title = "Import from YouTube Music",
-                                    subtitle = "Search, browse, or paste playlist links & IDs",
+                                    title = stringResource(R.string.set_import_yt),
+                                    subtitle = stringResource(R.string.set_import_yt_sub),
                                     onClick = onOpenYouTubeImport,
                                     position = position,
                                     isHighlighted = (highlightedSettingId == "youtube.import"),
@@ -1441,9 +1451,9 @@ fun SettingsScreen(
                             4 -> if (ytConnected) {
                                 val shownCount = ytAccountPlaylists.count { it.id !in hiddenYtLibraryPlaylistIds }
                                 val visibilitySubtitle = if (shownCount == ytAccountPlaylists.size) {
-                                    "All (${ytAccountPlaylists.size}) account playlists shown"
+                                    stringResource(R.string.set_yt_shown_all, ytAccountPlaylists.size)
                                 } else {
-                                    "$shownCount of ${ytAccountPlaylists.size} account playlists shown"
+                                    stringResource(R.string.set_yt_shown_partial, shownCount, ytAccountPlaylists.size)
                                 }
                                 SettingsActionCard(
                                     icon = Icons.Filled.Visibility,
@@ -1473,9 +1483,9 @@ fun SettingsScreen(
                                     iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                                     title = stringResource(R.string.settings_yt_history),
                                     subtitle = if (ytHistorySyncEnabled) {
-                                        "On • songs you listen to in LastWave, including lossless & downloads, appear in your YouTube Music history"
+                                        stringResource(R.string.set_yt_hist_on)
                                     } else {
-                                        "Off • listening in LastWave stays out of your YouTube Music history"
+                                        stringResource(R.string.set_yt_hist_off)
                                     },
                                     checked = ytHistorySyncEnabled,
                                     onCheckedChange = viewModel::setYtHistorySyncEnabled,
@@ -1514,7 +1524,7 @@ fun SettingsScreen(
                                 androidx.browser.customtabs.CustomTabsIntent.Builder().build()
                                     .launchUrl(context, android.net.Uri.parse(LAST_FM_CREATE_KEY_URL))
                             }.onFailure {
-                                viewModel.showToast("No browser available to open Last.fm")
+                                viewModel.showToast(context.getString(R.string.toast_no_browser_open_lfm))
                             }
                         },
                     )
@@ -1528,11 +1538,11 @@ fun SettingsScreen(
                         icon = Icons.Filled.Public,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                        title = "Discord Rich Presence",
+                        title = stringResource(R.string.set_discord_title),
                         subtitle = if (discordPresenceEnabled) {
-                            "On • your track, quality and cover show on your Discord profile"
+                            stringResource(R.string.set_discord_on)
                         } else {
-                            "Off • LastWave stays off your Discord profile"
+                            stringResource(R.string.set_discord_off)
                         },
                         checked = discordPresenceEnabled,
                         onCheckedChange = viewModel::setDiscordPresenceEnabled,
@@ -1569,7 +1579,7 @@ fun SettingsScreen(
                                             iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                             iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                                             title = stringResource(R.string.settings_excluded_songs),
-                                            subtitle = "${state.recommendationExclusionCount} songs excluded",
+                                            subtitle = stringResource(R.string.set_excl_count, state.recommendationExclusionCount),
                                             onClick = onOpenExcludedSongs,
                                             position = position,
                                             isHighlighted = (highlightedSettingId == "library.excluded_songs"),
@@ -1588,8 +1598,8 @@ fun SettingsScreen(
                                             icon = Icons.Filled.QueueMusic,
                                             iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                             iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            title = "Import from YouTube Music",
-                                            subtitle = "Search, browse, or paste playlist links & IDs",
+                                            title = stringResource(R.string.set_import_yt),
+                                            subtitle = stringResource(R.string.set_import_yt_sub),
                                             onClick = onOpenYouTubeImport,
                                             position = position,
                                             isHighlighted = (highlightedSettingId == "library.import_yt"),
@@ -1598,8 +1608,8 @@ fun SettingsScreen(
                                             icon = Icons.Filled.QueueMusic,
                                             iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                             iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                            title = "Import from Spotify / Apple Music",
-                                            subtitle = "Paste a public playlist link",
+                                            title = stringResource(R.string.set_import_spotify),
+                                            subtitle = stringResource(R.string.set_import_spotify_sub),
                                             onClick = onOpenExternalImport,
                                             position = position,
                                             isHighlighted = (highlightedSettingId == "library.import_external"),
@@ -1613,7 +1623,7 @@ fun SettingsScreen(
                                             onClick = {
                                                 runCatching {
                                                     csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/csv", "audio/x-mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "*/*"))
-                                                }.onFailure { viewModel.showToast("No file picker is available") }
+                                                }.onFailure { viewModel.showToast(context.getString(R.string.toast_no_picker)) }
                                             },
                                             position = position,
                                             isHighlighted = (highlightedSettingId == "library.import_file"),
@@ -1641,7 +1651,7 @@ fun SettingsScreen(
                                 subtitle = stringResource(R.string.settings_backup_sub),
                                 onClick = {
                                     runCatching { backupLauncher.launch("lastwave-backup-${System.currentTimeMillis()}.json") }
-                                        .onFailure { viewModel.showToast("No file picker is available") }
+                                        .onFailure { viewModel.showToast(context.getString(R.string.toast_no_picker)) }
                                 },
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "backup.create"),
@@ -1654,7 +1664,7 @@ fun SettingsScreen(
                                 subtitle = stringResource(R.string.settings_restore_sub),
                                 onClick = {
                                     runCatching { restoreLauncher.launch(arrayOf("*/*")) }
-                                        .onFailure { viewModel.showToast("No file picker is available") }
+                                        .onFailure { viewModel.showToast(context.getString(R.string.toast_no_picker)) }
                                 },
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "backup.restore"),
@@ -1715,10 +1725,10 @@ fun SettingsScreen(
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 title = stringResource(R.string.settings_updates_support),
-                                subtitle = "Join @clashprojects on Telegram",
+                                subtitle = stringResource(R.string.set_tg_sub),
                                 onClick = {
                                     if (!openTelegramChannel(context, "clashprojects")) {
-                                        viewModel.showToast("No compatible browser or Telegram app is available")
+                                        viewModel.showToast(context.getString(R.string.toast_no_browser_tg))
                                     }
                                 },
                                 position = position,
@@ -1728,12 +1738,12 @@ fun SettingsScreen(
                                 icon = Icons.Filled.Group,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                title = "Discord Support",
-                                subtitle = "Join our Discord community",
+                                title = stringResource(R.string.set_discord_support),
+                                subtitle = stringResource(R.string.set_discord_support_sub),
                                 onClick = {
                                     val discordIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://discord.gg/TMCEPSUNk2"))
                                     if (!startActivitySafely(context, discordIntent)) {
-                                        viewModel.showToast("No compatible browser is available")
+                                        viewModel.showToast(context.getString(R.string.toast_no_browser))
                                     }
                                 },
                                 position = position,
@@ -1744,10 +1754,10 @@ fun SettingsScreen(
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 title = stringResource(R.string.settings_more_from_us),
-                                subtitle = "Join @MaterialYouApp on Telegram",
+                                subtitle = stringResource(R.string.set_more_apps_sub),
                                 onClick = {
                                     if (!openTelegramChannel(context, "MaterialYouApp")) {
-                                        viewModel.showToast("No compatible browser or Telegram app is available")
+                                        viewModel.showToast(context.getString(R.string.toast_no_browser_tg))
                                     }
                                 },
                                 position = position,
@@ -1860,7 +1870,7 @@ fun SettingsScreen(
                         onClick = {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Clash-Projects/LastWave-native"))
                             if (!startActivitySafely(context, intent)) {
-                                viewModel.showToast("No browser is available")
+                                viewModel.showToast(context.getString(R.string.toast_no_browser_plain))
                             }
                         },
                         isHighlighted = (highlightedSettingId == "about.source_code"),
@@ -1987,7 +1997,7 @@ fun SettingsScreen(
         var password by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = viewModel::dismissSessionKeyDialog,
-            title = { Text("Enable scrobbling") },
+            title = { Text(stringResource(R.string.set_scrobble_title)) },
             text = {
                 Column {
                     Text(
@@ -1998,7 +2008,7 @@ fun SettingsScreen(
                     androidx.compose.material3.OutlinedTextField(
                         value = password,
                         onValueChange = { password = it },
-                        label = { Text("Last.fm password") },
+                        label = { Text(stringResource(R.string.set_scrobble_pass)) },
                         singleLine = true,
                         visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                         isError = state.sessionKeyError != null,
@@ -2015,11 +2025,11 @@ fun SettingsScreen(
                     if (state.sessionKeyLoading) {
                         com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator(size = 18.dp)
                     } else {
-                        Text("Enable")
+                        Text(stringResource(R.string.set_scrobble_enable))
                     }
                 }
             },
-            dismissButton = { TextButton(onClick = viewModel::dismissSessionKeyDialog) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = viewModel::dismissSessionKeyDialog) { Text(stringResource(R.string.common_cancel)) } },
         )
     }
 
@@ -2278,7 +2288,7 @@ fun SettingsScreen(
                                     ) {
                                         Icon(
                                             Icons.Filled.Check,
-                                            contentDescription = "Selected",
+                                            contentDescription = stringResource(R.string.set_selected_cd),
                                             tint = MaterialTheme.colorScheme.onPrimary,
                                             modifier = Modifier.size(18.dp),
                                         )
@@ -2429,7 +2439,7 @@ fun SettingsScreen(
                                     ) {
                                         Icon(
                                             Icons.Filled.Check,
-                                            contentDescription = "Selected",
+                                            contentDescription = stringResource(R.string.set_selected_cd),
                                             tint = MaterialTheme.colorScheme.onPrimary,
                                             modifier = Modifier.size(18.dp),
                                         )
@@ -2449,7 +2459,7 @@ fun SettingsScreen(
             innerTube = viewModel.innerTube,
             importManager = viewModel.playlistImportManager,
             onImportSuccess = { saved ->
-                viewModel.showToast("Imported \"${saved.title}\" (${saved.tracks.size} tracks)")
+                viewModel.showToast(context.getString(R.string.toast_imported, saved.title, saved.tracks.size))
             },
         )
     }
@@ -2714,7 +2724,7 @@ private fun CrossfadeDurationRow(
                 )
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Crossfade duration", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.set_xfade_dur), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                     Text(
                         "${sliderValue.roundToInt()}s \u2022 $blendStyle",
                         style = MaterialTheme.typography.bodySmall,
@@ -2758,9 +2768,9 @@ private fun CrossfadeDurationRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("1s (Tight)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                Text("6s", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                Text("12s (Long)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                Text(stringResource(R.string.set_xfade_1), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                Text(stringResource(R.string.set_xfade_6), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                Text(stringResource(R.string.set_xfade_12), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
             }
         }
     }
@@ -3145,7 +3155,7 @@ private fun YouTubeAccountRow(
                     contentColor = MaterialTheme.colorScheme.onErrorContainer,
                 ),
             ) {
-                Icon(Icons.Filled.Logout, contentDescription = "Disconnect")
+                Icon(Icons.Filled.Logout, contentDescription = stringResource(R.string.set_disconnect_cd))
             }
         }
     }
@@ -3273,7 +3283,7 @@ private fun LastFmIntegrationCard(
                             contentColor = MaterialTheme.colorScheme.onErrorContainer,
                         ),
                     ) {
-                        Icon(Icons.Filled.Logout, contentDescription = "Disconnect")
+                        Icon(Icons.Filled.Logout, contentDescription = stringResource(R.string.set_disconnect_cd))
                     }
                 }
             }
@@ -3284,7 +3294,7 @@ private fun LastFmIntegrationCard(
                             message = if (connecting) "Connecting to Last.fm…" else "Waiting for approval in the browser…",
                         )
                         Spacer(Modifier.height(4.dp))
-                        TextButton(onClick = onCancel) { Text("Cancel") }
+                        TextButton(onClick = onCancel) { Text(stringResource(R.string.common_cancel)) }
                     }
                     else -> {
                         Button(
@@ -3292,7 +3302,7 @@ private fun LastFmIntegrationCard(
                             enabled = hasApiKey,
                             shape = ExpressivePillShape,
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Connect Last.fm") }
+                        ) { Text(stringResource(R.string.set_lfm_connect)) }
                         Text(
                             if (hasApiKey) "Approve in your browser. You can disconnect anytime — Stats keep working locally."
                             else "Add your API key below first, then connect.",
@@ -3314,13 +3324,13 @@ private fun LastFmIntegrationCard(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            "API key",
+                            stringResource(R.string.set_lfm_key_label),
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Medium,
                         )
                         Text(
-                            if (hasApiKey) "Your key is saved"
-                            else "Required — get one free, then paste it here",
+                            if (hasApiKey) stringResource(R.string.set_lfm_key_saved)
+                            else stringResource(R.string.set_lfm_key_hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -3333,7 +3343,7 @@ private fun LastFmIntegrationCard(
                     androidx.compose.material3.OutlinedTextField(
                         value = keyInput,
                         onValueChange = { keyInput = it.trim() },
-                        label = { Text("API key (32 chars)") },
+                        label = { Text(stringResource(R.string.set_lfm_apikey)) },
                         singleLine = true,
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth(),
@@ -3341,7 +3351,7 @@ private fun LastFmIntegrationCard(
                     androidx.compose.material3.OutlinedTextField(
                         value = secretInput,
                         onValueChange = { secretInput = it.trim() },
-                        label = { Text("Shared secret") },
+                        label = { Text(stringResource(R.string.set_lfm_secret)) },
                         singleLine = true,
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth(),
@@ -3357,20 +3367,20 @@ private fun LastFmIntegrationCard(
                             enabled = keyInput.length >= 16 && secretInput.length >= 16,
                             shape = ExpressivePillShape,
                             modifier = Modifier.weight(1f),
-                        ) { Text("Save key") }
+                        ) { Text(stringResource(R.string.set_lfm_save)) }
                         if (hasApiKey) {
                             OutlinedButton(
                                 onClick = onRemoveKey,
                                 shape = ExpressivePillShape,
-                            ) { Text("Remove") }
+                            ) { Text(stringResource(R.string.set_lfm_remove)) }
                         }
                     }
                     TextButton(onClick = onOpenCreateKeyPage) {
-                        Text("Get a free key at last.fm/api →")
+                        Text(stringResource(R.string.set_lfm_get))
                     }
                 } else {
                     TextButton(onClick = onOpenCreateKeyPage) {
-                        Text("How to get a free key →")
+                        Text(stringResource(R.string.set_lfm_how))
                     }
                 }
             }
@@ -3381,15 +3391,15 @@ private fun LastFmIntegrationCard(
     if (showDisconnectConfirm) {
         AlertDialog(
             onDismissRequest = { showDisconnectConfirm = false },
-            title = { Text("Disconnect Last.fm?") },
-            text = { Text("Global scrobbles pause. Your Stats switch to local listening history — nothing is deleted.") },
+            title = { Text(stringResource(R.string.set_lfm_disc_title)) },
+            text = { Text(stringResource(R.string.set_lfm_disc_text)) },
             confirmButton = {
                 TextButton(onClick = {
                     showDisconnectConfirm = false
                     onDisconnect()
-                }) { Text("Disconnect") }
+                }) { Text(stringResource(R.string.set_lfm_disc_btn)) }
             },
-            dismissButton = { TextButton(onClick = { showDisconnectConfirm = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { showDisconnectConfirm = false }) { Text(stringResource(R.string.common_cancel)) } },
         )
     }
 }
@@ -3459,7 +3469,7 @@ private fun AccentPresetGrid(
             }
         }
         ColorTile(
-            label = "Custom",
+            label = stringResource(R.string.set_eq_custom),
             selected = customSelected,
             modifier = Modifier.weight(1f),
             onClick = onPickCustom,
@@ -3737,7 +3747,7 @@ private fun ColorWheelSheet(onDismiss: () -> Unit, onApply: (Color) -> Unit) {
                 .align(Alignment.CenterHorizontally)
                 .padding(20.dp),
         ) {
-            Text("Custom Color", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.set_color_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
             Box(
                 Modifier
@@ -3747,16 +3757,16 @@ private fun ColorWheelSheet(onDismiss: () -> Unit, onApply: (Color) -> Unit) {
                     .background(previewColor),
             )
             Spacer(Modifier.height(20.dp))
-            Text("Hue", style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(R.string.set_hue), style = MaterialTheme.typography.labelLarge)
             Slider(value = hue, onValueChange = { hue = it }, valueRange = 0f..360f)
-            Text("Saturation", style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(R.string.set_sat), style = MaterialTheme.typography.labelLarge)
             Slider(value = saturation, onValueChange = { saturation = it }, valueRange = 0f..1f)
-            Text("Lightness", style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(R.string.set_light), style = MaterialTheme.typography.labelLarge)
             Slider(value = lightness, onValueChange = { lightness = it }, valueRange = 0.15f..0.85f)
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = onDismiss, shape = ExpressivePillShape, modifier = Modifier.weight(1f).height(48.dp)) { Text("Cancel") }
-                Button(onClick = { onApply(previewColor) }, shape = ExpressivePillShape, modifier = Modifier.weight(1f).height(48.dp)) { Text("Apply") }
+                OutlinedButton(onClick = onDismiss, shape = ExpressivePillShape, modifier = Modifier.weight(1f).height(48.dp)) { Text(stringResource(R.string.common_cancel)) }
+                Button(onClick = { onApply(previewColor) }, shape = ExpressivePillShape, modifier = Modifier.weight(1f).height(48.dp)) { Text(stringResource(R.string.common_apply)) }
             }
             Spacer(Modifier.height(8.dp))
         }
@@ -4021,7 +4031,7 @@ private fun EqualizerSheet(
                 ) {
                     Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Reset", style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.set_eq_reset), style = MaterialTheme.typography.labelMedium)
                 }
             }
 
@@ -4037,7 +4047,7 @@ private fun EqualizerSheet(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("Enable Equalizer", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.set_eq_enable), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                         Text(
                             if (eq.enabled) "Shaping your music in real-time" else "Off \u2014 original audio passes through",
                             style = MaterialTheme.typography.bodySmall,
@@ -4079,7 +4089,7 @@ private fun EqualizerSheet(
                     )
                 }
                 if (eq.presetName == EqualizerPresets.CUSTOM_NAME) {
-                    FilterChip(selected = true, onClick = {}, label = { Text("Custom", style = MaterialTheme.typography.labelMedium) })
+                    FilterChip(selected = true, onClick = {}, label = { Text(stringResource(R.string.set_eq_custom), style = MaterialTheme.typography.labelMedium) })
                 }
             }
 
@@ -4409,9 +4419,9 @@ private fun YouTubeChannelSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("YouTube Channel", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.set_yt_channel), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        "Pick which channel's library, likes & history LastWave uses",
+                        stringResource(R.string.set_yt_channel_sub),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -4429,7 +4439,7 @@ private fun YouTubeChannelSheet(
                     ) {
                         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                         Text(
-                            "Loading channels...",
+                            stringResource(R.string.set_yt_loading),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -4446,17 +4456,17 @@ private fun YouTubeChannelSheet(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             Text(
-                                "No channels found",
+                                stringResource(R.string.set_yt_empty_title),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                "Check your connection, then try again.",
+                                stringResource(R.string.set_yt_empty_sub),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             FilledTonalButton(onClick = onReload) {
-                                Text("Retry")
+                                Text(stringResource(R.string.set_yt_retry))
                             }
                         }
                     }
@@ -4506,7 +4516,7 @@ private fun YouTubeChannelSheet(
                                             maxLines = 1,
                                         )
                                         val detail = channel.channelHandle
-                                            ?: if (channel.channelId != null) "Channel" else "Default channel"
+                                            ?: if (channel.channelId != null) stringResource(R.string.set_channel_generic) else stringResource(R.string.set_channel_default)
                                         Text(
                                             detail,
                                             style = MaterialTheme.typography.bodySmall,
@@ -4531,7 +4541,7 @@ private fun YouTubeChannelSheet(
 
             Spacer(Modifier.height(16.dp))
             Button(onClick = onDismiss, shape = CircleShape, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                Text("Done", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.common_done), fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -4571,7 +4581,7 @@ private fun YouTubeLibraryVisibilitySheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("YouTube Playlists Shown", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.set_yt_shown_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
                         "Choose which account playlists appear in LastWave",
                         style = MaterialTheme.typography.bodySmall,
@@ -4593,7 +4603,7 @@ private fun YouTubeLibraryVisibilitySheet(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("No YouTube playlists found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.set_yt_none), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
                 LazyColumn(
@@ -4651,7 +4661,7 @@ private fun YouTubeLibraryVisibilitySheet(
 
             Spacer(Modifier.height(16.dp))
             Button(onClick = onDismiss, shape = CircleShape, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                Text("Done", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.common_done), fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -4809,7 +4819,7 @@ private fun SyncPlaylistsSheet(
                 shape = CircleShape,
                 modifier = Modifier.fillMaxWidth().height(48.dp),
             ) {
-                Text("Done", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.common_done), fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -4875,17 +4885,37 @@ private fun LyricsProviderDialog(
 
 
 
-private fun loudnessModeTitle(mode: LoudnessMode): String = when (mode) {
-    LoudnessMode.TRACK -> "Track"
-    LoudnessMode.ALBUM -> "Album"
-    else -> "Off"
+private fun loudnessModeTitle(context: android.content.Context, mode: LoudnessMode): String = when (mode) {
+    LoudnessMode.TRACK -> context.getString(R.string.set_loud_track)
+    LoudnessMode.ALBUM -> context.getString(R.string.set_loud_album)
+    else -> context.getString(R.string.set_loud_off)
 }
 
-private fun loudnessModeSubtitle(mode: LoudnessMode): String = when (mode) {
-    LoudnessMode.TRACK -> "Match every track to -14 LUFS (needs ReplayGain tags)"
-    LoudnessMode.ALBUM -> "Keep intentional album dynamics (falls back to track tags)"
-    else -> "Play tracks at their original level"
+private fun loudnessModeSubtitle(context: android.content.Context, mode: LoudnessMode): String = when (mode) {
+    LoudnessMode.TRACK -> context.getString(R.string.set_loud_track_sub)
+    LoudnessMode.ALBUM -> context.getString(R.string.set_loud_album_sub)
+    else -> context.getString(R.string.set_loud_off_sub)
 }
+
+@Composable
+private fun clarityPresetName(preset: com.lastwave.app.playback.ClarityPreset): String = stringResource(
+    when (preset.key) {
+        "speaker" -> R.string.set_preset_speaker
+        "headphone" -> R.string.set_preset_headphone
+        "dac" -> R.string.set_preset_dac
+        else -> R.string.set_preset_reference
+    },
+)
+
+@Composable
+private fun clarityPresetDescription(preset: com.lastwave.app.playback.ClarityPreset): String = stringResource(
+    when (preset.key) {
+        "speaker" -> R.string.set_preset_speaker_desc
+        "headphone" -> R.string.set_preset_headphone_desc
+        "dac" -> R.string.set_preset_dac_desc
+        else -> R.string.set_preset_reference_desc
+    },
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -4896,14 +4926,14 @@ private fun LoudnessModeDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Loudness Normalization") },
+        title = { Text(stringResource(R.string.set_loud_title)) },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
-                    "Evens out volume jumps between tracks. Bypassed in Bit-Perfect and USB exclusive modes.",
+                    stringResource(R.string.set_loud_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -4922,12 +4952,12 @@ private fun LoudnessModeDialog(
                         Spacer(Modifier.width(8.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
-                                loudnessModeTitle(mode),
+                                loudnessModeTitle(LocalContext.current, mode),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
                             )
                             Text(
-                                loudnessModeSubtitle(mode),
+                                loudnessModeSubtitle(LocalContext.current, mode),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -4951,7 +4981,7 @@ private fun ClarityPresetDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Clarity Output Preset") },
+        title = { Text(stringResource(R.string.set_clarity_title)) },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -4977,12 +5007,12 @@ private fun ClarityPresetDialog(
                         Spacer(Modifier.width(8.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
-                                preset.displayName,
+                                clarityPresetName(preset),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
                             )
                             Text(
-                                preset.description,
+                                clarityPresetDescription(preset),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -5153,7 +5183,7 @@ private fun LyricsAnimationSheet(
                                         Box(contentAlignment = Alignment.Center) {
                                             Icon(
                                                 imageVector = Icons.Filled.Check,
-                                                contentDescription = "Selected",
+                                                contentDescription = stringResource(R.string.set_selected_cd),
                                                 tint = MaterialTheme.colorScheme.onPrimary,
                                                 modifier = Modifier.size(16.dp),
                                             )
