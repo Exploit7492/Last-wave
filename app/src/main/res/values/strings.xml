@@ -716,7 +716,6 @@
     <string name="fpd_loading_more">Loading remaining tracks…</string>
     <string name="fpd_incomplete">Playlist incomplete · Retry</string>
     <string name="fpd_track_options_cd">Track options</string>
-</resources>
 
     <!-- Add-to-playlist duplicate dialogs -->
     <string name="add_dup_single_title">Song already in playlist</string>
