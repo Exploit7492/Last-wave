@@ -702,4 +702,32 @@
     <string name="gen_artist_name_hint">Sanatçı adı…</string>
     <string name="gen_load_top_tracks">En İyilerimi Yükle</string>
     <string name="gen_load_top_artists">En İyi Sanatçılarımı Yükle</string>
+
+    <!-- Arama -->
+    <string name="search_cd">Ara</string>
+    <string name="search_clear_cd">Temizle</string>
+    <string name="search_hint_users">Last.fm kullanıcılarında ara…</string>
+    <string name="search_hint_yt">YouTube Music’te ara…</string>
+    <string name="search_tab_tracks">Parçalar</string>
+    <string name="search_tab_artists">Sanatçılar</string>
+    <string name="search_tab_albums">Albümler</string>
+    <string name="search_tab_playlists">Listeler</string>
+    <string name="search_tab_users">Kullanıcılar</string>
+    <string name="search_recent">Son aramalar</string>
+    <string name="search_clear_all">Tümünü temizle</string>
+    <string name="search_explore">Türleri ve havaları keşfet</string>
+    <string name="search_no_results">“%1$s” için sonuç bulunamadı</string>
+    <string name="search_insert_cd">Arama çubuğuna ekle</string>
+    <string name="search_remove_cd">Geçmişten kaldır</string>
+    <string name="search_follow_cd">Last.fm’de %1$s takip et</string>
+    <string name="search_unfollow_cd">Last.fm’de %1$s takibi bırak</string>
+    <string name="search_open_playlist_cd">Listeyi aç</string>
+    <string name="search_play_top_cd">En iyi sonucu çal</string>
+
+    <!-- Akış liste detayı -->
+    <string name="fpd_opening">Liste açılıyor…</string>
+    <string name="fpd_retry">Tekrar dene</string>
+    <string name="fpd_loading_more">Kalan parçalar yükleniyor…</string>
+    <string name="fpd_incomplete">Liste eksik · Tekrar dene</string>
+    <string name="fpd_track_options_cd">Parça seçenekleri</string>
 </resources>

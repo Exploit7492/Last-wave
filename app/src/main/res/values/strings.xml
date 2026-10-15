@@ -686,6 +686,34 @@
     <string name="gen_artist_name_hint">Artist name…</string>
     <string name="gen_load_top_tracks">Load My Top Tracks</string>
     <string name="gen_load_top_artists">Load My Top Artists</string>
+
+    <!-- Search -->
+    <string name="search_cd">Search</string>
+    <string name="search_clear_cd">Clear</string>
+    <string name="search_hint_users">Search Last.fm users…</string>
+    <string name="search_hint_yt">Search YouTube Music…</string>
+    <string name="search_tab_tracks">Tracks</string>
+    <string name="search_tab_artists">Artists</string>
+    <string name="search_tab_albums">Albums</string>
+    <string name="search_tab_playlists">Playlists</string>
+    <string name="search_tab_users">Users</string>
+    <string name="search_recent">Recent searches</string>
+    <string name="search_clear_all">Clear all</string>
+    <string name="search_explore">Explore genres &amp; moods</string>
+    <string name="search_no_results">No results found for “%1$s”</string>
+    <string name="search_insert_cd">Insert into search bar</string>
+    <string name="search_remove_cd">Remove from history</string>
+    <string name="search_follow_cd">Follow %1$s on Last.fm</string>
+    <string name="search_unfollow_cd">Unfollow %1$s on Last.fm</string>
+    <string name="search_open_playlist_cd">Open playlist</string>
+    <string name="search_play_top_cd">Play top result</string>
+
+    <!-- Feed playlist detail -->
+    <string name="fpd_opening">Opening playlist…</string>
+    <string name="fpd_retry">Try again</string>
+    <string name="fpd_loading_more">Loading remaining tracks…</string>
+    <string name="fpd_incomplete">Playlist incomplete · Retry</string>
+    <string name="fpd_track_options_cd">Track options</string>
 </resources>
 
     <!-- Add-to-playlist duplicate dialogs -->
