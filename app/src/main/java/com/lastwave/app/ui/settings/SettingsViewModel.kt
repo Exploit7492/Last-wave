@@ -257,15 +257,21 @@ class SettingsViewModel @Inject constructor(
                 throw cancellation
             } catch (error: Exception) {
                 android.util.Log.e(SETTINGS_TAG, "Failed to $action", error)
+                val toast = runCatching {
+                    appContext.getString(com.lastwave.app.R.string.toast_action_fail, action)
+                }.getOrDefault("Couldn't $action. Please try again.")
                 _uiState.update { state ->
-                    state.copy(toastMessage = appContext.getString(com.lastwave.app.R.string.toast_action_fail, action))
+                    state.copy(toastMessage = toast)
                 }
             } catch (error: LinkageError) {
                 // Missing/altered framework or JNI symbols on a custom ROM
                 // disable only this action, never the Settings destination.
                 android.util.Log.e(SETTINGS_TAG, "Unsupported platform action: $action", error)
+                val toast = runCatching {
+                    appContext.getString(com.lastwave.app.R.string.toast_unsupported)
+                }.getOrDefault("This action isn't supported on this device.")
                 _uiState.update { state ->
-                    state.copy(toastMessage = appContext.getString(com.lastwave.app.R.string.toast_unsupported))
+                    state.copy(toastMessage = toast)
                 }
             }
         }
