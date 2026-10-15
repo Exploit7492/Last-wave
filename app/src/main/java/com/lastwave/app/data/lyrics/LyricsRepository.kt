@@ -82,6 +82,7 @@ class LyricsRepository @Inject constructor(
     private val appleMusicApi: AppleMusicLyricsApi,
     private val lastWaveLyricsApi: LastWaveLyricsApi,
     private val biniApi: BiniLyricsApi,
+    private val lrcRedLyricsApi: LrcRedLyricsApi,
     private val simpMusicApi: SimpMusicLyricsApi,
     private val musixmatchApi: MusixmatchLyricsApi,
     private val settingsPreferences: com.lastwave.app.data.local.SettingsPreferences,
@@ -295,6 +296,9 @@ class LyricsRepository @Inject constructor(
                         fetchWordFromLastWave(title, artist, album, durationSeconds, recordingIsrc, effectiveVideoId)
                     },
                     async<LyricsResult.Success?> {
+                        fetchWordFromLrcRed(title, artist, album, durationSeconds, recordingIsrc, biniHit, effectiveVideoId)
+                    },
+                    async<LyricsResult.Success?> {
                         fetchWordFromAppleMusic(title, artist, album, durationSeconds)
                     },
                     async<LyricsResult.Success?> {
@@ -474,6 +478,8 @@ class LyricsRepository @Inject constructor(
     ): LyricsResult.Success? = when (preferred) {
         com.lastwave.app.data.local.LyricsProvider.LASTWAVE ->
             fetchWordFromLastWave(title, artist, album, durationSeconds, isrc, videoId)
+        com.lastwave.app.data.local.LyricsProvider.LRC_RED ->
+            fetchWordFromLrcRed(title, artist, album, durationSeconds, isrc, biniHit, videoId)
         com.lastwave.app.data.local.LyricsProvider.APPLE_MUSIC ->
             fetchWordFromAppleMusic(title, artist, album, durationSeconds)
         com.lastwave.app.data.local.LyricsProvider.BETTER_LYRICS ->
@@ -510,6 +516,41 @@ class LyricsRepository @Inject constructor(
                 album,
                 durationSeconds,
                 isrc,
+            ) ?: return null
+
+            foundIsrc?.takeIf { it.isNotBlank() }?.let { rememberIsrc(videoId, it) }
+            res.takeIf { it.isInstrumental || plausibleDuration(it.lines, durationSeconds) }
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private suspend fun fetchWordFromLrcRed(
+        title: String,
+        artist: String,
+        album: String?,
+        durationSeconds: Int?,
+        isrc: String?,
+        hit: BiniHit?,
+        videoId: String? = null,
+    ): LyricsResult.Success? {
+        return try {
+            val (foundIsrc, res) = lrcRedLyricsApi.fetchLyricsWithIsrc(
+                forSearchTitle(title),
+                forSearchArtist(artist),
+                album,
+                durationSeconds,
+                isrc,
+                hit,
+            ) ?: lrcRedLyricsApi.fetchLyricsWithIsrc(
+                title,
+                artist,
+                album,
+                durationSeconds,
+                isrc,
+                hit,
             ) ?: return null
 
             foundIsrc?.takeIf { it.isNotBlank() }?.let { rememberIsrc(videoId, it) }

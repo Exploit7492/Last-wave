@@ -80,7 +80,7 @@ class ExclusiveUsbOutput @Inject constructor(
     @Volatile private var lastNonMaxListeningGain = Float.NaN
     @Volatile private var ignoreStreamMusicMax = false
     /** Fork setting: never let the DAC's Feature Unit own the listening level. */
-    @Volatile private var forceSoftwareVolume = false
+    @Volatile private var forceSoftwareVolume = true
 
     private val audioManager: AudioManager? =
         appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -114,6 +114,7 @@ class ExclusiveUsbOutput @Inject constructor(
             if (!enabled) {
                 teardownLocked(closeDevice = true)
             } else {
+                clearBlockedDevices()
                 ensureVolumeObserverLocked()
                 syncListeningGainLocked()
             }
@@ -647,19 +648,21 @@ class ExclusiveUsbOutput @Inject constructor(
             clockMatched = rateSetBefore && !autoNegotiatedFallback
         }
         clockRechecked = true
-        val controlId = (0 until usbDevice.interfaceCount)
-            .map { usbDevice.getInterface(it) }
-            .firstOrNull {
-                it.interfaceClass == UsbConstants.USB_CLASS_AUDIO && it.interfaceSubclass == 1
-            }?.id ?: 0
-        val volumeControl = UacFeatureVolume(info.connection, controlId)
-        featureVolume = volumeControl
-        val attached = volumeControl.attach()
-        featureVolumeAttached = attached
-        hardwareVolume = attached && !forceSoftwareVolume
-        if (attached && forceSoftwareVolume) {
-            // Software volume requested: hardware level stays at 0 dB.
-            runCatching { volumeControl.setNormalized(1f) }
+        if (!forceSoftwareVolume) {
+            val controlId = (0 until usbDevice.interfaceCount)
+                .map { usbDevice.getInterface(it) }
+                .firstOrNull {
+                    it.interfaceClass == UsbConstants.USB_CLASS_AUDIO && it.interfaceSubclass == 1
+                }?.id ?: 0
+            val volumeControl = UacFeatureVolume(info.connection, controlId)
+            featureVolume = volumeControl
+            val attached = volumeControl.attach()
+            featureVolumeAttached = attached
+            hardwareVolume = attached
+        } else {
+            featureVolume = null
+            featureVolumeAttached = false
+            hardwareVolume = false
         }
         Log.i(
             TAG,

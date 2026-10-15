@@ -828,7 +828,10 @@ class MusicPlayer @Inject constructor(
                     ?: mediaItem.localConfiguration?.customCacheKey?.let(preparedStreams::get)
                     ?: preparedStreams.values.firstOrNull { it.url == mediaItem.localConfiguration?.uri?.toString() }
                     ?: findPreparedStreamFor(currentTrack, currentTrack.videoId, currentTrack.mediaIdKey() in losslessBypassMediaIds)
-                if (mediaItem.localConfiguration?.uri?.scheme == "lastwave" || prepared?.isExpired() == true) {
+                val isLocal = currentTrack.isLocalTrack() || mediaItem.mediaId.startsWith("local:")
+                val needsResolution = mediaItem.localConfiguration?.uri?.scheme == "lastwave" ||
+                    (!isLocal && (prepared == null || prepared.isExpired()))
+                if (needsResolution) {
                     // During lazy-player construction a restored queue is
                     // installed before the lazy value is published. Defer
                     // resolution until the first explicit playback action.
@@ -883,15 +886,20 @@ class MusicPlayer @Inject constructor(
                 ?.customCacheKey
                 ?.let(preparedStreams::get)
             val customCacheKey = player.currentMediaItem?.localConfiguration?.customCacheKey
-            val failedLocalStream = player.currentMediaItem?.localConfiguration?.uri?.scheme in setOf("file", "content")
+            val isGenuineLocal = currentTrack?.isLocalTrack() == true || failedMediaId?.startsWith("local:") == true
+            val failedLocalStream = isGenuineLocal && player.currentMediaItem?.localConfiguration?.uri?.scheme in setOf("file", "content")
+            val isCachedManifest = player.currentMediaItem?.localConfiguration?.uri?.toString()?.let {
+                it.contains("tidal_mpd") || it.contains("segdrm_mpd")
+            } == true
             val failedLosslessStream = !failedLocalStream && (rejectedStream?.isLossless
                 ?: customCacheKey?.startsWith("lossless:")
+                ?: isCachedManifest
                 ?: _state.value.isLossless)
             val rejectedYouTubeCandidate = rejectedStream?.youtubeCandidate
             val videoId = rejectedYouTubeCandidate?.videoId ?: trackVideoId
             val httpStatus = error.httpStatusCodeOrNull()
 
-            if (currentTrack?.playbackUrl != null && failedMediaId?.startsWith("local:") == true) {
+            if (isGenuineLocal) {
                 _state.update { it.copy(error = error.message ?: "Local file playback error (${error.errorCodeName})", isPlaying = false, isBuffering = false) }
                 scheduleUnavailableMediaSkip(failedIndex, failedMediaId, failure = error, allowAutoSkip = !playedAudibly)
                 return
@@ -2356,7 +2364,15 @@ class MusicPlayer @Inject constructor(
             ?.localConfiguration
             ?.customCacheKey
             ?.let(preparedStreams::get)
-        if (currentItem?.localConfiguration?.uri?.scheme == "lastwave" || currentPrepared?.isExpired() == true) {
+        val isLocalTrack = currentItem?.mediaId?.startsWith("local:") == true ||
+            _state.value.current?.isLocalTrack() == true
+        val needsResolution = currentItem?.localConfiguration?.uri?.scheme == "lastwave" ||
+            currentPrepared?.isExpired() == true ||
+            (!isLocalTrack && currentPrepared == null) ||
+            player.playerError != null ||
+            _state.value.error != null
+        if (needsResolution && player.currentMediaItemIndex in 0 until player.mediaItemCount) {
+            _state.update { it.copy(error = null) }
             resolveAndPlayQueueItem(player.currentMediaItemIndex)
             return@onMain
         }
@@ -2493,8 +2509,14 @@ class MusicPlayer @Inject constructor(
             return@onMain
         }
         val holdingUsb = exclusiveUsbOutput.isActive() && !exclusiveUsbOutput.isPaused()
-        val playing = _state.value.isPlaying ||
-            (playerDelegate.isInitialized() && (player.isPlaying || player.playWhenReady)) ||
+        val isPlayerActive = playerDelegate.isInitialized() &&
+            player.playbackState != Player.STATE_IDLE &&
+            player.playbackState != Player.STATE_ENDED &&
+            player.playerError == null &&
+            _state.value.error == null &&
+            (player.isPlaying || player.playWhenReady)
+        val playing = (_state.value.isPlaying && _state.value.error == null) ||
+            isPlayerActive ||
             holdingUsb
         if (playing) pause() else resume()
     }
@@ -2503,7 +2525,7 @@ class MusicPlayer @Inject constructor(
     private fun retryInterruptedPlayback(): Boolean {
         val snapshot = _state.value
         val track = snapshot.current ?: return false
-        if (snapshot.error == null || track.playbackUrl != null) return false
+        if (snapshot.error == null || track.isLocalTrack()) return false
         errorRetryCount = 0
         val queue = snapshot.queue.ifEmpty { listOf(track) }
         startResolvedQueuePlayback(
@@ -2849,6 +2871,7 @@ class MusicPlayer @Inject constructor(
             standbyQueue.size == player.mediaItemCount &&
             standbyQueue.getOrNull(nextIndex) == nextItem
         val standby = currentStandby()
+        val isNextLocal = nextItem?.mediaId?.startsWith("local:") == true
 
         val plan = planCrossfade(
             CrossfadePlanInput(
@@ -2861,8 +2884,12 @@ class MusicPlayer @Inject constructor(
                 crossfadeMs = crossfadeDurationMs,
                 playbackSpeed = player.playbackParameters.speed,
                 hasNextItem = hasNext,
-                nextItemResolved = nextItem?.localConfiguration?.uri?.scheme != "lastwave",
-                streamExpired = stream?.isExpired() == true,
+                nextItemResolved = if (isNextLocal) {
+                    nextItem?.localConfiguration?.uri?.scheme != "lastwave"
+                } else {
+                    nextItem?.localConfiguration?.uri?.scheme != "lastwave" && stream != null && !stream.isExpired()
+                },
+                streamExpired = if (isNextLocal) false else (stream?.isExpired() == true || (nextItem?.localConfiguration?.uri?.scheme != "lastwave" && stream == null)),
                 standbyArmedForNext = armedForNext,
                 standbyReady = armedForNext && standby?.playbackState == Player.STATE_READY,
                 standbyDurationMs = if (armedForNext) standby?.duration ?: 0L else 0L,
@@ -3862,7 +3889,13 @@ class MusicPlayer @Inject constructor(
             preparedStreams.remove(prepared.cacheKey)
             track.playbackIdentity()?.let { streamResolver.cache.invalidate(it) }
         }
-        if (preparedMatches && mediaItem.localConfiguration?.uri?.scheme != "lastwave" && prepared?.isExpired() != true) {
+        val isLocal = mediaItem.mediaId.startsWith("local:") || track.isLocalTrack()
+        val isAlreadyResolved = if (isLocal) {
+            mediaItem.localConfiguration?.uri?.scheme != "lastwave"
+        } else {
+            prepared != null && !prepared.isExpired() && mediaItem.localConfiguration?.uri?.scheme != "lastwave"
+        }
+        if (preparedMatches && isAlreadyResolved) {
             // Already resolved: publish quality synchronously so the badge is
             // correct from the first frame (no transition may fire for a
             // same-item play to republish it later). The stream is also staged,
@@ -5333,7 +5366,9 @@ class MusicPlayer @Inject constructor(
         silentRecoveries[mediaId] = attempt
         val item = player.getMediaItemAt(index)
         val prepared = item.localConfiguration?.customCacheKey?.let(preparedStreams::get)
-        val windowResolved = item.localConfiguration?.uri?.scheme != "lastwave" && prepared?.isExpired() != true
+        val isLocal = item.mediaId.startsWith("local:") || _state.value.current?.isLocalTrack() == true
+        val windowResolved = item.localConfiguration?.uri?.scheme != "lastwave" &&
+            (isLocal || (prepared != null && !prepared.isExpired()))
         android.util.Log.w(
             "MusicPlayer",
             "Silent window '${_state.value.current?.title}' (attempt $attempt): " +
@@ -5535,6 +5570,7 @@ class MusicPlayer @Inject constructor(
                 unavailableSkipJob = null
                 val nextIndex = nextQueueIndex(snapshot)
                 if (nextIndex == C.INDEX_UNSET) {
+                    player.pause()
                     player.stop()
                     _state.update { it.copy(isPlaying = false, isBuffering = false, error = "Track unavailable") }
                 } else {
@@ -5558,6 +5594,7 @@ class MusicPlayer @Inject constructor(
             if (visited >= player.mediaItemCount) nextIndex = C.INDEX_UNSET
             unavailableSkipJob = null
             if (nextIndex == C.INDEX_UNSET) {
+                player.pause()
                 player.stop()
                 _state.update {
                     it.copy(isPlaying = false, isBuffering = false, error = "Track unavailable")
@@ -6389,7 +6426,9 @@ class MusicPlayer @Inject constructor(
             durationMs = stream.durationSeconds.takeIf { it > 0 }?.times(1_000L)
                 ?: track.durationMs
                 ?: findKnownDuration(track),
-            expiresAtEpochMs = addonUrlExpiryMs(playUrl),
+            expiresAtEpochMs = addonUrlExpiryMs(stream.url)
+                ?: addonUrlExpiryMs(playUrl)
+                ?: (System.currentTimeMillis() + 2 * 60 * 60 * 1000L),
         )
     }
 
@@ -7956,11 +7995,26 @@ private fun PlayableTrack.toMediaItem(resolved: MusicPlayer.ResolvedStream? = nu
     else -> "query:${artist.lowercase()}|${title.lowercase()}"
 }
 
+fun PlayableTrack.isLocalTrack(): Boolean =
+    playbackUrl?.let { url ->
+        (url.startsWith("/") || url.startsWith("content://") || url.startsWith("file://")) &&
+            !url.contains("tidal_mpd") && !url.contains("segdrm_mpd")
+    } == true || (mediaIdKey().startsWith("local:") && !mediaIdKey().contains("tidal_mpd") && !mediaIdKey().contains("segdrm_mpd"))
+
 private fun MediaItem.toPlayableTrack(): PlayableTrack {
     val uriStr = localConfiguration?.uri?.toString()
+    val isCachedManifest = uriStr?.contains("tidal_mpd") == true ||
+        uriStr?.contains("segdrm_mpd") == true ||
+        uriStr?.endsWith(".mpd") == true
     val localUri = when {
-        uriStr?.startsWith("content://") == true || uriStr?.startsWith("file://") == true || uriStr?.startsWith("/") == true -> uriStr
-        mediaId.startsWith("local:") -> mediaId.removePrefix("local:")
+        mediaId.startsWith("local:") -> {
+            when {
+                uriStr?.startsWith("content://") == true || uriStr?.startsWith("file://") == true || uriStr?.startsWith("/") == true -> uriStr
+                else -> mediaId.removePrefix("local:")
+            }
+        }
+        uriStr?.startsWith("content://") == true -> uriStr
+        uriStr?.startsWith("file://") == true && !isCachedManifest -> uriStr
         else -> null
     }
     val dur = mediaMetadata.extras?.getLong("durationMs")?.takeIf { it > 0L }

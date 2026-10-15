@@ -35,31 +35,6 @@ data class HttpAddonConfig(
     val enabled: Boolean = true,
 )
 
-enum class LyricsUiVersion(val id: String, val title: String) {
-    CLASSIC("classic", "Classic"),
-    MODERN("modern", "Modern");
-
-    companion object {
-        fun fromId(id: String?): LyricsUiVersion =
-            entries.firstOrNull { it.id == id } ?: MODERN
-    }
-}
-
-enum class LyricsAnimation(val id: String, val title: String, val description: String) {
-    APPLE_FLUID("apple_fluid", "Apple Fluid", "Smooth spring scaling with dynamic focal tracking"),
-    KARAOKE_PULSE("karaoke_pulse", "Karaoke Pulse", "Rhythmic scale pop with energetic spring bounce"),
-    KINETIC_SLIDE("kinetic_slide", "Kinetic Slide", "Active line glides smoothly from leading edge"),
-    CINEMATIC_BLUR("cinematic_blur", "Cinematic Focus", "Soft background blur & vertical drift on past lines"),
-    LOSSLESS_GLOW("lossless_glow", "Lossless Glow", "Vibrant gradient text with frosted glass reflection"),
-    CARD_POP("card_pop", "Glass Elevation", "3D floating glass card lift with specular highlights"),
-    APPLE_ZOOM("apple_zoom", "Dynamic Focus Zoom", "Expanded focal magnification with fluid spring push"),
-    MINIMAL_WAVE("minimal_wave", "Minimal Clean", "Pure low-latency opacity transitions without distortion");
-
-    companion object {
-        fun fromId(id: String?): LyricsAnimation =
-            entries.firstOrNull { it.id == id } ?: APPLE_FLUID
-    }
-}
 
 /** Preferred lyrics source. Apple Music (syllable-synced) is the default:
  *  it is tried first and the app falls through to the rest automatically
@@ -69,6 +44,7 @@ enum class LyricsAnimation(val id: String, val title: String, val description: S
 enum class LyricsProvider(val id: String, val title: String, val subtitle: String) {
     AUTO("auto", "Auto", "Fastest word-sync wins, LRCLIB fallback"),
     LASTWAVE("lastwave", "LastWave", "Syllable & line-synced Apple lyrics first"),
+    LRC_RED("lrc_red", "lrc.red", "ISRC-indexed syllable TTML & LRC first"),
     APPLE_MUSIC("apple_music", "Apple Music", "Syllable-synced Apple Music lyrics first"),
     BETTER_LYRICS("better_lyrics", "BetterLyrics", "Word-synced lyrics first"),
     KUGOU("kugou", "Kugou", "KRC word-synced lyrics first"),
@@ -78,7 +54,7 @@ enum class LyricsProvider(val id: String, val title: String, val subtitle: Strin
     LRCLIB("lrclib", "LRCLIB", "Line-synced community lyrics first");
 
     val isWordProvider: Boolean get() =
-        this == LASTWAVE || this == APPLE_MUSIC || this == BETTER_LYRICS || this == KUGOU ||
+        this == LASTWAVE || this == LRC_RED || this == APPLE_MUSIC || this == BETTER_LYRICS || this == KUGOU ||
             this == BINI_LYRICS || this == SIMP_MUSIC || this == MUSIXMATCH
 
     companion object {
@@ -127,11 +103,7 @@ data class MiscSettings(
      *  the audio session so external equalizer apps / OEM Dolby can process
      *  playback. Bypass routes (USB exclusive, bit-perfect) suspend it. */
     val systemEffectsMode: Boolean = false,
-    /** Lyrics UI layout version (Classic or Modern). */
-    val lyricsUiVersion: LyricsUiVersion = LyricsUiVersion.MODERN,
     val wordByWordLyrics: Boolean = true,
-    /** Experimental lyrics animation style (Settings -> Experimental -> Lyrics Animation). */
-    val lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
     /** Preferred lyrics source (Settings -> Experimental -> Lyrics Provider).
      *  AUTO races all providers (fastest valid word-sync wins); an explicit
      *  pick is tried first with the rest as fallback. */
@@ -272,9 +244,7 @@ class SettingsPreferences @Inject constructor(
         val CLARITY_PRESET = intPreferencesKey("lw_clarity_preset")
         val CLARITY_ATMOS_BYPASS = booleanPreferencesKey("lw_clarity_atmos_bypass")
         val BIT_PERFECT_ENABLED = booleanPreferencesKey("lw_bit_perfect_enabled")
-        val LYRICS_UI_VERSION = stringPreferencesKey("lw_lyrics_ui_version")
         val WORD_BY_WORD_LYRICS = booleanPreferencesKey("lw_word_by_word_lyrics")
-        val LYRICS_ANIMATION = stringPreferencesKey("lw_lyrics_animation")
         val LYRICS_PROVIDER = stringPreferencesKey("lw_lyrics_provider")
         val LYRICS_OFFSET_MS = longPreferencesKey("lw_lyrics_offset_ms")
         val LYRICS_FONT_SCALE = floatPreferencesKey("lw_lyrics_font_scale")
@@ -346,9 +316,7 @@ class SettingsPreferences @Inject constructor(
                 clarityPreset = p.readSafely(Keys.CLARITY_PRESET)?.takeIf { it in 0..3 } ?: 0,
                 clarityAtmosBypass = p.readSafely(Keys.CLARITY_ATMOS_BYPASS) ?: false,
                 isBitPerfectEnabled = p.readSafely(Keys.BIT_PERFECT_ENABLED) ?: false,
-                lyricsUiVersion = LyricsUiVersion.fromId(p.readSafely(Keys.LYRICS_UI_VERSION)),
                 wordByWordLyrics = p.readSafely(Keys.WORD_BY_WORD_LYRICS) ?: true,
-                lyricsAnimation = LyricsAnimation.fromId(p.readSafely(Keys.LYRICS_ANIMATION)),
                 lyricsProvider = LyricsProvider.fromId(p.readSafely(Keys.LYRICS_PROVIDER)),
                 lyricsOffsetMs = (p.readSafely(Keys.LYRICS_OFFSET_MS) ?: 0L).coerceIn(-10000L, 10000L),
                 lyricsFontScale = (p.readSafely(Keys.LYRICS_FONT_SCALE) ?: 1.0f).coerceIn(0.7f, 1.5f),
@@ -577,20 +545,12 @@ class SettingsPreferences @Inject constructor(
         dataStore.edit { it[Keys.CLARITY_ATMOS_BYPASS] = enabled }
     }
 
-    suspend fun setLyricsUiVersion(version: LyricsUiVersion) {
-        dataStore.edit { it[Keys.LYRICS_UI_VERSION] = version.id }
-    }
-
     suspend fun setBitPerfectEnabled(enabled: Boolean) {
         dataStore.edit { it[Keys.BIT_PERFECT_ENABLED] = enabled }
     }
 
     suspend fun setWordByWordLyrics(enabled: Boolean) {
         dataStore.edit { it[Keys.WORD_BY_WORD_LYRICS] = enabled }
-    }
-
-    suspend fun setLyricsAnimation(animation: LyricsAnimation) {
-        dataStore.edit { it[Keys.LYRICS_ANIMATION] = animation.id }
     }
 
     suspend fun setLyricsProvider(provider: LyricsProvider) {

@@ -105,9 +105,7 @@ import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Waves
-import com.lastwave.app.data.local.LyricsAnimation
 import com.lastwave.app.data.local.LyricsProvider
-import com.lastwave.app.data.local.LyricsUiVersion
 import com.lastwave.app.ui.player.LyricsOffsetDialog
 import com.lastwave.app.ui.player.LyricsSizeDialog
 import androidx.compose.material.icons.filled.FormatSize
@@ -490,7 +488,6 @@ fun SettingsScreen(
     var showQualityDialog by remember { mutableStateOf(false) }
     var showDownloadQualityDialog by remember { mutableStateOf(false) }
     var showEqSheet by remember { mutableStateOf(false) }
-    var showLyricsAnimationSheet by remember { mutableStateOf(false) }
     var showLyricsProviderDialog by remember { mutableStateOf(false) }
     var showLyricsOffsetDialog by remember { mutableStateOf(false) }
     var showLyricsSizeDialog by remember { mutableStateOf(false) }
@@ -1246,19 +1243,20 @@ fun SettingsScreen(
                     SectionLabel(stringResource(R.string.settings_section_experimental))
                     SettingsGroup(rowCount = 6) { index, position ->
                         when (index) {
-                            0 -> SettingsActionCard(
+                            0 -> SettingsToggleCard(
                                 icon = Icons.Filled.Lyrics,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                title = stringResource(R.string.settings_lyrics_animation),
-                                subtitle = if (misc.lyricsUiVersion == LyricsUiVersion.MODERN) {
-                                    "New UI (Modern)"
+                                title = "Word-by-word lyrics",
+                                subtitle = if (misc.wordByWordLyrics) {
+                                    "Real-time syllable sync & karaoke highlight"
                                 } else {
-                                    "${misc.lyricsAnimation.title} \u2022 ${misc.lyricsAnimation.description}"
+                                    "Line-by-line synced lyrics"
                                 },
-                                onClick = { showLyricsAnimationSheet = true },
+                                checked = misc.wordByWordLyrics,
+                                onCheckedChange = viewModel::setWordByWordLyrics,
                                 position = position,
-                                isHighlighted = (highlightedSettingId == "appearance.lyrics_animation"),
+                                isHighlighted = (highlightedSettingId == "appearance.word_by_word_lyrics"),
                             )
                             1 -> SettingsToggleCard(
                                 icon = Icons.Filled.Waves,
@@ -2147,21 +2145,7 @@ fun SettingsScreen(
         )
     }
 
-    // -- Experimental Lyrics Animation Sheet --
-    if (showLyricsAnimationSheet) {
-        LyricsAnimationSheet(
-            version = misc.lyricsUiVersion,
-            wordByWord = misc.wordByWordLyrics,
-            onWordByWordChange = viewModel::setWordByWordLyrics,
-            onSelectVersion = viewModel::setLyricsUiVersion,
-            current = misc.lyricsAnimation,
-            onSelect = {
-                viewModel.setLyricsAnimation(it)
-                showLyricsAnimationSheet = false
-            },
-            onDismiss = { showLyricsAnimationSheet = false },
-        )
-    }
+
 
     // -- Lyrics provider picker: preferred source first, automatic
     // fallback to the rest when it returns nothing --
@@ -5129,214 +5113,3 @@ private fun ClarityPresetDialog(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun LyricsAnimationSheet(
-    wordByWord: Boolean,
-    onWordByWordChange: (Boolean) -> Unit,
-    version: LyricsUiVersion,
-    onSelectVersion: (LyricsUiVersion) -> Unit,
-    current: LyricsAnimation,
-    onSelect: (LyricsAnimation) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .adaptiveContentWidth(maxWidth = 640.dp)
-                .align(Alignment.CenterHorizontally)
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    modifier = Modifier.size(42.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Filled.Lyrics,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.size(22.dp),
-                        )
-                    }
-                }
-                Column {
-                    Text(
-                        text = "Lyrics Animation",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "Real-time motion physics & optical tracking",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            SettingsToggleCard(
-                icon = Icons.Filled.Lyrics,
-                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
-                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                title = "Word-by-word lyrics",
-                subtitle = "Turn off to use LRCLIB line-by-line lyrics",
-                checked = wordByWord,
-                onCheckedChange = onWordByWordChange,
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                val versions = listOf(
-                    LyricsUiVersion.CLASSIC to "Classic",
-                    LyricsUiVersion.MODERN to "New UI",
-                )
-                versions.forEach { (ver, label) ->
-                    val isVerSelected = ver == version
-                    val chipShape = RoundedCornerShape(14.dp)
-                    Surface(
-                        onClick = {
-                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                            onSelectVersion(ver)
-                        },
-                        shape = chipShape,
-                        color = if (isVerSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(chipShape),
-                    ) {
-                        Box(
-                            modifier = Modifier.padding(vertical = 10.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = if (isVerSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isVerSelected) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (version == LyricsUiVersion.CLASSIC) {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 440.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    items(LyricsAnimation.entries.toTypedArray(), key = { it.id }) { anim ->
-                        val isSelected = anim == current
-                        val cardShape = RoundedCornerShape(18.dp)
-
-                        Surface(
-                            shape = cardShape,
-                            color = if (isSelected) {
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.70f)
-                            } else {
-                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.50f)
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(cardShape)
-                                .clickable {
-                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                    onSelect(anim)
-                                },
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            ) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.surfaceContainerLowest,
-                                    modifier = Modifier.size(24.dp),
-                                ) {
-                                    if (isSelected) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = Icons.Filled.Check,
-                                                contentDescription = stringResource(R.string.set_selected_cd),
-                                                tint = MaterialTheme.colorScheme.onPrimary,
-                                                modifier = Modifier.size(16.dp),
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = anim.title,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurface,
-                                    )
-                                    Text(
-                                        text = anim.description,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(
-                            text = "New Lyrics UI",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Text(
-                            text = "Modern lyrics rendering active",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}

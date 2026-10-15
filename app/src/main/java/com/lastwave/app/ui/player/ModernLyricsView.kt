@@ -1490,3 +1490,60 @@ private suspend fun LazyListState.animateScrollBy(pixels: Float) {
         }
     }
 }
+
+internal fun activeLineIndex(lines: List<LyricLine>, positionMs: Long): Int {
+    var low = 0
+    var high = lines.size
+    while (low < high) {
+        val middle = (low + high) ushr 1
+        if (lines[middle].timeMs <= positionMs) low = middle + 1 else high = middle
+    }
+    return low - 1
+}
+
+/**
+ * Guarantees proper spacing between words across all providers.
+ * If provider syllable tokens stripped whitespace, restores spaces using line.text as ground truth.
+ */
+internal fun resolveSyllableDisplayTexts(line: LyricLine): List<String> {
+    val syllables = line.syllables
+    if (syllables.isEmpty()) return emptyList()
+
+    val fullText = line.text
+    if (fullText.contains(' ') || fullText.contains('\u00A0')) {
+        val result = mutableListOf<String>()
+        var cursor = 0
+
+        for (i in syllables.indices) {
+            val syl = syllables[i]
+            val cleanSyl = syl.text.trim()
+            if (cleanSyl.isEmpty()) {
+                result.add(syl.text)
+                continue
+            }
+
+            val idx = fullText.indexOf(cleanSyl, startIndex = cursor, ignoreCase = true)
+            if (idx >= 0) {
+                val endIdx = idx + cleanSyl.length
+                val hasTrailingSpace = endIdx < fullText.length && (fullText[endIdx] == ' ' || fullText[endIdx] == '\u00A0')
+                if (hasTrailingSpace && i < syllables.size - 1) {
+                    result.add("$cleanSyl ")
+                    cursor = endIdx + 1
+                } else {
+                    result.add(cleanSyl)
+                    cursor = endIdx
+                }
+            } else {
+                if (i < syllables.size - 1) {
+                    result.add("$cleanSyl ")
+                } else {
+                    result.add(cleanSyl)
+                }
+            }
+        }
+        return result
+    }
+
+    return syllables.map { it.text }
+}
+

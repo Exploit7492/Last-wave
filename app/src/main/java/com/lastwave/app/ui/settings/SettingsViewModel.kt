@@ -10,7 +10,6 @@ import com.lastwave.app.data.local.AccentMode
 import com.lastwave.app.data.local.ThemeMode
 import com.lastwave.app.data.local.AppLanguage
 import com.lastwave.app.data.local.EqualizerSettings
-import com.lastwave.app.data.local.LyricsUiVersion
 import com.lastwave.app.data.local.MiscSettings
 import com.lastwave.app.data.local.ScrobblerPreferences
 import com.lastwave.app.data.local.ScrobblerSettings
@@ -575,9 +574,7 @@ class SettingsViewModel @Inject constructor(
 
     fun setLoudnessPreamp(preampDb: Float) =
         launchSettingsAction("update loudness preamp") { loudnessPrefs.setPreampDb(preampDb) }
-    fun setLyricsUiVersion(version: LyricsUiVersion) = launchSettingsAction("update lyrics UI version") { settingsPreferences.setLyricsUiVersion(version) }
     fun setWordByWordLyrics(enabled: Boolean) = launchSettingsAction("update word-by-word lyrics") { settingsPreferences.setWordByWordLyrics(enabled) }
-    fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = launchSettingsAction("update lyrics animation") { settingsPreferences.setLyricsAnimation(animation) }
     fun setLyricsProvider(provider: com.lastwave.app.data.local.LyricsProvider) = launchSettingsAction("update lyrics provider") { settingsPreferences.setLyricsProvider(provider) }
     fun setLyricsOffsetMs(offsetMs: Long) = launchSettingsAction("update lyrics sync offset") {
         settingsPreferences.setLyricsOffsetMs(offsetMs.coerceIn(-10000L, 10000L))

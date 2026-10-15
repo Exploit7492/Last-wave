@@ -480,7 +480,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         if (shouldHold) {
             runCatching {
                 if (playbackWakeLock?.isHeld == false) {
-                    playbackWakeLock?.acquire(60 * 60 * 1000L)
+                    playbackWakeLock?.acquire()
                 }
                 if (playbackWifiLock?.isHeld == false) {
                     playbackWifiLock?.acquire()

@@ -218,8 +218,6 @@ import com.lastwave.app.data.lyrics.LyricsResult
 import com.lastwave.app.data.playlist.PlaylistRepository
 import com.lastwave.app.data.playlist.SavedPlaylist
 import com.lastwave.app.data.playlist.LIKED_SONGS_MODE
-import com.lastwave.app.data.local.LyricsAnimation
-import com.lastwave.app.data.local.LyricsUiVersion
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.MusicPlayerState
 import com.lastwave.app.playback.PlaybackChromeState
@@ -983,8 +981,6 @@ private fun ExpandedPlayer(
         progressState = viewModel.progressState,
         player = viewModel.player,
         lyricsState = lyricsState,
-        lyricsUiVersion = settings.lyricsUiVersion,
-        lyricsAnimation = settings.lyricsAnimation,
         wavySeekbarEnabled = settings.wavySeekbarEnabled,
         rotatingBackgroundEnabled = settings.rotatingBackgroundEnabled,
         lyricsOffsetMs = lyricsOffsetMs,
@@ -1793,8 +1789,6 @@ private fun FullPlayer(
     progressState: StateFlow<PlaybackProgressState>,
     player: MusicPlayer,
     lyricsState: LyricsUiState,
-    lyricsUiVersion: LyricsUiVersion = LyricsUiVersion.MODERN,
-    lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
     wavySeekbarEnabled: Boolean = true,
     rotatingBackgroundEnabled: Boolean = true,
     lyricsOffsetMs: Long = 0L,
@@ -2350,50 +2344,26 @@ private fun FullPlayer(
                                     }
                                 },
                             ) {
-                                if (lyricsUiVersion == LyricsUiVersion.MODERN) {
-                                    ModernLyricsPanel(
-                                        state = state,
-                                        player = player,
-                                        lyricsState = lyricsState,
-                                        progressState = progressState,
-                                        wavySeekbarEnabled = wavySeekbarEnabled,
-                                        lyricsOffsetMs = lyricsOffsetMs,
-                                        lyricsFontScale = lyricsFontScale,
-                                        onLyricsFontScaleChange = onSetLyricsFontScale ?: {},
-                                        onRetry = onRetryLyrics,
-                                        onToggleFullscreen = { lyricsFullscreen = !lyricsFullscreen },
-                                        isFullscreen = lyricsFullscreen,
-                                        onOpenLyricsOffset = { showLyricsOffsetDialog = true },
-                                        primaryColor = ambientColor,
-                                        secondaryColor = ambientCompanion,
-                                        tertiaryColor = ambientDeep,
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .adaptiveContentWidth(maxWidth = if (isTabletLandscape) 960.dp else 720.dp),
-                                    )
-                                } else {
-                                    LyricsPanel(
-                                        state = state,
-                                        progressState = progressState,
-                                        player = player,
-                                        lyricsState = lyricsState,
-                                        lyricsAnimation = lyricsAnimation,
-                                        wavySeekbarEnabled = wavySeekbarEnabled,
-                                        lyricsOffsetMs = lyricsOffsetMs,
-                                        lyricsFontScale = lyricsFontScale,
-                                        onLyricsFontScaleChange = onSetLyricsFontScale ?: {},
-                                        onRetry = onRetryLyrics,
-                                        onToggleFullscreen = { lyricsFullscreen = !lyricsFullscreen },
-                                        isFullscreen = lyricsFullscreen,
-                                        onOpenLyricsOffset = { showLyricsOffsetDialog = true },
-                                        primaryColor = ambientColor,
-                                        secondaryColor = ambientCompanion,
-                                        tertiaryColor = ambientDeep,
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .adaptiveContentWidth(maxWidth = if (isTabletLandscape) 960.dp else 720.dp),
-                                    )
-                                }
+                                ModernLyricsPanel(
+                                    state = state,
+                                    player = player,
+                                    lyricsState = lyricsState,
+                                    progressState = progressState,
+                                    wavySeekbarEnabled = wavySeekbarEnabled,
+                                    lyricsOffsetMs = lyricsOffsetMs,
+                                    lyricsFontScale = lyricsFontScale,
+                                    onLyricsFontScaleChange = onSetLyricsFontScale ?: {},
+                                    onRetry = onRetryLyrics,
+                                    onToggleFullscreen = { lyricsFullscreen = !lyricsFullscreen },
+                                    isFullscreen = lyricsFullscreen,
+                                    onOpenLyricsOffset = { showLyricsOffsetDialog = true },
+                                    primaryColor = ambientColor,
+                                    secondaryColor = ambientCompanion,
+                                    tertiaryColor = ambientDeep,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .adaptiveContentWidth(maxWidth = if (isTabletLandscape) 960.dp else 720.dp),
+                                )
                             }
                         }
 
