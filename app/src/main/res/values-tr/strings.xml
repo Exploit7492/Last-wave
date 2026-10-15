@@ -135,6 +135,11 @@
     <!-- Ortak iletişim düğmeleri -->
     <string name="common_cancel">Vazgeç</string>
     <string name="common_done">Bitti</string>
+    <string name="common_delete">Sil</string>
+    <string name="common_create">Oluştur</string>
+    <string name="common_rename">Yeniden Adlandır</string>
+    <string name="common_export">Dışa Aktar</string>
+    <string name="common_share">Paylaş</string>
     <string name="common_apply">Uygula</string>
     <string name="common_disconnect">Bağlantıyı Kes</string>
     <string name="common_restore">Geri Yükle</string>
@@ -477,4 +482,54 @@
     <string name="menu_quick_play">Çal</string>
     <string name="menu_quick_play_next">Sonraki çal</string>
     <string name="menu_quick_add_playlist">Listeye ekle</string>
+
+    <!-- Listeler ekranı -->
+    <string name="pl_sort_newest">Önce en yeniler</string>
+    <string name="pl_sort_oldest">Önce en eskiler</string>
+    <string name="pl_sort_name">Ad</string>
+    <string name="pl_sort_track_count">Parça sayısı</string>
+    <string name="pl_delete_multi_title">Listeler silinsin mi?</string>
+    <string name="pl_delete_multi_text">Seçili %1$d listeyi kalıcı olarak silmek istediğinize emin misiniz?</string>
+    <string name="pl_delete_single_title">Liste silinsin mi?</string>
+    <string name="pl_delete_undone">Bu işlem geri alınamaz.</string>
+    <string name="pl_create_title">Özel liste oluştur</string>
+    <string name="pl_name_label">Liste adı</string>
+    <string name="pl_rename_title">Listeyi yeniden adlandır</string>
+    <string name="pl_cover_title">Liste kapağı</string>
+    <string name="pl_cover_auto_desc">Otomatik kapak, kapak resmi olan ilk şarkıyı kullanır.</string>
+    <string name="pl_cover_custom_desc">Bu liste seçtiğiniz resmi kullanıyor.</string>
+    <string name="pl_use_automatic">Otomatik kullan</string>
+    <string name="pl_scrobble_auth_title">Kullanılamıyor</string>
+    <string name="pl_scrobble_auth_text">Scrobble silmek Last.fm oturum anahtarı gerektirir; bu giriş yöntemi (API anahtarı + kullanıcı adı) bunu sağlamaz.</string>
+    <string name="pl_scrobble_auth_ok">Tamam</string>
+    <string name="pl_empty">Henüz liste yok</string>
+    <string name="pl_download_all">Tüm şarkıları indir</string>
+    <string name="pl_make_local">Yerelde kullanılabilir yap</string>
+    <string name="pl_change_cover">Kapağı değiştir</string>
+    <string name="pl_export_title">Listeyi Dışa Aktar</string>
+    <string name="pl_choose_image">Resim seç</string>
+    <string name="pl_change_image">Resmi değiştir</string>
+    <string name="pl_title">Liste</string>
+    <string name="pl_selected_count">%1$d seçildi</string>
+    <string name="pl_select_more_hint">Daha fazla seçmek için uzun basın</string>
+    <string name="pl_count_only">%1$d Liste</string>
+    <string name="pl_count_tracks">%1$d Liste · %2$d Parça</string>
+    <string name="pl_delete_selected_cd">Seçilenleri sil</string>
+    <string name="pl_clear_selection_cd">Seçimi temizle</string>
+    <string name="pl_create_cd">Özel liste oluştur</string>
+    <string name="pl_sort_cd">Listeleri sırala</string>
+    <string name="pl_sort_label">Sırala</string>
+    <string name="pl_empty_hint">İlk mix’inizi oluşturmak için Üret sekmesine gidin.</string>
+    <string name="pl_pinned_cd">Sabitlendi</string>
+    <string name="pl_yt_tracks">%1$d parça</string>
+    <string name="pl_yt_connected">Bağlı hesap</string>
+    <string name="pl_subtitle_local">%1$d parça · %2$s</string>
+    <string name="pl_play_cd">Listeyi çal</string>
+    <string name="pl_options_cd">Liste seçenekleri</string>
+    <string name="pl_pin">Sabitle</string>
+    <string name="pl_unpin">Sabiti kaldır</string>
+    <string name="pl_regenerate">Yeniden üret</string>
+    <string name="pl_regenerating">Üretiliyor…</string>
+    <string name="pl_format_csv_desc">Tabloyla uyumlu</string>
+    <string name="pl_format_m3u_desc">Medya oynatıcı liste dosyası</string>
 </resources>

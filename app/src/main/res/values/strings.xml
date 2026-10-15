@@ -135,6 +135,11 @@
     <!-- Common dialog buttons -->
     <string name="common_cancel">Cancel</string>
     <string name="common_done">Done</string>
+    <string name="common_delete">Delete</string>
+    <string name="common_create">Create</string>
+    <string name="common_rename">Rename</string>
+    <string name="common_export">Export</string>
+    <string name="common_share">Share</string>
     <string name="common_apply">Apply</string>
     <string name="common_save">Save</string>
     <string name="common_close">Close</string>
@@ -480,4 +485,54 @@
     <string name="menu_quick_play">Play</string>
     <string name="menu_quick_play_next">Play next</string>
     <string name="menu_quick_add_playlist">Add to playlist</string>
+
+    <!-- Playlists screen -->
+    <string name="pl_sort_newest">Newest first</string>
+    <string name="pl_sort_oldest">Oldest first</string>
+    <string name="pl_sort_name">Name</string>
+    <string name="pl_sort_track_count">Track count</string>
+    <string name="pl_delete_multi_title">Delete playlists?</string>
+    <string name="pl_delete_multi_text">Are you sure you want to permanently delete %1$d selected playlists?</string>
+    <string name="pl_delete_single_title">Delete playlist?</string>
+    <string name="pl_delete_undone">This can\'t be undone.</string>
+    <string name="pl_create_title">Create custom playlist</string>
+    <string name="pl_name_label">Playlist name</string>
+    <string name="pl_rename_title">Rename playlist</string>
+    <string name="pl_cover_title">Playlist cover</string>
+    <string name="pl_cover_auto_desc">Automatic cover uses the first song with available artwork metadata.</string>
+    <string name="pl_cover_custom_desc">This playlist is using your selected image.</string>
+    <string name="pl_use_automatic">Use automatic</string>
+    <string name="pl_scrobble_auth_title">Not Available</string>
+    <string name="pl_scrobble_auth_text">Deleting scrobbles needs a Last.fm session key, which this sign-in method (API key + username) doesn\'t obtain.</string>
+    <string name="pl_scrobble_auth_ok">OK</string>
+    <string name="pl_empty">No playlists yet</string>
+    <string name="pl_download_all">Download all songs</string>
+    <string name="pl_make_local">Make available locally</string>
+    <string name="pl_change_cover">Change cover</string>
+    <string name="pl_export_title">Export Playlist</string>
+    <string name="pl_choose_image">Choose image</string>
+    <string name="pl_change_image">Change image</string>
+    <string name="pl_title">Playlist</string>
+    <string name="pl_selected_count">%1$d selected</string>
+    <string name="pl_select_more_hint">Long press to select more</string>
+    <string name="pl_count_only">%1$d Playlists</string>
+    <string name="pl_count_tracks">%1$d Playlists · %2$d Tracks</string>
+    <string name="pl_delete_selected_cd">Delete selected</string>
+    <string name="pl_clear_selection_cd">Clear selection</string>
+    <string name="pl_create_cd">Create custom playlist</string>
+    <string name="pl_sort_cd">Sort playlists</string>
+    <string name="pl_sort_label">Sort</string>
+    <string name="pl_empty_hint">Head to Generate to create your first mix.</string>
+    <string name="pl_pinned_cd">Pinned</string>
+    <string name="pl_yt_tracks">%1$d tracks</string>
+    <string name="pl_yt_connected">Connected account</string>
+    <string name="pl_subtitle_local">%1$d tracks · %2$s</string>
+    <string name="pl_play_cd">Play playlist</string>
+    <string name="pl_options_cd">Playlist options</string>
+    <string name="pl_pin">Pin</string>
+    <string name="pl_unpin">Unpin</string>
+    <string name="pl_regenerate">Regenerate</string>
+    <string name="pl_regenerating">Regenerating…</string>
+    <string name="pl_format_csv_desc">Spreadsheet-compatible</string>
+    <string name="pl_format_m3u_desc">Media-player playlist file</string>
 </resources>

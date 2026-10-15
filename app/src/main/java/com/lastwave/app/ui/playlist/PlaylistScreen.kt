@@ -84,7 +84,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import com.lastwave.app.R
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -161,11 +163,11 @@ fun PlaylistScreen(
         ) {
             var sortMenuExpanded by remember { mutableStateOf(false) }
             ExpressiveHeader(
-                title = if (selectedPlaylists.isNotEmpty()) "${selectedPlaylists.size} selected" else "Playlist",
-                subtitle = if (selectedPlaylists.isNotEmpty()) "Long press to select more" else if (state.playlists.any { it.isYouTubeOnly && it.remoteTrackCount == null }) {
-                    "${state.playlists.size} Playlists"
+                title = if (selectedPlaylists.isNotEmpty()) stringResource(R.string.pl_selected_count, selectedPlaylists.size) else stringResource(R.string.pl_title),
+                subtitle = if (selectedPlaylists.isNotEmpty()) stringResource(R.string.pl_select_more_hint) else if (state.playlists.any { it.isYouTubeOnly && it.remoteTrackCount == null }) {
+                    stringResource(R.string.pl_count_only, state.playlists.size)
                 } else {
-                    "${state.playlists.size} Playlists \u00b7 ${state.playlists.sumOf { it.remoteTrackCount ?: it.tracks.size }} Tracks"
+                    stringResource(R.string.pl_count_tracks, state.playlists.size, state.playlists.sumOf { it.remoteTrackCount ?: it.tracks.size })
                 },
                 actions = {
                     if (selectedPlaylists.isNotEmpty()) {
@@ -173,20 +175,20 @@ fun PlaylistScreen(
                             onClick = { showMultipleDeleteConfirm = true },
                             modifier = Modifier.size(40.dp),
                         ) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Delete selected", tint = MaterialTheme.colorScheme.error)
+                            Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.pl_delete_selected_cd), tint = MaterialTheme.colorScheme.error)
                         }
                         IconButton(
                             onClick = { selectedPlaylists = setOf() },
                             modifier = Modifier.size(40.dp),
                         ) {
-                            Icon(Icons.Filled.Close, contentDescription = "Clear selection")
+                            Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.pl_clear_selection_cd))
                         }
                     } else {
                         IconButton(
                             onClick = viewModel::openCreateDialog,
                             modifier = Modifier.size(40.dp),
                         ) {
-                            Icon(Icons.Filled.Add, contentDescription = "Create custom playlist")
+                            Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.pl_create_cd))
                         }
                         Box {
                             Surface(
@@ -202,13 +204,13 @@ fun PlaylistScreen(
                                 ) {
                                     Icon(
                                         Icons.AutoMirrored.Filled.Sort,
-                                        contentDescription = "Sort playlists",
+                                        contentDescription = stringResource(R.string.pl_sort_cd),
                                         modifier = Modifier.size(15.dp),
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        "Sort",
+                                        stringResource(R.string.pl_sort_label),
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurface,
@@ -224,10 +226,10 @@ fun PlaylistScreen(
                                 shadowElevation = 10.dp,
                                 modifier = Modifier.padding(vertical = 4.dp),
                             ) {
-                                DropdownMenuItem(text = { Text("Newest first") }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_DESC); sortMenuExpanded = false })
-                                DropdownMenuItem(text = { Text("Oldest first") }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_ASC); sortMenuExpanded = false })
-                                DropdownMenuItem(text = { Text("Name") }, onClick = { viewModel.setSortMode(PlaylistSortMode.NAME); sortMenuExpanded = false })
-                                DropdownMenuItem(text = { Text("Track count") }, onClick = { viewModel.setSortMode(PlaylistSortMode.TRACK_COUNT); sortMenuExpanded = false })
+                                DropdownMenuItem(text = { Text(stringResource(R.string.pl_sort_newest)) }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_DESC); sortMenuExpanded = false })
+                                DropdownMenuItem(text = { Text(stringResource(R.string.pl_sort_oldest)) }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_ASC); sortMenuExpanded = false })
+                                DropdownMenuItem(text = { Text(stringResource(R.string.pl_sort_name)) }, onClick = { viewModel.setSortMode(PlaylistSortMode.NAME); sortMenuExpanded = false })
+                                DropdownMenuItem(text = { Text(stringResource(R.string.pl_sort_track_count)) }, onClick = { viewModel.setSortMode(PlaylistSortMode.TRACK_COUNT); sortMenuExpanded = false })
                             }
                         }
                     }
@@ -331,8 +333,8 @@ fun PlaylistScreen(
         if (showMultipleDeleteConfirm) {
             AlertDialog(
                 onDismissRequest = { showMultipleDeleteConfirm = false },
-                title = { Text("Delete playlists?") },
-                text = { Text("Are you sure you want to permanently delete ${selectedPlaylists.size} selected playlists?") },
+                title = { Text(stringResource(R.string.pl_delete_multi_title)) },
+                text = { Text(stringResource(R.string.pl_delete_multi_text, selectedPlaylists.size)) },
                 confirmButton = {
                     TextButton(
                         onClick = {
@@ -341,11 +343,11 @@ fun PlaylistScreen(
                             showMultipleDeleteConfirm = false
                         }
                     ) {
-                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.common_delete), color = MaterialTheme.colorScheme.error)
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showMultipleDeleteConfirm = false }) { Text("Cancel") }
+                    TextButton(onClick = { showMultipleDeleteConfirm = false }) { Text(stringResource(R.string.common_cancel)) }
                 },
             )
         }
@@ -381,10 +383,10 @@ fun PlaylistScreen(
     if (state.deleteConfirmForPlaylistId != null) {
         AlertDialog(
             onDismissRequest = viewModel::dismissDeleteConfirm,
-            title = { Text("Delete playlist?") },
-            text = { Text("This can't be undone.") },
-            confirmButton = { TextButton(onClick = viewModel::confirmDelete) { Text("Delete") } },
-            dismissButton = { TextButton(onClick = viewModel::dismissDeleteConfirm) { Text("Cancel") } },
+            title = { Text(stringResource(R.string.pl_delete_single_title)) },
+            text = { Text(stringResource(R.string.pl_delete_undone)) },
+            confirmButton = { TextButton(onClick = viewModel::confirmDelete) { Text(stringResource(R.string.common_delete)) } },
+            dismissButton = { TextButton(onClick = viewModel::dismissDeleteConfirm) { Text(stringResource(R.string.common_cancel)) } },
         )
     }
 
@@ -393,19 +395,19 @@ fun PlaylistScreen(
         var title by remember(state.createDialogVisible) { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = viewModel::dismissCreateDialog,
-            title = { Text("Create custom playlist") },
+            title = { Text(stringResource(R.string.pl_create_title)) },
             text = {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("Playlist name") },
+                    label = { Text(stringResource(R.string.pl_name_label)) },
                     singleLine = true,
                 )
             },
             confirmButton = {
-                TextButton(onClick = { viewModel.createCustomPlaylist(title) }, enabled = title.isNotBlank()) { Text("Create") }
+                TextButton(onClick = { viewModel.createCustomPlaylist(title) }, enabled = title.isNotBlank()) { Text(stringResource(R.string.common_create)) }
             },
-            dismissButton = { TextButton(onClick = viewModel::dismissCreateDialog) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = viewModel::dismissCreateDialog) { Text(stringResource(R.string.common_cancel)) } },
         )
     }
 
@@ -414,19 +416,19 @@ fun PlaylistScreen(
         var title by remember(playlistId) { mutableStateOf(playlist?.title.orEmpty()) }
         AlertDialog(
             onDismissRequest = viewModel::dismissRename,
-            title = { Text("Rename playlist") },
+            title = { Text(stringResource(R.string.pl_rename_title)) },
             text = {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("Playlist name") },
+                    label = { Text(stringResource(R.string.pl_name_label)) },
                     singleLine = true,
                 )
             },
             confirmButton = {
-                TextButton(onClick = { viewModel.renamePlaylist(title) }, enabled = title.isNotBlank()) { Text("Rename") }
+                TextButton(onClick = { viewModel.renamePlaylist(title) }, enabled = title.isNotBlank()) { Text(stringResource(R.string.common_rename)) }
             },
-            dismissButton = { TextButton(onClick = viewModel::dismissRename) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = viewModel::dismissRename) { Text(stringResource(R.string.common_cancel)) } },
         )
     }
 
@@ -434,7 +436,7 @@ fun PlaylistScreen(
         state.playlists.firstOrNull { it.id == playlistId }?.let { playlist ->
             AlertDialog(
                 onDismissRequest = { coverEditorPlaylistId = null },
-                title = { Text("Playlist cover") },
+                title = { Text(stringResource(R.string.pl_cover_title)) },
                 text = {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
@@ -444,9 +446,9 @@ fun PlaylistScreen(
                         Spacer(Modifier.height(16.dp))
                         Text(
                             if (playlist.customCoverUri.isNullOrBlank()) {
-                                "Automatic cover uses the first song with available artwork metadata."
+                                stringResource(R.string.pl_cover_auto_desc)
                             } else {
-                                "This playlist is using your selected image."
+                                stringResource(R.string.pl_cover_custom_desc)
                             },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -462,7 +464,7 @@ fun PlaylistScreen(
                             coverPicker.launch(arrayOf("image/*"))
                         },
                     ) {
-                        Text(if (playlist.customCoverUri.isNullOrBlank()) "Choose image" else "Change image")
+                        Text(if (playlist.customCoverUri.isNullOrBlank()) stringResource(R.string.pl_choose_image) else stringResource(R.string.pl_change_image))
                     }
                 },
                 dismissButton = {
@@ -473,9 +475,9 @@ fun PlaylistScreen(
                                     viewModel.setCustomCover(playlist.id, null)
                                     coverEditorPlaylistId = null
                                 },
-                            ) { Text("Use automatic") }
+                            ) { Text(stringResource(R.string.pl_use_automatic)) }
                         }
-                        TextButton(onClick = { coverEditorPlaylistId = null }) { Text("Done") }
+                        TextButton(onClick = { coverEditorPlaylistId = null }) { Text(stringResource(R.string.common_done)) }
                     }
                 },
             )
@@ -485,9 +487,9 @@ fun PlaylistScreen(
     if (state.deleteScrobbleAuthRequired) {
         AlertDialog(
             onDismissRequest = viewModel::dismissDeleteScrobbleAuthRequired,
-            title = { Text("Not Available") },
-            text = { Text("Deleting scrobbles needs a Last.fm session key, which this sign-in method (API key + username) doesn't obtain.") },
-            confirmButton = { TextButton(onClick = viewModel::dismissDeleteScrobbleAuthRequired) { Text("OK") } },
+            title = { Text(stringResource(R.string.pl_scrobble_auth_title)) },
+            text = { Text(stringResource(R.string.pl_scrobble_auth_text)) },
+            confirmButton = { TextButton(onClick = viewModel::dismissDeleteScrobbleAuthRequired) { Text(stringResource(R.string.pl_scrobble_auth_ok)) } },
         )
     }
 
@@ -540,10 +542,10 @@ private fun EmptyState() {
                 }
             }
             Spacer(Modifier.height(20.dp))
-            Text("No playlists yet", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurface)
+            Text(stringResource(R.string.pl_empty), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Head to Generate to create your first mix.",
+                stringResource(R.string.pl_empty_hint),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -673,7 +675,7 @@ private fun PlaylistCard(
                         Spacer(Modifier.width(6.dp))
                         Icon(
                             Icons.Filled.PushPin,
-                            contentDescription = "Pinned",
+                            contentDescription = stringResource(R.string.pl_pinned_cd),
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(16.dp),
                         )
@@ -682,9 +684,9 @@ private fun PlaylistCard(
                 Spacer(Modifier.height(2.dp))
                 Text(
                     if (playlist.isYouTubeOnly) {
-                        "YouTube Music • ${playlist.remoteTrackCount?.let { "$it tracks" } ?: "Connected account"}"
+                        "YouTube Music • ${playlist.remoteTrackCount?.let { stringResource(R.string.pl_yt_tracks, it) } ?: stringResource(R.string.pl_yt_connected)}"
                     } else {
-                        "${playlist.tracks.size} tracks \u00b7 ${formatDate(playlist.createdAtMillis)}"
+                        stringResource(R.string.pl_subtitle_local, playlist.tracks.size, formatDate(playlist.createdAtMillis))
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -711,7 +713,7 @@ private fun PlaylistCard(
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Filled.PlayArrow,
-                            contentDescription = "Play playlist",
+                            contentDescription = stringResource(R.string.pl_play_cd),
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -724,7 +726,7 @@ private fun PlaylistCard(
                 IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(36.dp)) {
                     Icon(
                         Icons.Filled.MoreVert,
-                        contentDescription = "Playlist options",
+                        contentDescription = stringResource(R.string.pl_options_cd),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp),
                     )
@@ -738,39 +740,39 @@ private fun PlaylistCard(
                     shadowElevation = 10.dp,
                 ) {
                     DropdownMenuItem(
-                        text = { Text(if (playlist.isPinned) "Unpin" else "Pin") },
+                        text = { Text(if (playlist.isPinned) stringResource(R.string.pl_unpin) else stringResource(R.string.pl_pin)) },
                         leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
                         onClick = { onTogglePin(); menuExpanded = false },
                     )
                     val isLocalSongs = playlist.mode == com.lastwave.app.data.playlist.LOCAL_SONGS_MODE
                     if (!isLocalSongs) DropdownMenuItem(
-                        text = { Text("Download all songs") },
+                        text = { Text(stringResource(R.string.pl_download_all)) },
                         leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
                         onClick = { onDownload(); menuExpanded = false },
                     )
                     if (playlist.isYouTubeOnly) {
                         DropdownMenuItem(
-                            text = { Text("Make available locally") },
+                            text = { Text(stringResource(R.string.pl_make_local)) },
                             leadingIcon = { Icon(Icons.Filled.BookmarkAdd, contentDescription = null) },
                             onClick = { onMakeLocal(); menuExpanded = false },
                         )
                     } else {
                         if (playlist.mode != LIKED_SONGS_MODE && !isLocalSongs) {
                             DropdownMenuItem(
-                                text = { Text(if (isRegenerating) "Regenerating…" else "Regenerate") },
+                                text = { Text(if (isRegenerating) stringResource(R.string.pl_regenerating) else stringResource(R.string.pl_regenerate)) },
                                 leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
                                 enabled = !isRegenerating,
                                 onClick = { onRegenerate(); menuExpanded = false },
                             )
                         }
                         DropdownMenuItem(
-                            text = { Text("Change cover") },
+                            text = { Text(stringResource(R.string.pl_change_cover)) },
                             leadingIcon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = null) },
                             onClick = { onEditCover(); menuExpanded = false },
                         )
                         if (playlist.mode != LIKED_SONGS_MODE) {
                             DropdownMenuItem(
-                                text = { Text("Rename") },
+                                text = { Text(stringResource(R.string.common_rename)) },
                                 leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
                                 onClick = { onRename(); menuExpanded = false },
                             )
@@ -778,13 +780,13 @@ private fun PlaylistCard(
                     }
                     if (!playlist.isYouTubeOnly) {
                         DropdownMenuItem(
-                            text = { Text("Export") },
+                            text = { Text(stringResource(R.string.common_export)) },
                             leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) },
                             onClick = { onExport(); menuExpanded = false },
                         )
                     }
                     if (!isLocalSongs) DropdownMenuItem(
-                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                        text = { Text(stringResource(R.string.common_delete), color = MaterialTheme.colorScheme.error) },
                         leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
                         onClick = { onDelete(); menuExpanded = false },
                     )
@@ -808,34 +810,34 @@ internal fun ExportBottomSheet(
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(Modifier.padding(20.dp)) {
-            Text("Export Playlist", style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.pl_export_title), style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(16.dp))
 
             FormatOptionRow(
                 title = "CSV",
-                description = "Spreadsheet-compatible",
+                description = stringResource(R.string.pl_format_csv_desc),
                 selected = selected == ExportFormat.CSV,
                 onClick = { selected = ExportFormat.CSV },
             )
             Spacer(Modifier.height(8.dp))
             FormatOptionRow(
                 title = "M3U",
-                description = "Media-player playlist file",
+                description = stringResource(R.string.pl_format_m3u_desc),
                 selected = selected == ExportFormat.M3U,
                 onClick = { selected = ExportFormat.M3U },
             )
 
             Spacer(Modifier.height(20.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("Cancel") }
+                TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.common_cancel)) }
                 TextButton(
                     onClick = { if (selected == ExportFormat.CSV) onSaveCsv() else onSaveM3u() },
                     modifier = Modifier.weight(1f),
-                ) { Text("Save") }
+                ) { Text(stringResource(R.string.common_save)) }
                 TextButton(
                     onClick = { if (selected == ExportFormat.CSV) onShareCsv() else onShareM3u() },
                     modifier = Modifier.weight(1f),
-                ) { Text("Share") }
+                ) { Text(stringResource(R.string.common_share)) }
             }
         }
     }
