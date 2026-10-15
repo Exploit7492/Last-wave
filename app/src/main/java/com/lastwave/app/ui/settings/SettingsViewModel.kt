@@ -80,7 +80,6 @@ data class SettingsScreenState(
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val authRepository: AuthRepository,
     private val authCallback: com.lastwave.app.data.repository.LastFmAuthCallbackCoordinator,
     private val homeRepository: com.lastwave.app.data.repository.HomeRepository,
@@ -110,6 +109,8 @@ class SettingsViewModel @Inject constructor(
     val appUpdateManager: com.lastwave.app.data.update.AppUpdateManager,
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) : ViewModel() {
+
+    private val appContext: android.content.Context get() = context
 
     val authState: StateFlow<com.lastwave.app.data.model.AuthState> = authRepository.authState
     val updateInfo = appUpdateManager.updateInfo

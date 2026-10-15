@@ -146,7 +146,7 @@ class SettingsClearAllDataTest {
             playlistImportManager = playlistImportManager,
             innerTube = innerTube,
             appUpdateManager = appUpdateManager,
-            appContext = RuntimeEnvironment.getApplication(),
+            context = RuntimeEnvironment.getApplication(),
         )
     }
 
