@@ -646,4 +646,13 @@
     <string name="feed_artist_radio">Sanatçı radyosu</string>
     <string name="feed_shuffle_title_cd">%1$s karıştır</string>
     <string name="feed_search_music">Müzik ara</string>
+
+    <!-- Ana sayfa -->
+    <string name="home_no_tracks">Henüz parça yok</string>
+    <string name="home_switch_profile_cd">Profil değiştir</string>
+    <string name="home_listen_time_cd">Tahmini toplam dinleme süresi</string>
+    <string name="home_view_genres_cd">Türleri gör</string>
+    <string name="home_menu_cd">Menü</string>
+    <string name="home_play">Çal</string>
+    <string name="home_mix">Mix</string>
 </resources>

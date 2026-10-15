@@ -630,6 +630,15 @@
     <string name="feed_artist_radio">Artist radio</string>
     <string name="feed_shuffle_title_cd">Shuffle %1$s</string>
     <string name="feed_search_music">Search music</string>
+
+    <!-- Home -->
+    <string name="home_no_tracks">No tracks yet</string>
+    <string name="home_switch_profile_cd">Switch profile</string>
+    <string name="home_listen_time_cd">Estimated lifetime listening time</string>
+    <string name="home_view_genres_cd">View genres</string>
+    <string name="home_menu_cd">Menu</string>
+    <string name="home_play">Play</string>
+    <string name="home_mix">Mix</string>
 </resources>
 
     <!-- Add-to-playlist duplicate dialogs -->
