@@ -536,6 +536,46 @@
     <string name="pl_format_csv_desc">Spreadsheet-compatible</string>
     <string name="pl_format_m3u_desc">Media-player playlist file</string>
 
+    <!-- Playlist detail -->
+    <string name="pd_search_hint">Search in playlist</string>
+    <string name="pd_search_cd">Search in playlist</string>
+    <string name="pd_options_cd">Playlist options</string>
+    <string name="pd_song_options_cd">Song options</string>
+    <string name="pd_back_cd">Back</string>
+    <string name="pd_shuffle_cd">Shuffle</string>
+    <string name="pd_locate_cd">Locate playing song</string>
+    <string name="pd_play">Play</string>
+    <string name="pd_playing">Playing</string>
+    <string name="pd_yt_subtitle">%1$s songs • YouTube Music</string>
+    <string name="pd_yt_only">YouTube Music</string>
+    <string name="pd_subtitle_local">%1$d songs • %2$s</string>
+    <string name="pd_track_count">%1$d tracks</string>
+    <string name="pd_tracks_label">Tracks</string>
+    <string name="pd_loading">Loading tracks…</string>
+    <string name="pd_empty">No tracks in this playlist yet.</string>
+    <string name="pd_reorder_hint">Switch to Custom order to rearrange</string>
+    <string name="pd_building">Building a fresh playlist…</string>
+    <string name="pd_sort_custom">Custom order</string>
+    <string name="pd_sort_date">Date added</string>
+    <string name="pd_sort_name">Name</string>
+    <string name="pd_sort_artist">Artist</string>
+    <string name="pd_sort_playtime">Play time</string>
+    <string name="pd_cancel_downloads">Cancel playlist downloads</string>
+    <string name="pd_change_cover">Change cover image</string>
+    <string name="pd_export_share">Export / Share</string>
+    <string name="pd_delete_title">Delete playlist?</string>
+    <string name="pd_delete_text">This will permanently remove “%1$s”.</string>
+    <string name="pd_clear_search_cd">Clear search</string>
+    <string name="pd_reorder_locked_cd">Reorder locked</string>
+    <string name="pd_reorder_unlocked_cd">Reorder unlocked</string>
+    <string name="pd_pin_top">Pin to top</string>
+    <string name="pd_unpin">Unpin playlist</string>
+    <string name="pd_regenerate_playlist">Regenerate playlist</string>
+    <string name="pd_sync_yt">Sync to YouTube Music</string>
+    <string name="pd_syncing_yt">Syncing to YouTube Music</string>
+    <string name="pd_delete_item">Delete playlist</string>
+</resources>
+
     <!-- Add-to-playlist duplicate dialogs -->
     <string name="add_dup_single_title">Song already in playlist</string>
     <string name="add_dup_single_text">%1$s by %2$s is already present in %3$s. You can leave the playlist unchanged or add another copy.</string>

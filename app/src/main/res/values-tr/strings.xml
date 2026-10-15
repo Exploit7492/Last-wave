@@ -551,4 +551,43 @@
     <string name="player_show_lyrics_cd">Şarkı sözlerini göster</string>
     <string name="player_delete_cd">Sil</string>
     <string name="player_menu_cd">Menü</string>
+
+    <!-- Liste detayı -->
+    <string name="pd_search_hint">Listede ara</string>
+    <string name="pd_search_cd">Listede ara</string>
+    <string name="pd_options_cd">Liste seçenekleri</string>
+    <string name="pd_song_options_cd">Şarkı seçenekleri</string>
+    <string name="pd_back_cd">Geri</string>
+    <string name="pd_shuffle_cd">Karıştır</string>
+    <string name="pd_locate_cd">Çalan şarkıyı bul</string>
+    <string name="pd_play">Çal</string>
+    <string name="pd_playing">Çalınıyor</string>
+    <string name="pd_yt_subtitle">%1$s şarkı • YouTube Music</string>
+    <string name="pd_yt_only">YouTube Music</string>
+    <string name="pd_subtitle_local">%1$d şarkı • %2$s</string>
+    <string name="pd_track_count">%1$d parça</string>
+    <string name="pd_tracks_label">Parçalar</string>
+    <string name="pd_loading">Parçalar yükleniyor…</string>
+    <string name="pd_empty">Bu listede henüz parça yok.</string>
+    <string name="pd_reorder_hint">Yeniden sıralamak için Özel sıraya geçin</string>
+    <string name="pd_building">Yeni liste hazırlanıyor…</string>
+    <string name="pd_sort_custom">Özel sıra</string>
+    <string name="pd_sort_date">Eklenme tarihi</string>
+    <string name="pd_sort_name">Ad</string>
+    <string name="pd_sort_artist">Sanatçı</string>
+    <string name="pd_sort_playtime">Çalma süresi</string>
+    <string name="pd_cancel_downloads">Liste indirmelerini iptal et</string>
+    <string name="pd_change_cover">Kapak resmini değiştir</string>
+    <string name="pd_export_share">Dışa Aktar / Paylaş</string>
+    <string name="pd_delete_title">Liste silinsin mi?</string>
+    <string name="pd_delete_text">“%1$s” kalıcı olarak silinecek.</string>
+    <string name="pd_clear_search_cd">Aramayı temizle</string>
+    <string name="pd_reorder_locked_cd">Yeniden sıralama kilitli</string>
+    <string name="pd_reorder_unlocked_cd">Yeniden sıralama açık</string>
+    <string name="pd_pin_top">Başa sabitle</string>
+    <string name="pd_unpin">Sabiti kaldır</string>
+    <string name="pd_regenerate_playlist">Listeyi yeniden üret</string>
+    <string name="pd_sync_yt">YouTube Music’e eşitle</string>
+    <string name="pd_syncing_yt">YouTube Music’e eşitleniyor</string>
+    <string name="pd_delete_item">Listeyi sil</string>
 </resources>
