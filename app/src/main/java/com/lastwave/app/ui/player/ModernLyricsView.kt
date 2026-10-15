@@ -154,6 +154,7 @@ fun ModernLyricsPanel(
     // panel incl. AnimatedContent + badge ~16x/sec. Other players isolate it.
     val progressFlow = progressState ?: player.progressState
     val progressInitial = PlaybackProgressState(positionMs = state.positionMs, durationMs = state.durationMs)
+    var effectiveFontScale by remember(lyricsFontScale) { mutableFloatStateOf(lyricsFontScale) }
 
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -228,8 +229,8 @@ fun ModernLyricsPanel(
                         }
                         // Shared style instances drawn by every row below.
                         val currentTextStyle = LocalTextStyle.current
-                        val karaokeNormalStyle = remember(currentTextStyle, isAppleMusic, isWordSynced, lyricsFontScale) {
-                            val baseSize = (if (isAppleMusic) 28f else if (isWordSynced) 32f else 30f) * lyricsFontScale
+                        val karaokeNormalStyle = remember(currentTextStyle, isAppleMusic, isWordSynced, effectiveFontScale) {
+                            val baseSize = (if (isAppleMusic) 28f else if (isWordSynced) 32f else 30f) * effectiveFontScale
                             currentTextStyle.copy(
                                 fontSize = baseSize.sp,
                                 lineHeight = (baseSize * 1.38f).sp,
@@ -237,8 +238,8 @@ fun ModernLyricsPanel(
                                 textMotion = TextMotion.Animated,
                             )
                         }
-                        val karaokeAccompanimentStyle = remember(currentTextStyle, isAppleMusic, isWordSynced, lyricsFontScale) {
-                            val baseSize = (if (isAppleMusic) 22f else if (isWordSynced) 24f else 22f) * lyricsFontScale
+                        val karaokeAccompanimentStyle = remember(currentTextStyle, isAppleMusic, isWordSynced, effectiveFontScale) {
+                            val baseSize = (if (isAppleMusic) 22f else if (isWordSynced) 24f else 22f) * effectiveFontScale
                             currentTextStyle.copy(
                                 fontSize = baseSize.sp,
                                 lineHeight = (baseSize * 1.35f).sp,
@@ -302,7 +303,7 @@ fun ModernLyricsPanel(
                     } else if (!targetState.plainLyrics.isNullOrBlank()) {
                         ModernPlainLyricsView(
                             plainLyrics = targetState.plainLyrics,
-                            lyricsFontScale = lyricsFontScale,
+                            lyricsFontScale = effectiveFontScale,
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else {
@@ -329,8 +330,14 @@ fun ModernLyricsPanel(
             isFullscreen = isFullscreen,
             lyricsOffsetMs = lyricsOffsetMs,
             onOpenLyricsOffset = onOpenLyricsOffset,
-            lyricsFontScale = lyricsFontScale,
-            onLyricsFontScaleChange = onLyricsFontScaleChange,
+            lyricsFontScale = effectiveFontScale,
+            onLyricsFontScaleChange = { newScale ->
+                effectiveFontScale = newScale
+                onLyricsFontScaleChange(newScale)
+            },
+            onLyricsFontScalePreview = { previewScale ->
+                effectiveFontScale = previewScale
+            },
             primaryColor = primaryColor,
             secondaryColor = secondaryColor,
             tertiaryColor = tertiaryColor,
@@ -1003,6 +1010,7 @@ private fun ModernLyricsControlsHost(
     onOpenLyricsOffset: (() -> Unit)? = null,
     lyricsFontScale: Float = 1f,
     onLyricsFontScaleChange: (Float) -> Unit = {},
+    onLyricsFontScalePreview: (Float) -> Unit = {},
     primaryColor: Color = MaterialTheme.colorScheme.primary,
     secondaryColor: Color = MaterialTheme.colorScheme.secondary,
     tertiaryColor: Color = MaterialTheme.colorScheme.tertiary,
@@ -1021,6 +1029,7 @@ private fun ModernLyricsControlsHost(
         onOpenLyricsOffset = onOpenLyricsOffset,
         lyricsFontScale = lyricsFontScale,
         onLyricsFontScaleChange = onLyricsFontScaleChange,
+        onLyricsFontScalePreview = onLyricsFontScalePreview,
         primaryColor = primaryColor,
         secondaryColor = secondaryColor,
         tertiaryColor = tertiaryColor,
@@ -1041,12 +1050,16 @@ private fun ModernLyricsControls(
     onOpenLyricsOffset: (() -> Unit)? = null,
     lyricsFontScale: Float = 1f,
     onLyricsFontScaleChange: (Float) -> Unit = {},
+    onLyricsFontScalePreview: (Float) -> Unit = {},
     primaryColor: Color = MaterialTheme.colorScheme.primary,
     secondaryColor: Color = MaterialTheme.colorScheme.secondary,
     tertiaryColor: Color = MaterialTheme.colorScheme.tertiary,
     modifier: Modifier = Modifier,
 ) {
     var showFontSlider by rememberSaveable { mutableStateOf(false) }
+    var sliderPosition by remember(lyricsFontScale) { mutableFloatStateOf(lyricsFontScale) }
+    var isDragging by remember { mutableStateOf(false) }
+    val currentDisplayScale = if (isDragging) sliderPosition else lyricsFontScale
 
     Column(
         modifier = modifier
@@ -1076,14 +1089,19 @@ private fun ModernLyricsControls(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = "Lyrics size: ${(lyricsFontScale * 100).roundToInt()}%",
+                            text = "Lyrics size: ${(currentDisplayScale * 100).roundToInt()}%",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = Color.White.copy(alpha = 0.90f),
                         )
-                        if (lyricsFontScale != 1.0f) {
+                        if (currentDisplayScale != 1.0f) {
                             TextButton(
-                                onClick = { onLyricsFontScaleChange(1.0f) },
+                                onClick = {
+                                    sliderPosition = 1.0f
+                                    isDragging = false
+                                    onLyricsFontScalePreview(1.0f)
+                                    onLyricsFontScaleChange(1.0f)
+                                },
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                                 modifier = Modifier.height(26.dp),
                             ) {
@@ -1107,8 +1125,16 @@ private fun ModernLyricsControls(
                             color = Color.White.copy(alpha = 0.70f),
                         )
                         Slider(
-                            value = lyricsFontScale,
-                            onValueChange = onLyricsFontScaleChange,
+                            value = currentDisplayScale,
+                            onValueChange = {
+                                isDragging = true
+                                sliderPosition = it
+                                onLyricsFontScalePreview(it)
+                            },
+                            onValueChangeFinished = {
+                                isDragging = false
+                                onLyricsFontScaleChange(sliderPosition)
+                            },
                             valueRange = 0.7f..1.5f,
                             modifier = Modifier.weight(1f),
                         )

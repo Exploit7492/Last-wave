@@ -32,13 +32,20 @@ object SegmentedMpdBuilder {
             "flac" -> "flac"
             "opus" -> "opus"
             "mp4a", "aac" -> "mp4a.40.2"
+            "eac3", "ec-3", "ec3" -> "ec-3"
+            "ac-4", "ac4" -> "ac-4"
             else -> s.codec.ifBlank { "flac" }
         }
         val bandwidth = s.bandwidth.takeIf { it > 0 } ?: 1_000_000
         val sampleRate = s.sampleRate.takeIf { it > 0 } ?: 44100
         val durationSec = descriptor.durationSec.takeIf { it > 0 } ?: 240
         // SegmentList/Duration form: total duration split evenly across chunks.
-        val segDur = durationSec.toDouble() / s.segments.size.coerceAtLeast(1)
+        // DASH duration in SegmentList requires integer timescale units; floating-point
+        // durations fail Long.parseLong in DashManifestParser, causing seeks to reset to 0.
+        val timescale = 1000L
+        val durationTimescale = durationSec.toLong() * timescale
+        val segCount = s.segments.size.coerceAtLeast(1)
+        val segDurationTimescale = (durationTimescale / segCount).coerceAtLeast(1L)
 
         val psshBlock = descriptor.drm
             ?.pssh
@@ -65,7 +72,7 @@ object SegmentedMpdBuilder {
             "codecs=\"${escapeXml(codecs)}\" bandwidth=\"$bandwidth\" " +
             "audioSamplingRate=\"$sampleRate\">" +
             "<BaseURL>${escapeXml(baseUrl)}</BaseURL>" +
-            "<SegmentList duration=\"${"%.3f".format(Locale.US, segDur)}\">" +
+            "<SegmentList timescale=\"$timescale\" duration=\"$segDurationTimescale\">" +
             "<Initialization range=\"${escapeXml(s.initializationRange)}\"/>" +
             segUrls +
             "</SegmentList>" +
@@ -73,6 +80,52 @@ object SegmentedMpdBuilder {
             "</AdaptationSet>" +
             "</Period>" +
             "</MPD>"
+    }
+
+    /**
+     * Sanitizes raw DASH MPD XML so that any floating-point duration or timescale attributes
+     * in <SegmentList> or <SegmentTemplate> are converted to integer units.
+     * AndroidX Media3's DashManifestParser parses duration and timescale via Long.parseLong(), which
+     * fails with NumberFormatException on decimals like "10.000", resetting seek position to 0.
+     */
+    fun sanitizeMpdXml(rawXml: String): String {
+        if (!rawXml.contains("duration", ignoreCase = true) && !rawXml.contains("timescale", ignoreCase = true)) return rawXml
+
+        // 1. Sanitize float timescale in <SegmentList> or <SegmentTemplate>
+        val floatTimescaleRegex = Regex(
+            """(<(?:SegmentList|SegmentTemplate)[^>]*?)\btimescale\s*=\s*['"](\d+)\.(\d+)['"]([^>]*?>)""",
+            RegexOption.IGNORE_CASE,
+        )
+        var xml = floatTimescaleRegex.replace(rawXml) { match ->
+            val prefix = match.groupValues[1]
+            val floatVal = "${match.groupValues[2]}.${match.groupValues[3]}".toDoubleOrNull() ?: return@replace match.value
+            val cleanScale = Math.round(floatVal).coerceAtLeast(1L)
+            val suffix = match.groupValues[4]
+            "${prefix}timescale=\"$cleanScale\"$suffix"
+        }
+
+        // 2. Sanitize float duration in <SegmentList> or <SegmentTemplate>
+        val floatDurationRegex = Regex(
+            """(<(?:SegmentList|SegmentTemplate)[^>]*?)\bduration\s*=\s*['"](\d+)\.(\d+)['"]([^>]*?>)""",
+            RegexOption.IGNORE_CASE,
+        )
+        xml = floatDurationRegex.replace(xml) { match ->
+            val prefix = match.groupValues[1]
+            val intPart = match.groupValues[2]
+            val fracPart = match.groupValues[3]
+            val suffix = match.groupValues[4]
+            val combinedAttrs = prefix + suffix
+            val hasTimescale = combinedAttrs.contains("timescale", ignoreCase = true)
+            val floatVal = "$intPart.$fracPart".toDoubleOrNull() ?: return@replace match.value
+            if (hasTimescale) {
+                val cleanDuration = Math.round(floatVal).coerceAtLeast(1L)
+                "${prefix}duration=\"$cleanDuration\"$suffix"
+            } else {
+                val msDuration = Math.round(floatVal * 1000.0).coerceAtLeast(1L)
+                "${prefix}timescale=\"1000\" duration=\"$msDuration\"$suffix"
+            }
+        }
+        return xml
     }
 
     private fun escapeXml(raw: String): String = raw

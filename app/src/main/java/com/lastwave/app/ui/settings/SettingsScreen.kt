@@ -1573,6 +1573,45 @@ fun SettingsScreen(
                         onCheckedChange = viewModel::setDiscordPresenceEnabled,
                         isHighlighted = (highlightedSettingId == "discord.presence"),
                     )
+                    SectionLabel("Global Live Telemetry & Map")
+                    SettingsToggleCard(
+                        icon = Icons.Filled.Public,
+                        iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                        iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        title = "Global Live Map Telemetry",
+                        subtitle = if (misc.liveTelemetryEnabled) {
+                            "On • Listening ticks broadcast anonymously to the live world map"
+                        } else {
+                            "Off • Playback telemetry stays completely local"
+                        },
+                        checked = misc.liveTelemetryEnabled,
+                        onCheckedChange = viewModel::setLiveTelemetryEnabled,
+                        isHighlighted = (highlightedSettingId == "telemetry.enabled"),
+                    )
+                    SettingsGroup(rowCount = 1) { _, position ->
+                        SettingsActionCard(
+                            icon = Icons.Filled.Public,
+                            iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                            iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            title = "Open Global Live Map",
+                            subtitle = "telemetry.clashprojects.qd.je • Real-time vector map of global listeners",
+                            onClick = {
+                                runCatching {
+                                    androidx.browser.customtabs.CustomTabsIntent.Builder().build()
+                                        .launchUrl(context, Uri.parse("https://telemetry.clashprojects.qd.je"))
+                                }.onFailure {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://telemetry.clashprojects.qd.je")).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    if (!startActivitySafely(context, intent)) {
+                                        viewModel.showToast("No compatible browser is available")
+                                    }
+                                }
+                            },
+                            position = position,
+                            isHighlighted = (highlightedSettingId == "telemetry.open_map"),
+                        )
+                    }
                 }
             }
                     }
@@ -1743,9 +1782,31 @@ fun SettingsScreen(
                         item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel(stringResource(R.string.settings_section_about))
-                    SettingsGroup(rowCount = 4) { index, position ->
+                    SettingsGroup(rowCount = 5) { index, position ->
                         when (index) {
                             0 -> SettingsActionCard(
+                                icon = Icons.Filled.Public,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                title = "Global Live Map",
+                                subtitle = "telemetry.clashprojects.qd.je • Real-time listener telemetry",
+                                onClick = {
+                                    runCatching {
+                                        androidx.browser.customtabs.CustomTabsIntent.Builder().build()
+                                            .launchUrl(context, Uri.parse("https://telemetry.clashprojects.qd.je"))
+                                    }.onFailure {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://telemetry.clashprojects.qd.je")).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        if (!startActivitySafely(context, intent)) {
+                                            viewModel.showToast("No compatible browser is available")
+                                        }
+                                    }
+                                },
+                                position = position,
+                                isHighlighted = (highlightedSettingId == "about.live_map"),
+                            )
+                            1 -> SettingsActionCard(
                                 icon = Icons.AutoMirrored.Filled.Send,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1759,7 +1820,7 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "about.telegram_support"),
                             )
-                            1 -> SettingsActionCard(
+                            2 -> SettingsActionCard(
                                 icon = Icons.Filled.Group,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -1774,7 +1835,7 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "about.discord_support"),
                             )
-                            2 -> SettingsActionCard(
+                            3 -> SettingsActionCard(
                                 icon = Icons.Filled.AutoAwesome,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1788,7 +1849,7 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "about.more_apps"),
                             )
-                            3 -> SettingsActionCard(
+                            4 -> SettingsActionCard(
                                 icon = Icons.Filled.Code,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,

@@ -98,6 +98,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
     @Inject lateinit var themeRepository: ThemeRepository
     @Inject lateinit var artworkRepository: com.lastwave.app.data.artwork.ArtworkRepository
     @Inject lateinit var androidAutoLibrary: AndroidAutoMediaLibrary
+    @Inject lateinit var liveTelemetryRepository: com.lastwave.app.data.repository.LiveTelemetryRepository
 
     // SupervisorJob stops sibling failure propagation; the handler below
     // additionally stops an unexpected exception in any fire-and-forget
@@ -273,6 +274,9 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 val resolvedUrl = map[key]
                 if (!resolvedUrl.isNullOrBlank() && resolvedUrl != artworkUrl) {
                     fetchArtwork(resolvedUrl)
+                    if (musicPlayer.state.value.isPlaying) {
+                        pingLiveTelemetry(current, force = true)
+                    }
                 }
             }
         }
@@ -634,6 +638,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         if (key == detectedKey) {
             if (state.isPlaying && key != nowPlayingAnnouncedKey) {
                 announceNowPlaying(state)
+                pingLiveTelemetry(track)
             }
             return
         }
@@ -669,6 +674,25 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
 
         if (state.isPlaying) {
             announceNowPlaying(state)
+            pingLiveTelemetry(track, force = true)
+        }
+    }
+
+    private fun pingLiveTelemetry(track: PlayableTrack, force: Boolean = false) {
+        val (cleanTitle, cleanArtist) = cleanTrackMetadata(track.title, track.artist)
+        val cover = artworkUrl ?: track.artworkUrl
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                liveTelemetryRepository.ping(
+                    title = cleanTitle,
+                    artist = cleanArtist,
+                    songId = track.internalTrackId ?: track.videoId,
+                    artworkUrl = cover,
+                    force = force,
+                )
+            }.onFailure { e ->
+                android.util.Log.w("MusicPlaybackService", "Live telemetry ping error: ${e.message}")
+            }
         }
     }
 
@@ -731,6 +755,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 // Announce Now Playing when transitioning to playing or if not yet announced
                 if (state.isPlaying && (!wasPlaying || key != nowPlayingAnnouncedKey)) {
                     announceNowPlaying(state)
+                    pingLiveTelemetry(track)
                 }
                 wasPlaying = state.isPlaying
 
@@ -743,10 +768,16 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                     submissionAttempted = false
                     retryCount = 0
                     announceNowPlaying(state)
+                    pingLiveTelemetry(track, force = true)
                 }
                 lastPositionMs = state.positionMs
 
                 accumulatedMs += 1_000
+
+                // Heartbeat to keep listener alive on global map (backend expires in 60s)
+                if (accumulatedMs > 0 && accumulatedMs % 45_000L == 0L) {
+                    pingLiveTelemetry(track, force = true)
+                }
 
                 if (submissionAttempted) continue
 

@@ -986,15 +986,26 @@ class LosslessMusicApi @Inject constructor(
                 failureCooldownUntilMs = 0L
 
                 val lowerUrlPath = rawUrl.substringBefore('?').lowercase()
+                val isExplicitDash = rawUrl.startsWith("data:application/dash+xml") ||
+                    lowerUrlPath.endsWith(".mpd") || lowerUrlPath.contains("/mpd")
                 val streamMimeType = when {
-                    rawUrl.startsWith("data:application/dash+xml") -> "application/dash+xml"
-                    lowerUrlPath.endsWith(".mpd") -> "application/dash+xml"
-                    lowerUrlPath.endsWith(".m3u8") -> "application/x-mpegURL"
+                    isExplicitDash -> "application/dash+xml"
+                    lowerUrlPath.endsWith(".m3u8") || lowerUrlPath.contains(".m3u8") -> "application/x-mpegURL"
                     // Atmos arrives as a direct progressive E-AC-3 MP4.
                     isStreamAtmos -> "audio/mp4"
                     lowerUrlPath.endsWith(".flac") -> "audio/flac"
                     lowerUrlPath.endsWith(".mp4") || lowerUrlPath.endsWith(".m4a") -> "audio/mp4"
-                    else -> "application/dash+xml"
+                    lowerUrlPath.endsWith(".mp3") -> "audio/mpeg"
+                    lowerUrlPath.endsWith(".aac") -> "audio/aac"
+                    lowerUrlPath.endsWith(".ogg") || lowerUrlPath.endsWith(".opus") -> "audio/ogg"
+                    streamCodec.contains("mp3") -> "audio/mpeg"
+                    streamCodec.contains("aac") -> "audio/mp4"
+                    streamCodec.contains("mp4a") -> "audio/mp4"
+                    streamCodec.contains("opus") -> "audio/ogg"
+                    streamCodec.contains("flac") -> "audio/flac"
+                    formatId == QUALITY_MP3_320 -> "audio/mpeg"
+                    formatId == QUALITY_DATA_SAVER -> "audio/mp4"
+                    else -> "audio/flac"
                 }
 
                 val resolvedBitrateKbps = stream?.bitrate?.let { if (it > 10_000) it / 1000 else it }

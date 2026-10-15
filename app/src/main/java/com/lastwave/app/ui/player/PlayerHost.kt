@@ -148,6 +148,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -1815,19 +1816,23 @@ private fun FullPlayer(
 ) {
     val track = state.current ?: return
     var showLyricsOffsetDialog by remember { mutableStateOf(false) }
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val isTablet = isTabletOrWideScreen()
+    val isTabletLandscape = isLandscape && (isTablet || configuration.screenWidthDp >= 600)
     val isCanvasActive = canvasEnabled && canvas != null
     val showFullBleed = canvasFullBleedEnabled
-    val showSleeveCanvas = isCanvasActive && !showFullBleed
+    val showSleeveCanvas = isCanvasActive && (!showFullBleed || isTabletLandscape)
     // activeCanvas is the single gate every render branch below keys off, so it also
     // carries the Animated Album Canvas toggle. The ViewModel nulls canvasState
     // asynchronously, so without this a disabled toggle still paints one frame of
     // motion artwork over the cover.
-    val activeCanvas = remember(canvas, showFullBleed, canvasEnabled) {
+    val activeCanvas = remember(canvas, showFullBleed, canvasEnabled, isTabletLandscape) {
         if (!canvasEnabled) {
             null
         } else {
             val tall = canvas?.tallUrl
-            if (showFullBleed && canvas != null && !tall.isNullOrBlank()) {
+            if (showFullBleed && !isTabletLandscape && canvas != null && !tall.isNullOrBlank()) {
                 canvas.copy(url = tall)
             } else {
                 canvas
@@ -2110,7 +2115,7 @@ private fun FullPlayer(
                             ),
                         ),
                 )
-                if (showFullBleed) {
+                if (showFullBleed && !isTabletLandscape) {
                     val heroHeight = if (heroBottomPx > 0f) {
                         with(LocalDensity.current) { heroBottomPx.toDp() }
                     } else {
@@ -2148,7 +2153,7 @@ private fun FullPlayer(
                             presentationAlpha = { heroAlpha },
                             onCoverChanged = { canvasCover = it },
                             onAspectRatioChanged = { canvasAspect = it },
-                            pausedForTransition = shownDismissY > 0f || currentTab != FullPlayerTab.NOW_PLAYING,
+                            pausedForTransition = shownDismissY > 1f || currentTab != FullPlayerTab.NOW_PLAYING,
                             modifier = Modifier
                                 .align(Alignment.TopStart)
                                 .fillMaxWidth()
@@ -2190,7 +2195,13 @@ private fun FullPlayer(
                 if (!lyricsFullscreen) Box(
                     Modifier
                         .fillMaxWidth()
-                        .adaptiveContentWidth(maxWidth = 640.dp)
+                        .then(
+                            if (isTabletLandscape) {
+                                Modifier.widthIn(max = 1200.dp).fillMaxWidth()
+                            } else {
+                                Modifier.adaptiveContentWidth(maxWidth = 640.dp)
+                            }
+                        )
                         .height(52.dp)
                         .padding(horizontal = 20.dp)
                         .playerVerticalSwipe(enabled = currentTab != FullPlayerTab.NOW_PLAYING),
@@ -2298,7 +2309,15 @@ private fun FullPlayer(
 
                 AnimatedContent(
                     targetState = currentTab,
-                    modifier = Modifier.weight(1f).adaptiveContentWidth(maxWidth = 680.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .then(
+                            if (isTabletLandscape) {
+                                Modifier.widthIn(max = 1200.dp).fillMaxWidth()
+                            } else {
+                                Modifier.adaptiveContentWidth(maxWidth = 680.dp)
+                            }
+                        ),
                     transitionSpec = {
                         // Matched fade durations keep both layers visible
                         // throughout the crossfade so the background never
@@ -2350,7 +2369,7 @@ private fun FullPlayer(
                                         tertiaryColor = ambientDeep,
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .adaptiveContentWidth(maxWidth = 720.dp),
+                                            .adaptiveContentWidth(maxWidth = if (isTabletLandscape) 960.dp else 720.dp),
                                     )
                                 } else {
                                     LyricsPanel(
@@ -2372,7 +2391,7 @@ private fun FullPlayer(
                                         tertiaryColor = ambientDeep,
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .adaptiveContentWidth(maxWidth = 720.dp),
+                                            .adaptiveContentWidth(maxWidth = if (isTabletLandscape) 960.dp else 720.dp),
                                     )
                                 }
                             }
@@ -2389,13 +2408,34 @@ private fun FullPlayer(
                                     player,
                                     Modifier
                                         .fillMaxSize()
-                                        .adaptiveContentWidth(maxWidth = 720.dp)
+                                        .adaptiveContentWidth(maxWidth = if (isTabletLandscape) 960.dp else 720.dp)
                                         .padding(horizontal = 12.dp),
                                 )
                             }
                         }
 
                         FullPlayerTab.NOW_PLAYING -> {
+                            if (isTabletLandscape) {
+                                FullPlayerLandscape(
+                                    track = track,
+                                    state = state,
+                                    player = player,
+                                    progressState = progressState,
+                                    wavySeekbarEnabled = wavySeekbarEnabled,
+                                    showSleeveCanvas = showSleeveCanvas,
+                                    canvas = activeCanvas ?: canvas,
+                                    ambientColor = ambientColor,
+                                    ambientCompanion = ambientCompanion,
+                                    ambientDeep = ambientDeep,
+                                    isLiked = isLiked,
+                                    onToggleLiked = onToggleLiked,
+                                    onDoubleTapLike = onDoubleTapLike,
+                                    onOpenArtist = onOpenArtist,
+                                    onTabChange = onTabChange,
+                                    shownDismissY = shownDismissY,
+                                    swipeThreshold = swipeThreshold,
+                                )
+                            } else {
                                 // ── Standard layout (lifted and balanced) ──────
                                 Column(
                                     Modifier.fillMaxSize().padding(horizontal = 20.dp).padding(bottom = 18.dp),
@@ -2576,7 +2616,7 @@ private fun FullPlayer(
                                                         corner = 22.dp,
                                                         canvas = if (showSleeveCanvas) canvas else null,
                                                         isPlaying = state.isPlaying,
-                                                        pausedForTransition = shownDismissY > 0f || currentTab != FullPlayerTab.NOW_PLAYING,
+                                                        pausedForTransition = shownDismissY > 1f || currentTab != FullPlayerTab.NOW_PLAYING,
                                                         onAspectRatioChanged = { canvasAspect = it },
                                                     )
                                                 }
@@ -2835,6 +2875,7 @@ private fun FullPlayer(
                                     Spacer(Modifier.height(24.dp))
                                     PlayerUtilityControls(state, player, isTranslucent = true)
                                 }
+                            }
                         }
                     }
                 }
@@ -2897,6 +2938,474 @@ private fun FullPlayer(
         )
     }
 }
+}
+
+@Composable
+private fun FullPlayerLandscape(
+    track: PlayableTrack,
+    state: MusicPlayerState,
+    player: MusicPlayer,
+    progressState: StateFlow<PlaybackProgressState>?,
+    wavySeekbarEnabled: Boolean,
+    showSleeveCanvas: Boolean,
+    canvas: com.lastwave.app.data.canvas.CanvasArtwork?,
+    ambientColor: Color,
+    ambientCompanion: Color,
+    ambientDeep: Color,
+    isLiked: Boolean,
+    onToggleLiked: () -> Unit,
+    onDoubleTapLike: () -> Unit,
+    onOpenArtist: (String) -> Unit,
+    onTabChange: (FullPlayerTab) -> Unit,
+    shownDismissY: Float,
+    swipeThreshold: Float,
+) {
+    var artworkDragX by remember { mutableFloatStateOf(0f) }
+    val shownArtworkX by animateFloatAsState(
+        targetValue = artworkDragX,
+        animationSpec = ExpressiveMotion.spatialSpring(),
+        label = "landscapeArtworkDragX",
+    )
+    var seekOverlaySeconds by remember { mutableIntStateOf(5) }
+    var seekOverlayDirection by remember { mutableStateOf<SeekDirection?>(null) }
+    var lastTapSide by remember { mutableStateOf<SeekDirection?>(null) }
+    var lastTapTimestamp by remember { mutableLongStateOf(0L) }
+    var lastLikeTapTimestamp by remember { mutableLongStateOf(0L) }
+    var seekResetJob by remember { mutableStateOf<Job?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+    var canvasAspect by remember { mutableFloatStateOf(1f) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(40.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Left Column: Large Album Artwork & Canvas with gestures
+        BoxWithConstraints(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight(),
+            contentAlignment = Alignment.Center,
+        ) {
+            val artworkSize = (minOf(maxWidth, maxHeight) - 16.dp)
+                .coerceAtLeast(0.dp)
+                .coerceAtMost(480.dp)
+
+            val glowAlpha by animateFloatAsState(
+                targetValue = if (state.isPlaying) 0.65f else 0.35f,
+                animationSpec = tween(600),
+                label = "landscapeArtworkGlowAlpha",
+            )
+            Box(
+                modifier = Modifier
+                    .size(artworkSize + 36.dp)
+                    .graphicsLayer {
+                        translationX = shownArtworkX * 0.7f
+                        alpha = glowAlpha
+                    }
+                    .background(
+                        Brush.radialGradient(
+                            0.0f to ambientColor.copy(alpha = 0.50f),
+                            0.50f to ambientCompanion.copy(alpha = 0.22f),
+                            1.0f to Color.Transparent,
+                        ),
+                        shape = CircleShape,
+                    ),
+            )
+
+            val artworkPlayingScale by animateFloatAsState(
+                targetValue = if (state.isPlaying) 1.0f else 0.92f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMediumLow,
+                ),
+                label = "landscapeArtworkPlayingScale",
+            )
+
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.88f),
+                tonalElevation = 6.dp,
+                shadowElevation = if (state.isPlaying) 28.dp else 12.dp,
+                modifier = Modifier
+                    .size(artworkSize)
+                    .graphicsLayer {
+                        scaleX = artworkPlayingScale
+                        scaleY = artworkPlayingScale
+                        translationX = shownArtworkX
+                        rotationZ = shownArtworkX / 80f
+                    }
+                    .pointerInput(track.videoId, track.title) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            var isDrag = false
+                            val touchSlop = viewConfiguration.touchSlop
+                            val initialX = down.position.x
+                            val initialY = down.position.y
+
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+
+                                if (!change.pressed) {
+                                    if (isDrag) {
+                                        when {
+                                            artworkDragX < -swipeThreshold -> player.next()
+                                            artworkDragX > swipeThreshold -> player.previous()
+                                        }
+                                        artworkDragX = 0f
+                                    } else {
+                                        val now = SystemClock.elapsedRealtime()
+                                        val side = when {
+                                            initialX < size.width * 0.34f -> SeekDirection.REWIND
+                                            initialX > size.width * 0.66f -> SeekDirection.FORWARD
+                                            else -> null
+                                        }
+
+                                        if (side == null) {
+                                            lastTapSide = null
+                                            lastTapTimestamp = 0L
+                                            if (lastLikeTapTimestamp != 0L && now - lastLikeTapTimestamp < 450L) {
+                                                lastLikeTapTimestamp = 0L
+                                                onDoubleTapLike()
+                                            } else {
+                                                lastLikeTapTimestamp = now
+                                            }
+                                        } else {
+                                            lastLikeTapTimestamp = 0L
+                                            if (lastTapSide != side) {
+                                                seekResetJob?.cancel()
+                                                seekOverlayDirection = null
+                                                lastTapSide = side
+                                                lastTapTimestamp = now
+                                            } else if (now - lastTapTimestamp < 450L) {
+                                                val newSeconds = if (seekOverlayDirection == side) seekOverlaySeconds + 5 else 5
+                                                seekOverlaySeconds = newSeconds
+                                                seekOverlayDirection = side
+                                                lastTapTimestamp = now
+                                                val deltaMs = if (side == SeekDirection.FORWARD) 5_000L else -5_000L
+                                                val newPos = (player.state.value.positionMs + deltaMs).coerceIn(0L, player.state.value.durationMs.coerceAtLeast(0L))
+                                                player.seekTo(newPos)
+
+                                                seekResetJob?.cancel()
+                                                seekResetJob = coroutineScope.launch {
+                                                    delay(700L)
+                                                    seekOverlayDirection = null
+                                                    lastTapSide = null
+                                                }
+                                            } else {
+                                                lastTapTimestamp = now
+                                                lastTapSide = side
+                                                seekOverlayDirection = null
+                                            }
+                                        }
+                                    }
+                                    break
+                                }
+
+                                if (change.isConsumed) {
+                                    artworkDragX = 0f
+                                    lastLikeTapTimestamp = 0L
+                                    lastTapTimestamp = 0L
+                                    lastTapSide = null
+                                    break
+                                }
+
+                                val dx = change.position.x - initialX
+                                val dy = change.position.y - initialY
+                                if (!isDrag) {
+                                    if (kotlin.math.abs(dx) > touchSlop && kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
+                                        isDrag = true
+                                        lastLikeTapTimestamp = 0L
+                                        lastTapTimestamp = 0L
+                                        lastTapSide = null
+                                        change.consume()
+                                    }
+                                } else {
+                                    change.consume()
+                                    artworkDragX = dx
+                                }
+                            }
+                        }
+                    },
+            ) {
+                Box(Modifier.fillMaxSize()) {
+                    PlayerArtwork(
+                        track = track,
+                        modifier = Modifier.fillMaxSize(),
+                        corner = 24.dp,
+                        canvas = if (showSleeveCanvas) canvas else null,
+                        isPlaying = state.isPlaying,
+                        pausedForTransition = shownDismissY > 1f,
+                        onAspectRatioChanged = { canvasAspect = it },
+                    )
+                }
+            }
+
+            androidx.compose.animation.AnimatedVisibility(
+                visible = seekOverlayDirection == SeekDirection.REWIND,
+                enter = fadeIn(tween(100)) + scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.88f),
+                exit = fadeOut(tween(200)),
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxWidth(0.42f)
+                    .height(130.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(topStart = 32.dp, bottomStart = 32.dp, topEnd = 72.dp, bottomEnd = 72.dp))
+                        .background(Color.Black.copy(alpha = 0.58f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.White.copy(alpha = 0.22f),
+                            modifier = Modifier.size(52.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Filled.FastRewind,
+                                    contentDescription = "Seek rewind",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(28.dp),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "-${seekOverlaySeconds}s",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White,
+                        )
+                    }
+                }
+            }
+
+            androidx.compose.animation.AnimatedVisibility(
+                visible = seekOverlayDirection == SeekDirection.FORWARD,
+                enter = fadeIn(tween(100)) + scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.88f),
+                exit = fadeOut(tween(200)),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxWidth(0.42f)
+                    .height(130.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(topEnd = 32.dp, bottomEnd = 32.dp, topStart = 72.dp, bottomStart = 72.dp))
+                        .background(Color.Black.copy(alpha = 0.58f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.White.copy(alpha = 0.22f),
+                            modifier = Modifier.size(52.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Filled.FastForward,
+                                    contentDescription = "Seek forward",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(28.dp),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "+${seekOverlaySeconds}s",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White,
+                        )
+                    }
+                }
+            }
+        }
+
+        // Right Column: Controls & Metadata
+        Column(
+            modifier = Modifier
+                .weight(1.15f)
+                .fillMaxHeight(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        track.title,
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            letterSpacing = (-0.35).sp,
+                            fontWeight = FontWeight.ExtraBold,
+                        ),
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .basicMarquee(iterations = Int.MAX_VALUE),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    val splitArtists = remember(track.artist) {
+                        com.lastwave.app.util.ArtistHelper.splitArtists(track.artist)
+                    }
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(0.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        splitArtists.forEachIndexed { index, artName ->
+                            Text(
+                                text = artName,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Medium,
+                                ),
+                                color = Color.White.copy(alpha = 0.72f),
+                                modifier = Modifier
+                                    .clickable(
+                                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                        indication = null,
+                                    ) { onOpenArtist(artName) },
+                            )
+                            if (index < splitArtists.lastIndex) {
+                                Text(
+                                    text = ", ",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontSize = 17.sp,
+                                        fontWeight = FontWeight.Normal,
+                                    ),
+                                    color = Color.White.copy(alpha = 0.50f),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.width(16.dp))
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val likeInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                    val isLikePressed by likeInteraction.collectIsPressedAsState()
+                    val likeScale by animateFloatAsState(
+                        targetValue = if (isLikePressed) 0.78f else 1.0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessMediumLow,
+                        ),
+                        label = "landscapeLikeScale",
+                    )
+                    LiquidGlassSurface(
+                        glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls, interactionSource = likeInteraction),
+                        onClick = onToggleLiked,
+                        interactionSource = likeInteraction,
+                        shape = CircleShape,
+                        color = liquidGlassContainerColor(if (isLiked) {
+                            Color.White.copy(alpha = 0.92f)
+                        } else {
+                            Color.White.copy(alpha = 0.14f)
+                        }),
+                        contentColor = if (isLiked) {
+                            Color(0xFFE91E63)
+                        } else {
+                            Color.White.copy(alpha = 0.85f)
+                        },
+                        tonalElevation = 0.dp,
+                        shadowElevation = 0.dp,
+                        modifier = Modifier
+                            .size(50.dp)
+                            .graphicsLayer {
+                                scaleX = likeScale
+                                scaleY = likeScale
+                            },
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(
+                                if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                                contentDescription = if (isLiked) "Unlike song" else "Like song",
+                                modifier = Modifier.size(26.dp),
+                            )
+                        }
+                    }
+
+                    val lyricsInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                    val isLyricsPressed by lyricsInteraction.collectIsPressedAsState()
+                    val lyricsScale by animateFloatAsState(
+                        targetValue = if (isLyricsPressed) 0.82f else 1.0f,
+                        animationSpec = ExpressiveMotion.spatialSpring(),
+                        label = "landscapeLyricsScale",
+                    )
+                    LiquidGlassSurface(
+                        glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls, interactionSource = lyricsInteraction),
+                        onClick = { onTabChange(FullPlayerTab.LYRICS) },
+                        interactionSource = lyricsInteraction,
+                        shape = CircleShape,
+                        color = liquidGlassContainerColor(Color.White.copy(alpha = 0.14f)),
+                        contentColor = Color.White.copy(alpha = 0.90f),
+                        tonalElevation = 0.dp,
+                        shadowElevation = 0.dp,
+                        modifier = Modifier
+                            .size(50.dp)
+                            .graphicsLayer {
+                                scaleX = lyricsScale
+                                scaleY = lyricsScale
+                            },
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.FormatQuote,
+                                contentDescription = "Show lyrics",
+                                modifier = Modifier.size(26.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            SeekBar(
+                progressState = progressState ?: player.progressState,
+                isPlaying = state.isPlaying,
+                trackKey = track.videoId ?: "${track.artist}|${track.title}",
+                wavyEnabled = wavySeekbarEnabled,
+                onSeek = player::seekTo,
+                isTranslucent = LocalLiquidGlass.current,
+                fallbackDurationMs = track.durationMs ?: state.durationMs,
+                primaryColor = ambientColor,
+                secondaryColor = ambientCompanion,
+                tertiaryColor = ambientDeep,
+            )
+
+            Spacer(Modifier.height(18.dp))
+
+            MainControls(state, player, isTranslucent = true)
+
+            Spacer(Modifier.height(18.dp))
+
+            PlayerUtilityControls(state, player, isTranslucent = true)
+        }
+    }
 }
 
 @Composable
@@ -3599,6 +4108,8 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
             "$base#$n"
         }
     }
+    val currentQueue by rememberUpdatedState(state.queue)
+    val currentQueueKeys by rememberUpdatedState(queueKeys)
     // Abort a stale drag if the queue itself changes underneath us
     // (track ended, clear-upcoming, fresh playQueue, …).
     LaunchedEffect(state.queue.size) {
@@ -3742,6 +4253,7 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             itemsIndexed(state.queue, key = { index, _ -> queueKeys.getOrNull(index) ?: index.toString() }) { index, item ->
+                val currentIndex by rememberUpdatedState(index)
                 val isCurrent = index == state.currentIndex
                 val isDragging = index == draggingIndex
                 val stableKey = queueKeys.getOrNull(index) ?: index.toString()
@@ -3752,8 +4264,8 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                             // composition-time `index` can be stale if the queue
                             // shifted between composition and the gesture, which
                             // removed the wrong item (audit #12).
-                            val currentIndex = queueKeys.indexOf(stableKey)
-                            if (currentIndex >= 0) player.removeQueueItem(currentIndex)
+                            val resolvedIndex = currentQueueKeys.indexOf(stableKey).takeIf { it >= 0 } ?: currentIndex
+                            if (resolvedIndex >= 0) player.removeQueueItem(resolvedIndex)
                             true
                         } else {
                             false
@@ -3783,7 +4295,7 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                     content = {
                 LiquidGlassSurface(
                     glassModifier = Modifier.liquidGlassChrome(RoundedCornerShape(20.dp), LocalLiquidGlass.current),
-                    onClick = { player.seekToQueueItem(index) },
+                    onClick = { player.seekToQueueItem(currentQueueKeys.indexOf(stableKey).takeIf { it >= 0 } ?: currentIndex) },
                     shape = RoundedCornerShape(20.dp),
                     color = if (isCurrent) {
                         if (LocalLiquidGlass.current) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
@@ -3837,7 +4349,7 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                             )
                         }
                         IconButton(
-                            onClick = { menuIndex = index },
+                            onClick = { menuIndex = currentQueueKeys.indexOf(stableKey).takeIf { it >= 0 } ?: currentIndex },
                             modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
@@ -3862,7 +4374,8 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                                 .pointerInput(stableKey) {
                                     detectDragGesturesAfterLongPress(
                                         onDragStart = {
-                                            draggingIndex = index
+                                            val actualIndex = currentQueueKeys.indexOf(stableKey).takeIf { it >= 0 } ?: currentIndex
+                                            draggingIndex = actualIndex
                                             dragOffsetY = 0f
                                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                         },
@@ -3886,7 +4399,7 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                                             val draggedCenter = draggedInfo.offset + draggedInfo.size / 2 + dragOffsetY.toInt()
                                             val target = layoutInfo.visibleItemsInfo.firstOrNull { info ->
                                                 info.index != source &&
-                                                    info.index in state.queue.indices &&
+                                                    info.index in currentQueue.indices &&
                                                     draggedCenter in info.offset..(info.offset + info.size)
                                             }?.index
                                             if (target != null && target != source) {

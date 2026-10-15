@@ -706,12 +706,8 @@ fun PlaylistDetailScreen(
                 }
                 itemsIndexed(
                     items = displayTracks,
-                    key = { index, _ ->
-                        // Never fall back to a bare "track_$index": two rows
-                        // would share one key after insert/delete and Lazy
-                        // throws at the viewport edge. displayKeys is always
-                        // exactly displayTracks.size long (same remember input).
-                        displayKeys.getOrElse(index) { "pos_fallback_$index" }
+                    key = { index, track ->
+                        displayKeys.getOrNull(index) ?: "pos_${track.url.ifBlank { "${track.name}_${track.artist}" }}_$index"
                     },
                     contentType = { _, _ -> "playlist_track" },
                 ) { index, track ->
@@ -719,7 +715,7 @@ fun PlaylistDetailScreen(
                         playbackState.current?.title.equals(track.name, ignoreCase = true) &&
                         playbackState.current?.artist.equals(track.artist, ignoreCase = true)
                     val isDragging = reorderEnabled && index == draggingIndex
-                    val stableKey = displayKeys.getOrElse(index) { "pos_fallback_$index" }
+                    val stableKey = displayKeys.getOrNull(index) ?: "pos_${track.url.ifBlank { "${track.name}_${track.artist}" }}_$index"
 
                     Box(
                         modifier = Modifier

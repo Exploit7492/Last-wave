@@ -361,7 +361,7 @@ class InnerTubeMusicApi @Inject constructor(
         val songs = mutableListOf<YouTubeMusicTrack>()
         val isNextResponse = (root as? JsonObject)?.obj("contents")?.obj("singleColumnMusicWatchNextResultsRenderer") != null ||
             (root as? JsonObject)?.obj("currentVideoEndpoint") != null
-        val playlistPage = browseId.startsWith("VL") && !isNextResponse
+        val playlistPage = !isNextResponse && (browseId.startsWith("VL") || browseId.startsWith("FE") || browseId.startsWith("PL") || isLiked)
         fun trackContainers(page: JsonElement): List<JsonElement> =
             if (playlistPage) playlistTrackContainers(page) else listOf(page)
         val initialContainers = trackContainers(root)
@@ -373,6 +373,17 @@ class InnerTubeMusicApi @Inject constructor(
             trackLimit?.let { parsed.take(it) } ?: parsed
         }
         if (initialSongs.isEmpty() && initialContainers.isEmpty()) {
+            if (header != null) {
+                return@withContext YouTubePlaylistResult(
+                    id = rawId,
+                    title = title ?: if (isLiked) "Liked Music" else "YouTube Playlist",
+                    author = author,
+                    artworkUrl = artworkUrl,
+                    trackCount = 0,
+                    tracks = emptyList(),
+                    isComplete = true,
+                )
+            }
             val topKeys = (root as? JsonObject)?.keys?.take(8)?.joinToString(",").orEmpty()
             android.util.Log.w(
                 PLAYLIST_LOG_TAG,
@@ -386,9 +397,11 @@ class InnerTubeMusicApi @Inject constructor(
         // Follow continuation pages until gone. Safety cap is enormous on
         // purpose (60k tracks) — it only exists to bound a pathological loop.
         fun continuation(containers: List<JsonElement>, pageJson: JsonElement): String? =
-            containers.firstNotNullOfOrNull {
-                if (playlistPage) playlistTrackContinuationToken(it) else genericContinuationToken(it)
-            } ?: genericContinuationToken(pageJson)
+            if (playlistPage) {
+                containers.firstNotNullOfOrNull(::playlistTrackContinuationToken)
+            } else {
+                containers.firstNotNullOfOrNull(::genericContinuationToken) ?: genericContinuationToken(pageJson)
+            }
         var token = continuation(containers, root)
         if ((trackLimit != null || progressive) && songs.isNotEmpty()) {
             onPageLoaded?.invoke(songs.toList())
@@ -499,21 +512,21 @@ class InnerTubeMusicApi @Inject constructor(
         val isLiked = com.lastwave.app.data.playlist.PlaylistImportManager.isYtLikedId(browseId)
         if (ytAuth.connection.value.isConnected) {
             runCatching { browseRoot(browseId, authenticated = true) }.getOrNull()?.let {
-                if (parseSongRenderers(it).isNotEmpty()) return it to true
+                if (hasPlaylistContent(it)) return it to true
             }
             if (isLiked) {
                 runCatching { browseRoot("FEmusic_liked_videos", authenticated = true) }.getOrNull()?.let {
-                    if (parseSongRenderers(it).isNotEmpty()) return it to true
+                    if (hasPlaylistContent(it)) return it to true
                 }
                 if (browseId != "LM") {
                     runCatching { browseRoot("LM", authenticated = true) }.getOrNull()?.let {
-                        if (parseSongRenderers(it).isNotEmpty()) return it to true
+                        if (hasPlaylistContent(it)) return it to true
                     }
                 }
             }
         }
         runCatching { browseRoot(browseId, authenticated = false) }.getOrNull()?.let {
-            if (parseSongRenderers(it).isNotEmpty()) return it to false
+            if (hasPlaylistContent(it)) return it to false
         }
         // RDCLAK / RD-prefixed IDs (radio/mix) or Liked Music fall back to the "next" endpoint
         if (browseId.startsWith("RDCLAK") || browseId.startsWith("RD") || isLiked) {
@@ -525,6 +538,9 @@ class InnerTubeMusicApi @Inject constructor(
         }
         return null
     }
+
+    private fun hasPlaylistContent(root: JsonElement): Boolean =
+        parseSongRenderers(root).isNotEmpty() || playlistHeader(root) != null || playlistTrackContainers(root).isNotEmpty()
 
     /**
      * Resolves a playlist (RDCLAK…, RD… radio/mix or Liked Music fallback)
@@ -1453,21 +1469,22 @@ class InnerTubeMusicApi @Inject constructor(
     }
 
     /** Only playlist rows and their continuation, excluding recommendation shelves. */
-    private fun playlistTrackContainers(root: JsonElement): List<JsonElement> {
+    internal fun playlistTrackContainers(root: JsonElement): List<JsonElement> {
         val shelves = mutableListOf<JsonObject>()
         collectObjects(root, "musicPlaylistShelfRenderer", shelves)
         collectObjects(root, "musicPlaylistShelfContinuation", shelves)
         collectObjects(root, "playlistVideoListRenderer", shelves)
         collectObjects(root, "playlistVideoListContinuation", shelves)
-        if (shelves.isNotEmpty()) return shelves
+        val validShelves = shelves.filterNot(::isSuggestionShelf)
+        if (validShelves.isNotEmpty()) return validShelves
 
         val musicShelves = mutableListOf<JsonObject>()
         collectObjects(root, "musicShelfRenderer", musicShelves)
-        val validShelves = musicShelves.filter { parseSongRenderers(it).isNotEmpty() }
-        if (validShelves.isNotEmpty()) return validShelves
+        val validMusicShelves = musicShelves.filterNot(::isSuggestionShelf).filter { parseSongRenderers(it).isNotEmpty() }
+        if (validMusicShelves.isNotEmpty()) return validMusicShelves
 
         val continuations = root.obj("continuationContents")
-        continuations?.obj("musicShelfContinuation")?.let { return listOf(it) }
+        continuations?.obj("musicShelfContinuation")?.takeUnless(::isSuggestionShelf)?.let { return listOf(it) }
         return listOf("onResponseReceivedActions", "onResponseReceivedEndpoints", "onResponseReceivedCommands")
             .flatMap { key -> root.array(key).orEmpty() }
             .mapNotNull { action ->
@@ -1475,6 +1492,7 @@ class InnerTubeMusicApi @Inject constructor(
                     ?.array("continuationItems")
             }
     }
+
 
     private fun playlistTrackContinuationToken(container: JsonElement): String? {
         val contents = (container as? JsonArray) ?: container.array("contents")
@@ -3582,16 +3600,6 @@ class InnerTubeMusicApi @Inject constructor(
         return formatted.highResolutionArtwork()
     }
 
-    private fun collectObjects(element: JsonElement, key: String, output: MutableList<JsonObject>) {
-        when (element) {
-            is JsonObject -> element.forEach { (name, child) ->
-                if (name == key && child is JsonObject) output += child
-                collectObjects(child, key, output)
-            }
-            is JsonArray -> element.forEach { collectObjects(it, key, output) }
-            else -> Unit
-        }
-    }
 
     private fun findString(element: JsonElement, key: String): String? = when (element) {
         is JsonObject -> {
@@ -3983,12 +3991,74 @@ class InnerTubeMusicApi @Inject constructor(
     }
 }
 
-private fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
-private fun JsonObject.array(key: String): JsonArray? = this[key] as? JsonArray
-private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
-private fun JsonObject.int(key: String): Int? = string(key)?.toIntOrNull()
-private fun JsonElement.asObject(): JsonObject? = this as? JsonObject
-private fun JsonElement.obj(key: String): JsonObject? = (this as? JsonObject)?.obj(key)
-private fun JsonElement.array(key: String): JsonArray? = (this as? JsonObject)?.array(key)
-private fun JsonElement.string(key: String): String? = (this as? JsonObject)?.string(key)
-private fun JsonElement.int(key: String): Int? = (this as? JsonObject)?.int(key)
+internal fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
+internal fun JsonObject.array(key: String): JsonArray? = this[key] as? JsonArray
+internal fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+internal fun JsonObject.int(key: String): Int? = string(key)?.toIntOrNull()
+internal fun JsonElement.asObject(): JsonObject? = this as? JsonObject
+internal fun JsonElement.obj(key: String): JsonObject? = (this as? JsonObject)?.obj(key)
+internal fun JsonElement.array(key: String): JsonArray? = (this as? JsonObject)?.array(key)
+internal fun JsonElement.string(key: String): String? = (this as? JsonObject)?.string(key)
+internal fun JsonElement.int(key: String): Int? = (this as? JsonObject)?.int(key)
+
+internal fun collectObjects(element: JsonElement, key: String, output: MutableList<JsonObject>) {
+    when (element) {
+        is JsonObject -> element.forEach { (name, child) ->
+            if (name == key && child is JsonObject) output += child
+            collectObjects(child, key, output)
+        }
+        is JsonArray -> element.forEach { collectObjects(it, key, output) }
+        else -> Unit
+    }
+}
+
+internal fun isSuggestionShelf(shelf: JsonObject): Boolean {
+    val titleText = shelf.obj("title")?.array("runs")?.joinToString("") {
+        it.asObject()?.string("text").orEmpty()
+    } ?: shelf.obj("title")?.string("simpleText")
+      ?: shelf.obj("header")?.obj("musicShelfHeaderRenderer")?.obj("title")?.array("runs")?.joinToString("") {
+          it.asObject()?.string("text").orEmpty()
+      }
+      ?: shelf.obj("header")?.obj("musicShelfHeaderRenderer")?.obj("title")?.string("simpleText")
+      ?: shelf.obj("header")?.obj("musicHeaderRenderer")?.obj("title")?.array("runs")?.joinToString("") {
+          it.asObject()?.string("text").orEmpty()
+      }
+    if (!titleText.isNullOrBlank()) {
+        val lower = titleText.trim().lowercase()
+        if (lower.contains("suggestion") || lower.contains("suggested") ||
+            lower.contains("recommend") || lower.contains("vorschl") ||
+            lower.contains("empfehl") || lower.contains("sugeren") ||
+            lower.contains("sugest") || lower.contains("recommand") ||
+            lower.contains("sugger") || lower.contains("aanbevel") ||
+            lower.contains("förslag") || lower.contains("forslag") ||
+            lower.contains("suosituk") || lower.contains("рекомендац") ||
+            lower.contains("öneri") || lower.contains("सुझाव") ||
+            lower.contains("建议") || lower.contains("추천") ||
+            lower.contains("おすすめ") || lower.contains("اقتراح")
+        ) {
+            return true
+        }
+    }
+    val bottomEndpoint = shelf.obj("bottomEndpoint")
+    if (bottomEndpoint != null) {
+        val endpointStr = bottomEndpoint.toString().lowercase()
+        if (endpointStr.contains("suggestion") || endpointStr.contains("suggested")) {
+            return true
+        }
+    }
+    val contents = shelf.array("contents") ?: shelf.array("items")
+    if (contents != null && contents.isNotEmpty()) {
+        val allHaveAddAction = contents.all { item ->
+            val itemObj = item.asObject() ?: return@all false
+            val editEndpoints = mutableListOf<JsonObject>()
+            collectObjects(itemObj, "playlistEditEndpoint", editEndpoints)
+            editEndpoints.any { ep ->
+                ep.array("actions")?.any { act ->
+                    act.asObject()?.string("action")?.contains("ACTION_ADD", ignoreCase = true) == true
+                } == true
+            }
+        }
+        if (allHaveAddAction) return true
+    }
+    return false
+}
