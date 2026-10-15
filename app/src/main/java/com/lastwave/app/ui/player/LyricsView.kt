@@ -89,7 +89,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
+import com.lastwave.app.R
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -823,7 +825,7 @@ private fun PlainLyricsView(
                     tint = Color.White.copy(alpha = 0.90f),
                 )
                 Text(
-                    "Lyrics not time-synced",
+                    stringResource(R.string.ly_not_synced),
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.White.copy(alpha = 0.70f),
                 )
@@ -868,7 +870,7 @@ private fun EmptyLyricsView(
             )
 
             Text(
-                text = if (isInstrumental) "Instrumental" else "No lyrics",
+                text = if (isInstrumental) stringResource(R.string.ly_instrumental) else stringResource(R.string.ly_none),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
@@ -876,9 +878,9 @@ private fun EmptyLyricsView(
 
             Text(
                 text = if (isInstrumental) {
-                    "This track has no vocal lyrics."
+                    stringResource(R.string.ly_no_vocals)
                 } else {
-                    "No synced lyrics found for this track."
+                    stringResource(R.string.ly_no_synced)
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color.White.copy(alpha = 0.70f),
@@ -892,7 +894,7 @@ private fun EmptyLyricsView(
                 ) {
                     Icon(Icons.Filled.Refresh, contentDescription = null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Try again")
+                    Text(stringResource(R.string.ly_retry))
                 }
             }
         }
@@ -1032,7 +1034,7 @@ private fun LyricsPlaybackControls(
                 ) {
                     Icon(
                         Icons.Filled.FormatSize,
-                        contentDescription = "Adjust lyrics text size",
+                        contentDescription = stringResource(R.string.ly_size_cd),
                         modifier = Modifier.size(22.dp),
                         tint = if (showFontSlider || isCustomFont) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.90f),
                     )

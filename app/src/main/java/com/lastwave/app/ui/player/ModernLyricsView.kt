@@ -87,7 +87,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextLayoutResult
+import com.lastwave.app.R
 import com.lastwave.app.ui.theme.LocalLiquidGlass
 import com.lastwave.app.ui.theme.LiquidGlassPreset
 import com.lastwave.app.ui.theme.LiquidGlassSurface
@@ -250,11 +252,14 @@ fun ModernLyricsPanel(
                         val layoutDirection = if (isOverallRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
                         // Short provider badge: makes it visible why words
                         // animate (word-sync) or just scroll (line-sync).
+                        val wordSyncLabel = stringResource(R.string.ly_word_sync)
+                        val lineSyncLabel = stringResource(R.string.ly_line_sync)
+                        val providerFallback = stringResource(R.string.ly_provider_fallback)
                         val syncLabel = remember(targetState.source, isWordSynced) {
                             val provider = targetState.source
                                 ?.substringBefore(" (")
-                                ?.takeIf { it.isNotBlank() } ?: "Lyrics"
-                            "${if (isWordSynced) "WORD SYNC" else "LINE SYNC"} • $provider"
+                                ?.takeIf { it.isNotBlank() } ?: providerFallback
+                            "${if (isWordSynced) wordSyncLabel else lineSyncLabel} • $provider"
                         }
                         CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
                             Column(
@@ -836,7 +841,7 @@ private fun ModernPlainLyricsView(
                     tint = Color.White.copy(alpha = 0.90f),
                 )
                 Text(
-                    "Lyrics not time-synced",
+                    stringResource(R.string.ly_not_synced),
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.White.copy(alpha = 0.70f),
                 )
@@ -881,7 +886,7 @@ private fun ModernEmptyLyricsView(
             )
 
             Text(
-                text = if (isInstrumental) "Instrumental" else "No lyrics",
+                text = if (isInstrumental) stringResource(R.string.ly_instrumental) else stringResource(R.string.ly_none),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
@@ -889,9 +894,9 @@ private fun ModernEmptyLyricsView(
 
             Text(
                 text = if (isInstrumental) {
-                    "This track has no vocal lyrics."
+                    stringResource(R.string.ly_no_vocals)
                 } else {
-                    "No synced lyrics found for this track."
+                    stringResource(R.string.ly_no_synced)
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color.White.copy(alpha = 0.70f),
@@ -903,7 +908,7 @@ private fun ModernEmptyLyricsView(
                 TextButton(onClick = onRetry) {
                     Icon(Icons.Filled.Refresh, contentDescription = null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Try again")
+                    Text(stringResource(R.string.ly_retry))
                 }
             }
         }
@@ -1159,7 +1164,7 @@ private fun ModernLyricsControls(
             ) {
                 Icon(
                     Icons.Filled.FormatSize,
-                    contentDescription = "Adjust lyrics text size",
+                    contentDescription = stringResource(R.string.ly_size_cd),
                     modifier = Modifier.size(22.dp),
                     tint = if (showFontSlider || isCustomFont) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.90f),
                 )

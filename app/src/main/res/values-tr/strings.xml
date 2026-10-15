@@ -1005,4 +1005,17 @@
     <string name="fr_month_oct">Eki</string>
     <string name="fr_month_nov">Kas</string>
     <string name="fr_month_dec">Ara</string>
+
+    <!-- Şarkı sözü görünümleri -->
+    <string name="ly_word_sync">KELİME EŞİTLEME</string>
+    <string name="ly_line_sync">SATIR EŞİTLEME</string>
+    <string name="ly_provider_fallback">Şarkı Sözleri</string>
+    <string name="ly_sync_badge">%1$s • %2$s</string>
+    <string name="ly_not_synced">Şarkı sözleri zaman eşitlemeli değil</string>
+    <string name="ly_instrumental">Enstrümantal</string>
+    <string name="ly_none">Şarkı sözü yok</string>
+    <string name="ly_no_vocals">Bu parçada vokal sözü yok.</string>
+    <string name="ly_no_synced">Bu parça için eşitlenmiş söz bulunamadı.</string>
+    <string name="ly_retry">Tekrar dene</string>
+    <string name="ly_size_cd">Şarkı sözü metin boyutunu ayarla</string>
 </resources>

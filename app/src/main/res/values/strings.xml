@@ -1011,4 +1011,17 @@
     <string name="fr_month_oct">Oct</string>
     <string name="fr_month_nov">Nov</string>
     <string name="fr_month_dec">Dec</string>
+
+    <!-- Lyrics views -->
+    <string name="ly_word_sync">WORD SYNC</string>
+    <string name="ly_line_sync">LINE SYNC</string>
+    <string name="ly_provider_fallback">Lyrics</string>
+    <string name="ly_sync_badge">%1$s • %2$s</string>
+    <string name="ly_not_synced">Lyrics not time-synced</string>
+    <string name="ly_instrumental">Instrumental</string>
+    <string name="ly_none">No lyrics</string>
+    <string name="ly_no_vocals">This track has no vocal lyrics.</string>
+    <string name="ly_no_synced">No synced lyrics found for this track.</string>
+    <string name="ly_retry">Try again</string>
+    <string name="ly_size_cd">Adjust lyrics text size</string>
 </resources>
