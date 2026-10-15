@@ -535,4 +535,23 @@
     <string name="pl_regenerating">Regenerating…</string>
     <string name="pl_format_csv_desc">Spreadsheet-compatible</string>
     <string name="pl_format_m3u_desc">Media-player playlist file</string>
+
+    <!-- Add-to-playlist duplicate dialogs -->
+    <string name="add_dup_single_title">Song already in playlist</string>
+    <string name="add_dup_single_text">%1$s by %2$s is already present in %3$s. You can leave the playlist unchanged or add another copy.</string>
+    <string name="add_dup_add_anyway">Add anyway</string>
+    <string name="add_dup_leave">Leave unchanged</string>
+    <string name="add_dup_multi_title">%1$d playlists already have this song</string>
+    <string name="add_dup_multi_text">Existing copies stay unchanged. Select only the playlists where you want another copy.</string>
+    <string name="add_dup_add_missing">Add missing</string>
+    <string name="add_create_title">Create playlist</string>
+    <string name="add_create_and_add">Create &amp; Add</string>
+    <string name="player_play_pause_cd">Play or pause</string>
+    <string name="player_create_cd">Create Playlist</string>
+    <string name="player_lyrics_offset_cd">Lyrics sync offset</string>
+    <string name="player_seek_back_cd">Seek rewind</string>
+    <string name="player_seek_fwd_cd">Seek forward</string>
+    <string name="player_show_lyrics_cd">Show lyrics</string>
+    <string name="player_delete_cd">Delete</string>
+    <string name="player_menu_cd">Menu</string>
 </resources>

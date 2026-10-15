@@ -532,4 +532,23 @@
     <string name="pl_regenerating">Üretiliyor…</string>
     <string name="pl_format_csv_desc">Tabloyla uyumlu</string>
     <string name="pl_format_m3u_desc">Medya oynatıcı liste dosyası</string>
+
+    <!-- Listeye eklerken yinelenen diyalogları -->
+    <string name="add_dup_single_title">Şarkı zaten listede</string>
+    <string name="add_dup_single_text">%1$s - %2$s, %3$s içinde zaten var. Listeyi olduğu gibi bırakabilir veya bir kopya daha ekleyebilirsiniz.</string>
+    <string name="add_dup_add_anyway">Yine de ekle</string>
+    <string name="add_dup_leave">Değiştirmeden bırak</string>
+    <string name="add_dup_multi_title">%1$d listede bu şarkı zaten var</string>
+    <string name="add_dup_multi_text">Mevcut kopyalar değişmeden kalır. Yalnızca başka kopya istediğiniz listeleri seçin.</string>
+    <string name="add_dup_add_missing">Eksikleri ekle</string>
+    <string name="add_create_title">Liste oluştur</string>
+    <string name="add_create_and_add">Oluştur ve Ekle</string>
+    <string name="player_play_pause_cd">Çal veya duraklat</string>
+    <string name="player_create_cd">Liste Oluştur</string>
+    <string name="player_lyrics_offset_cd">Şarkı sözü eşitleme kayması</string>
+    <string name="player_seek_back_cd">Geri sar</string>
+    <string name="player_seek_fwd_cd">İleri sar</string>
+    <string name="player_show_lyrics_cd">Şarkı sözlerini göster</string>
+    <string name="player_delete_cd">Sil</string>
+    <string name="player_menu_cd">Menü</string>
 </resources>

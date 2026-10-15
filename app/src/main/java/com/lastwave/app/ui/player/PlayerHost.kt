@@ -1033,7 +1033,7 @@ internal fun AnimatedPlayPauseIcon(isPlaying: Boolean, modifier: Modifier = Modi
     ) { playing ->
         Icon(
             if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-            contentDescription = "Play or pause",
+            contentDescription = stringResource(com.lastwave.app.R.string.player_play_pause_cd),
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -1411,11 +1411,10 @@ private fun AddToPlaylistDialog(
             val playlist = duplicatePlaylists.first()
             AlertDialog(
                 onDismissRequest = { duplicateConfirmation = null },
-                title = { Text("Song already in playlist") },
+                title = { Text(stringResource(com.lastwave.app.R.string.add_dup_single_title)) },
                 text = {
                     Text(
-                        "${track.title} by ${track.artist} is already present in ${playlist.title}. " +
-                            "You can leave the playlist unchanged or add another copy.",
+                        stringResource(com.lastwave.app.R.string.add_dup_single_text, track.title, track.artist, playlist.title),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 },
@@ -1426,12 +1425,12 @@ private fun AddToPlaylistDialog(
                             duplicateConfirmation = null
                         },
                     ) {
-                        Text("Add anyway")
+                        Text(stringResource(com.lastwave.app.R.string.add_dup_add_anyway))
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { duplicateConfirmation = null }) {
-                        Text("Leave unchanged")
+                        Text(stringResource(com.lastwave.app.R.string.add_dup_leave))
                     }
                 },
             )
@@ -1442,12 +1441,12 @@ private fun AddToPlaylistDialog(
         AlertDialog(
             onDismissRequest = { duplicateConfirmation = null },
             title = {
-                Text("${duplicates.size} playlists already have this song")
+                Text(stringResource(com.lastwave.app.R.string.add_dup_multi_title, duplicates.size))
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        "Existing copies stay unchanged. Select only the playlists where you want another copy.",
+                        stringResource(com.lastwave.app.R.string.add_dup_multi_text),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     LazyColumn(
@@ -1511,16 +1510,16 @@ private fun AddToPlaylistDialog(
                 ) {
                     Text(
                         when {
-                            duplicatePlaylistIds.isNotEmpty() -> "Add anyway"
-                            missingCount > 0 -> "Add missing"
-                            else -> "Leave unchanged"
+                            duplicatePlaylistIds.isNotEmpty() -> stringResource(com.lastwave.app.R.string.add_dup_add_anyway)
+                            missingCount > 0 -> stringResource(com.lastwave.app.R.string.add_dup_add_missing)
+                            else -> stringResource(com.lastwave.app.R.string.add_dup_leave)
                         },
                     )
                 }
             },
             dismissButton = {
                 TextButton(onClick = { duplicateConfirmation = null }) {
-                    Text("Leave unchanged")
+                    Text(stringResource(com.lastwave.app.R.string.add_dup_leave))
                 }
             },
         )
@@ -1550,12 +1549,12 @@ private fun AddToPlaylistDialog(
         if (showCreateDialog) {
             AlertDialog(
                 onDismissRequest = { showCreateDialog = false },
-                title = { Text("Create playlist") },
+                title = { Text(stringResource(com.lastwave.app.R.string.add_create_title)) },
                 text = {
                     OutlinedTextField(
                         value = newPlaylistName,
                         onValueChange = { newPlaylistName = it },
-                        label = { Text("Playlist name") },
+                        label = { Text(stringResource(com.lastwave.app.R.string.pl_name_label)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -1577,11 +1576,11 @@ private fun AddToPlaylistDialog(
                             showCreateDialog = false
                         },
                     ) {
-                        Text("Create & Add")
+                        Text(stringResource(com.lastwave.app.R.string.add_create_and_add))
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showCreateDialog = false }) { Text("Cancel") }
+                    TextButton(onClick = { showCreateDialog = false }) { Text(stringResource(com.lastwave.app.R.string.common_cancel)) }
                 },
             )
         }
@@ -1622,7 +1621,7 @@ private fun AddToPlaylistDialog(
                     onClick = { showCreateDialog = true },
                     modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
                 ) {
-                    Icon(Icons.Filled.Add, contentDescription = "Create Playlist")
+                    Icon(Icons.Filled.Add, contentDescription = stringResource(com.lastwave.app.R.string.player_create_cd))
                 }
             }
 
@@ -1743,7 +1742,7 @@ private fun AddToPlaylistDialog(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(onClick = onDismiss) { Text(stringResource(com.lastwave.app.R.string.common_cancel)) }
                 Spacer(Modifier.width(8.dp))
                 Button(
                     onClick = { requestAdd(selectedPlaylistIds) },
@@ -2256,7 +2255,7 @@ private fun FullPlayer(
                             ) {
                                 Icon(
                                     Icons.Filled.Timer,
-                                    contentDescription = "Lyrics sync offset",
+                                    contentDescription = stringResource(com.lastwave.app.R.string.player_lyrics_offset_cd),
                                     modifier = Modifier.size(22.dp),
                                     tint = if (lyricsOffsetMs != 0L) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.94f),
                                 )
@@ -2599,7 +2598,7 @@ private fun FullPlayer(
                                                         Box(contentAlignment = Alignment.Center) {
                                                             Icon(
                                                                 Icons.Filled.FastRewind,
-                                                                contentDescription = "Seek rewind",
+                                                                contentDescription = stringResource(com.lastwave.app.R.string.player_seek_back_cd),
                                                                 tint = Color.White,
                                                                 modifier = Modifier.size(28.dp),
                                                             )
@@ -2644,7 +2643,7 @@ private fun FullPlayer(
                                                         Box(contentAlignment = Alignment.Center) {
                                                             Icon(
                                                                 Icons.Filled.FastForward,
-                                                                contentDescription = "Seek forward",
+                                                                contentDescription = stringResource(com.lastwave.app.R.string.player_seek_fwd_cd),
                                                                 tint = Color.White,
                                                                 modifier = Modifier.size(28.dp),
                                                             )
@@ -2797,7 +2796,7 @@ private fun FullPlayer(
                                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                                     Icon(
                                                         Icons.Filled.FormatQuote,
-                                                        contentDescription = "Show lyrics",
+                                                        contentDescription = stringResource(com.lastwave.app.R.string.player_show_lyrics_cd),
                                                         modifier = Modifier.size(24.dp),
                                                     )
                                                 }
@@ -3764,7 +3763,7 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                                 Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 24.dp),
                                 contentAlignment = alignment
                             ) {
-                                Icon(Icons.Filled.DeleteOutline, contentDescription = "Delete", tint = MaterialTheme.colorScheme.onErrorContainer)
+                                Icon(Icons.Filled.DeleteOutline, contentDescription = stringResource(com.lastwave.app.R.string.player_delete_cd), tint = MaterialTheme.colorScheme.onErrorContainer)
                             }
                         }
                     },
@@ -3830,7 +3829,7 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                         ) {
                             Icon(
                                 Icons.Filled.MoreVert,
-                                contentDescription = "Menu",
+                                contentDescription = stringResource(com.lastwave.app.R.string.player_menu_cd),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
