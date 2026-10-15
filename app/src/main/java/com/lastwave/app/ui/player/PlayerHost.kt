@@ -3385,7 +3385,7 @@ private fun FullPlayerLandscape(
             Spacer(Modifier.height(20.dp))
 
             SeekBar(
-                progressState = progressState,
+                progressState = progressState ?: player.progressState,
                 isPlaying = state.isPlaying,
                 trackKey = track.videoId ?: "${track.artist}|${track.title}",
                 wavyEnabled = wavySeekbarEnabled,

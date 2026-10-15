@@ -257,10 +257,12 @@ class PlaylistRepository @Inject constructor(
      * Returns the saved playlist, or the pre-existing duplicate if skipped.
      */
     suspend fun save(title: String, subtitle: String, mode: String, tracks: List<GeneratedTrack>, discoverSignature: String? = null): SavedPlaylist = saveMutex.withLock {
-        // A failed read must abort the save. Treating it as "no existing
-        // playlists" skipped the dedupe check and stacked a same-title sibling
-        // every time a read failed.
-        val rawTracks = if (mode == LIKED_SONGS_MODE) tracks.distinctSongs() else tracks
+        val existing = getAll()
+        val rawTracks = if (mode == LIKED_SONGS_MODE) {
+            val seen = mutableListOf<GeneratedTrack>()
+            tracks.forEach { t -> if (seen.none { it.sameSongAs(t) }) seen.add(t) }
+            seen
+        } else tracks
         val playableTracks = if (mode == "custom" && tracks.isEmpty()) emptyList() else filterPlayable(rawTracks)
         existing.firstOrNull {
             it.mode == mode &&
