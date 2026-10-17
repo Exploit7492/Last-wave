@@ -371,6 +371,7 @@ class PlayerViewModel @Inject constructor(
 
     private var currentTrackLyricsKey: String? = null
     private var lyricsJob: Job? = null
+    private var spotLyricsOverride: Pair<com.lastwave.app.data.local.LyricsProvider?, Set<com.lastwave.app.data.local.LyricsProvider>> = Pair(null, emptySet())
 
     private val _canvasState = MutableStateFlow<com.lastwave.app.data.canvas.CanvasArtwork?>(null)
     val canvasState = _canvasState.asStateFlow()
@@ -408,6 +409,7 @@ class PlayerViewModel @Inject constructor(
                 val key = track?.let { "${it.videoId ?: ""}|${it.artist}|${it.title}|$wordByWord" }
                 if (key != currentTrackLyricsKey) {
                     currentTrackLyricsKey = key
+                    spotLyricsOverride = Pair(null, emptySet())
                     if (track != null) {
                         loadLyrics(track, forceRefresh = false)
                     } else {
@@ -509,7 +511,31 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    fun loadLyrics(track: PlayableTrack, forceRefresh: Boolean = false) {
+    fun selectLyricsProvider(provider: com.lastwave.app.data.local.LyricsProvider) {
+        val track = player.state.value.current ?: return
+        spotLyricsOverride = Pair(provider, emptySet())
+        loadLyrics(track, forceRefresh = true, overrideProvider = provider, excludedProviders = emptySet())
+    }
+
+    fun tryAnotherLyricsSource() {
+        val track = player.state.value.current ?: return
+        val currentSource = (_lyricsState.value as? LyricsUiState.Success)?.source
+        val currentProvider = com.lastwave.app.data.lyrics.providerForSource(currentSource)
+        val newExcluded = if (currentProvider != null) {
+            spotLyricsOverride.second + currentProvider
+        } else {
+            spotLyricsOverride.second
+        }
+        spotLyricsOverride = Pair(null, newExcluded)
+        loadLyrics(track, forceRefresh = true, overrideProvider = null, excludedProviders = newExcluded)
+    }
+
+    fun loadLyrics(
+        track: PlayableTrack,
+        forceRefresh: Boolean = false,
+        overrideProvider: com.lastwave.app.data.local.LyricsProvider? = spotLyricsOverride.first,
+        excludedProviders: Set<com.lastwave.app.data.local.LyricsProvider> = spotLyricsOverride.second,
+    ) {
         lyricsJob?.cancel()
         lyricsJob = viewModelScope.launch {
             // Lyrics hit other hosts (LRCLIB, Apple, SimpMusic). Starting
@@ -545,6 +571,8 @@ class PlayerViewModel @Inject constructor(
                         localLrcPath = com.lastwave.app.data.generate.LocalAudioFormats
                             .importedPathOrNull(track.playbackUrl)
                             ?.let(com.lastwave.app.data.generate.LocalAudioFormats::lrcPathFor),
+                        overrideProvider = overrideProvider,
+                        excludedProviders = excludedProviders,
                         onPartialResult = { partial ->
                             withContext(Dispatchers.Main.immediate) {
                                 coroutineContext.ensureActive()
@@ -1005,6 +1033,8 @@ private fun ExpandedPlayer(
         onToggleLiked = { currentTrack?.let(viewModel::toggleLiked) },
         onDoubleTapLike = { currentTrack?.let(viewModel::like) },
         onDragStatusChange = onDragStatusChange,
+        onSelectLyricsProvider = viewModel::selectLyricsProvider,
+        onTryAnotherLyricsSource = viewModel::tryAnotherLyricsSource,
     )
 }
 
@@ -1818,6 +1848,8 @@ private fun FullPlayer(
     onToggleLiked: () -> Unit = {},
     onDoubleTapLike: () -> Unit = {},
     onDragStatusChange: (Boolean) -> Unit = {},
+    onSelectLyricsProvider: ((com.lastwave.app.data.local.LyricsProvider) -> Unit)? = null,
+    onTryAnotherLyricsSource: (() -> Unit)? = null,
 ) {
     val track = state.current ?: return
     var showLyricsOffsetDialog by remember { mutableStateOf(false) }
@@ -2414,6 +2446,8 @@ private fun FullPlayer(
                                     onControlsVisibleChange = { lyricsControlsVisible = it },
                                     translationLanguage = translationLanguage,
                                     onRetry = onRetryLyrics,
+                                    onSelectLyricsProvider = onSelectLyricsProvider,
+                                    onTryAnotherLyricsSource = onTryAnotherLyricsSource,
                                     onToggleFullscreen = { lyricsFullscreen = !lyricsFullscreen },
                                     isFullscreen = lyricsFullscreen,
                                     onOpenLyricsOffset = { showLyricsOffsetDialog = true },
