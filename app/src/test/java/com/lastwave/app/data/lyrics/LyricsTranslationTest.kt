@@ -66,8 +66,9 @@ class LyricsTranslationTest {
             LyricsTranslation.TextSlot(1, "世界", sectionHeader = false),
         )
         val payload = LyricsTranslation.batches(slots).single().payload
+        val marker = "\uE0000001\uE001"
         val response =
-            """[[["Hello","你好",null,null,10],["World","世界",null,null,10]],null,"zh-CN"]"""
+            """[[["Hello","你好",null,null,10],["$marker","$marker",null,null,10],["World","世界",null,null,10]],null,"zh-CN"]"""
         val answer = LyricsTranslation.parseTranslatedAnswer(response, slots.size, payload.length)
         assertThat(answer).isNotNull()
         assertThat(answer!!.translations).containsExactly("Hello", "World").inOrder()
@@ -196,7 +197,7 @@ class LyricsTranslationTest {
     fun translationWireTarget_passesConfiguredCodeThrough() {
         assertThat(translationWireTarget(" fr ")).isEqualTo("fr")
         assertThat(translationWireTarget("zh-TW")).isEqualTo("zh-TW")
-        assertThat(translationWireTarget("")).isNotBlank()
+        assertThat(translationWireTarget("").isNotBlank()).isTrue()
     }
 
     @Test

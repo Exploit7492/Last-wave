@@ -42,7 +42,10 @@ class RelatedGraphRepositoryTest {
         db = Room.inMemoryDatabaseBuilder(
             RuntimeEnvironment.getApplication(),
             AppDatabase::class.java,
-        ).allowMainThreadQueries().build()
+        ).allowMainThreadQueries()
+            .setQueryExecutor { it.run() }
+            .setTransactionExecutor { it.run() }
+            .build()
         dao = db.relatedGraphDao()
         refreshScope = TestScope(StandardTestDispatcher())
         repository = RelatedGraphRepository(api, dao, refreshScope)
@@ -67,7 +70,7 @@ class RelatedGraphRepositoryTest {
     @Test
     fun staleHit_returnsCacheImmediatelyThenRefreshesInBackground() = runTest {
         seedEdge("seed", "old1", System.currentTimeMillis() - FRESH_TTL_MS - 1)
-        coEvery { api.fetchRelatedSongs("seed", any(), any()) } returns listOf(track("new1"))
+        coEvery { api.fetchRelatedSongs("seed", any(), any()) } returns listOf(track("old1"), track("new1"))
 
         val result = repository.relatedFor("seed", limit = 1)
 
