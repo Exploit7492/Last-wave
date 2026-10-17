@@ -2091,7 +2091,7 @@ private fun FullPlayer(
                             decodeSizePx = 200,
                             transformations = staticBlurTransform,
                         )
-                        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.52f)))
+                        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (isLyricsTab) 0.40f else 0.52f)))
                         Box(
                             Modifier
                                 .fillMaxSize()

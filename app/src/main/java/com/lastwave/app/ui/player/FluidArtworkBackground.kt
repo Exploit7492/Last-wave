@@ -169,6 +169,7 @@ private const val FLOW_SPEED = 2.5f
 
 private const val SATURATION = 1.9f
 private const val BRIGHTNESS = 0.52f
+private const val LYRICS_BRIGHTNESS = 0.44f
 private const val CONTRAST = 0.3f
 
 private const val TWIST_ANGLE = 1.6f
@@ -255,7 +256,7 @@ private class AgslFluidRenderer {
         shader.setFloatUniform("twistRadius", (maxOf(width, height) + minOf(width, height)) / 2f * TWIST_REACH)
         shader.setFloatUniform("twistAngle", TWIST_ANGLE)
         shader.setFloatUniform("saturation", SATURATION)
-        shader.setFloatUniform("brightness", if (extraBlur) 0.32f else BRIGHTNESS)
+        shader.setFloatUniform("brightness", if (extraBlur) LYRICS_BRIGHTNESS else BRIGHTNESS)
         shader.setFloatUniform("contrast", CONTRAST)
         paint.shader = shader
         canvas.drawRect(0f, 0f, width, height, paint)
