@@ -3,8 +3,13 @@
 ## [4.3.0] - 2026-10-17
 
 ### Added & Improved
-- **Lyrics Share:** Export and share styled lyric cards (Song and Lyrics modes) with dynamic palette extraction, customizable color swatches, full multilingual support (Latin, Devanagari, Arabic, CJK), and system share sheet & MediaStore gallery export.
-- **On-Spot Lyrics Provider Switching:** Added a dedicated lyrics provider icon in lyrics controls to switch provider or exclude current source on the fly with smooth auto-hide controls integration.
+- **Share Lyrics Card:** Select up to 5 lines from synced or plain lyrics to generate styled lyric cards. Choose between Song Mode (album art header + track metadata + lyrics) and Lyrics Mode (clean typography), customize with dynamic palette extraction (cover tones, dominant, muted, dark, accent, or LastWave Lime), and export via the system share sheet or save directly to Pictures/LastWave with full multilingual font rendering (Latin, Devanagari, Arabic, CJK).
+- **Lyrics Romanization & Translation:** Added inline romanization and real-time translation support for non-Latin scripts directly within the lyrics view.
+- **Expanded Lyrics Providers:** Integrated additional lyrics sources for broader catalog coverage, higher match rates, and more reliable synced timestamps.
+- **Faster Playback & Multi-Provider Addons:** Optimized stream initialization for faster playback startup and introduced simultaneous multi-provider addon support for an expanded, unified library.
+- **Motion Lyrics Background:** Added dynamic, fluid motion canvas backgrounds synchronized to the active album art inside the lyrics screen.
+- **UAC1 & USB DAC Bit-Perfect Fixes:** Resolved UAC1 compatibility issues, improved hardware sample rate handshakes, and stabilized bit-perfect USB DAC audio routing.
+- **Local Device Library Support:** Added full on-device audio scanning, metadata parsing, and seamless local song playback right alongside your streaming library.
 - **100% Localization Coverage:** Complete translation across all 12 supported locales.
 - **Dynamic APK Variant Selection:** Automatically detects device architecture and system version to download the appropriate APK variant (universal, uncompressed, or android7).
 - **Audio Fallback:** Falls back to stereo lossless when Dolby Atmos is unavailable.
@@ -15,7 +20,6 @@
 ## [4.2.4] - 2026-10-05
 
 ### Added & Improved
-- **Lyrics Share:** Export and share styled lyric cards (Song and Lyrics modes) with dynamic palette extraction, customizable color swatches, full multilingual support (Latin, Devanagari, Arabic, CJK), and system share sheet & MediaStore gallery export.
 - **Resource Usage & Smooth UI:** Optimized rendering pipelines, reduced background resource contention, and smoothed UI interactions.
 - **Fast YouTube Search:** Restored instant 2-pass YouTube search resolution, eliminating multi-stage search fallback delays.
 - **Dolby Atmos Downloads:** Aligned spatial audio capability detection in `TrackDownloadManager` with `MusicPlayer`'s system `Spatializer` check, resolving Atmos download skips on Android 12L+ devices.
