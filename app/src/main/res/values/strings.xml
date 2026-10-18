@@ -30,6 +30,13 @@
     <string name="settings_section_youtube">YouTube Music</string>
     <string name="settings_connect_yt">Connect YouTube Music</string>
     <string name="settings_connect_yt_sub">Sign in to see and sync every playlist</string>
+    <string name="settings_cookie_login">YouTube Music Cookie Login</string>
+    <string name="settings_cookie_login_sub">Sign in with exported session cookies</string>
+    <string name="cookie_login_instructions">Paste your session cookies from music.youtube.com (raw Cookie header, Netscape cookies.txt, or JSON array). Must contain SAPISID or __Secure-3PAPISID.</string>
+    <string name="cookie_login_placeholder">SID=...; __Secure-3PAPISID=...; SAPISID=...</string>
+    <string name="cookie_login_paste_clipboard">Paste from Clipboard</string>
+    <string name="cookie_login_connect">Connect</string>
+    <string name="cookie_login_connecting">Connecting…</string>
     <string name="settings_yt_sync">Two-way Playlist Sync</string>
     <string name="settings_select_playlists">Select Playlists to Sync</string>
     <string name="settings_yt_shown">YouTube Playlists Shown</string>
@@ -289,7 +296,7 @@
     <string name="signal_detail_tempo_ok">1.00x — no pitch processing</string>
     <string name="signal_detail_tempo_active">%1$sx — resampling active</string>
     <string name="signal_detail_gain_unity">0.0 dB — unity gain</string>
-    <string name="signal_detail_gain_scaled">Gain %1$sx — unity required (ducking or fade active)</string>
+    <string name="signal_detail_gain_scaled">Gain %1$sx — volume adjusted</string>
     <string name="signal_detail_sysvol_hw">Hardware volume — no digital scaling</string>
     <string name="signal_detail_sysvol_max">MAX — no digital attenuation</string>
     <string name="signal_detail_sysvol_scaled">%1$d/%2$d — digital attenuation before DAC</string>
@@ -380,6 +387,11 @@
     <string name="signal_direct_hal">DIRECT → HAL</string>
     <string name="signal_verdict_direct_hal">Android mixer bypassed — samples enter the HAL unchanged. A vendor DSP after the HAL cannot be verified from Android.</string>
     <string name="signal_internal_track">Exclusive AAudio (internal)</string>
+    <string name="signal_usb_hardware_section">Hardware direct pipeline</string>
+    <string name="signal_usb_interface">Interface</string>
+    <string name="signal_usb_interface_value">Direct USB (usbdevfs)</string>
+    <string name="signal_android_mixer">Android mixer</string>
+    <string name="signal_android_mixer_bypassed">Bypassed (Hardware exclusive)</string>
     <string name="signal_internal_section">Internal output</string>
     <string name="signal_internal_route">Route</string>
     <string name="signal_internal_status">Direct output</string>

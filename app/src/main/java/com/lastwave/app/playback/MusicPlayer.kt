@@ -1935,9 +1935,17 @@ class MusicPlayer @Inject constructor(
         startIndex: Int = 0,
         sourceLabel: String = "LastWave",
         startShuffled: Boolean = false,
+        enableRadioContinuation: Boolean = false,
     ) {
-        disableRadioQueue()
-        playQueueInternal(tracks, startIndex, endlessDiscover = false, sourceLabel = sourceLabel, startShuffled = startShuffled)
+        if (!enableRadioContinuation) disableRadioQueue()
+        playQueueInternal(
+            tracks = tracks,
+            startIndex = startIndex,
+            endlessDiscover = false,
+            sourceLabel = sourceLabel,
+            startShuffled = startShuffled,
+            enableRadioContinuation = enableRadioContinuation,
+        )
     }
 
     fun playDiscoverQueue(tracks: List<PlayableTrack>, startIndex: Int = 0) {
@@ -1951,12 +1959,19 @@ class MusicPlayer @Inject constructor(
         endlessDiscover: Boolean,
         sourceLabel: String = if (endlessDiscover) "Discover" else "LastWave",
         startShuffled: Boolean = false,
+        enableRadioContinuation: Boolean = false,
     ) {
         if (tracks.isEmpty()) return
         pendingRestoredSession = null
         discoverQueueLoadJob?.cancel()
         discoverQueueActive = endlessDiscover
-        disableRadioQueue()
+        if (!enableRadioContinuation) {
+            disableRadioQueue()
+        } else {
+            radioQueueActive = true
+            radioUsedSeeds.clear()
+            tracks.getOrNull(startIndex)?.videoId?.takeIf(String::isNotBlank)?.let { radioUsedSeeds.add(it) }
+        }
         val selectedIndex = startIndex.coerceIn(tracks.indices)
         playRequest?.cancel()
         queueEnrichmentJob?.cancel()
@@ -1973,7 +1988,7 @@ class MusicPlayer @Inject constructor(
             selectedIndex = selectedIndex,
             startPositionMs = 0L,
             sourceLabel = sourceLabel,
-            endlessDiscover = endlessDiscover,
+            endlessDiscover = endlessDiscover || enableRadioContinuation,
             startShuffled = startShuffled,
         )
     }
@@ -3000,7 +3015,10 @@ class MusicPlayer @Inject constructor(
         outgoingPlayer = outgoing
         activePlayer = standby
         standby.addListener(listener)
-        standby.setAudioAttributes(standby.audioAttributes, true)
+        // Keep handleAudioFocus = false: LastWave manages audio focus manually via requestMediaAudioFocus().
+        // Setting true here activates ExoPlayer's internal AudioFocusManager which steals focus, causing Android
+        // to send AUDIOFOCUS_LOSS (-1) to LastWave's own focus listener, immediately pausing playback.
+        standby.setAudioAttributes(standby.audioAttributes, false)
         standby.play()
         // The standby is now the live player; the outgoing one is the next
         // standby. Cleared so the downloader resumes caching the new track.
@@ -3564,6 +3582,7 @@ class MusicPlayer @Inject constructor(
                 exclusiveHardwareVolume = hardwareVolume,
                 exclusiveFailureReason = exclusiveUsbOutput.lastFailureReason.takeIf { !exclusive },
                 clockFallbackResampled = clockFallback,
+                wireBits = exclusiveUsbOutput.activeWireBits(),
             ),
         )
     }

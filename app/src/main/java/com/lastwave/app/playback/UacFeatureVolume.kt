@@ -42,6 +42,7 @@ class UacFeatureVolume(
             featureUnitId = id
             channels = verifiedChannels
             available = true
+            writeMute(id, false)
             Log.i(
                 TAG,
                 "Feature Unit volume verified id=0x${id.toString(16)} " +
@@ -62,25 +63,14 @@ class UacFeatureVolume(
         for (channel in channels) {
             if (writeVolume(featureUnitId, channel, coded)) ok = true
         }
-        if (clamped <= 0f) {
-            writeMute(featureUnitId, true)
-        }
-        if (ok && clamped in 0.001f..0.85f && coded < -512) {
-            val checkChannel = channels.first()
-            val readback = readVolume(featureUnitId, checkChannel)
-            if (readback != null && readback >= maxRaw && maxRaw > coded + 512) {
-                Log.w(
-                    TAG,
-                    "DAC ignored SET_CUR coded=$coded on ch=$checkChannel (readback=$readback); failing closed",
-                )
-                return false
-            }
-        }
+        writeMute(featureUnitId, clamped <= 0f)
         return ok
     }
 
     private fun discoverChannels(unitId: Int): IntArray {
-        val found = CHANNELS_TO_TRY.filter { readVolume(unitId, it) != null }
+        val found = CHANNELS_TO_TRY.filter { ch ->
+            readVolume(unitId, ch) != null || writeVolume(unitId, ch, maxRaw)
+        }
         return found.toIntArray()
     }
 
@@ -166,32 +156,57 @@ class UacFeatureVolume(
         return raw.toShort().toInt()
     }
 
-    private fun verifyWritableChannels(unitId: Int, found: IntArray): IntArray {
-        val writable = mutableListOf<Int>()
+    private fun verifyChannelWritable(unitId: Int, channel: Int): Boolean {
+        val original = readVolume(unitId, channel)
         val step = resRaw.coerceAtLeast(256)
         val testCandidate = (maxRaw - 12 * step).coerceIn(minRaw, maxRaw - step)
-        for (channel in found) {
-            val original = readVolume(unitId, channel) ?: continue
-            val test = if (kotlin.math.abs(original - testCandidate) >= step) {
-                testCandidate
-            } else {
-                (minRaw + 2 * step).coerceIn(minRaw, maxRaw)
-            }
-            if (!writeVolume(unitId, channel, test)) continue
-            runCatching { Thread.sleep(VERIFY_SLEEP_MS) }
-            val updated = readVolume(unitId, channel)
+        val test = if (original != null && kotlin.math.abs(original - testCandidate) >= step) {
+            testCandidate
+        } else {
+            (minRaw + 2 * step).coerceIn(minRaw, maxRaw)
+        }
+        if (!writeVolume(unitId, channel, test)) return false
+        runCatching { Thread.sleep(VERIFY_SLEEP_MS) }
+        val updated = readVolume(unitId, channel)
+        val restored = if (original != null) {
             writeVolume(unitId, channel, original)
-            val changed = updated != null && updated != original
-            Log.i(
-                TAG,
-                "verify FU 0x${unitId.toString(16)} ch=$channel original=$original " +
-                    "test=$test readback=$updated writable=$changed",
-            )
-            if (changed) {
-                writable += channel
+        } else {
+            writeVolume(unitId, channel, maxRaw)
+        }
+        val changed = updated != null && updated != original
+        Log.i(
+            TAG,
+            "verify FU 0x${unitId.toString(16)} ch=$channel original=$original " +
+                "test=$test readback=$updated restored=$restored writable=$changed",
+        )
+        return (changed || restored)
+    }
+
+    private fun verifyWritableChannels(unitId: Int, found: IntArray): IntArray {
+        // Priority 1: Master channel (channel 0)
+        // In UAC 1.0 & 2.0, Master channel controls the entire cluster globally.
+        // Using Channel 0 guarantees both stereo channels stay perfectly balanced.
+        if (0 in found && verifyChannelWritable(unitId, 0)) {
+            // Reset discrete channels 1 (Left) and 2 (Right) trims to unity gain (0 dB / maxRaw)
+            // to ensure no residual attenuation or channel imbalance exists from previous tests or state.
+            if (1 in found) writeVolume(unitId, 1, maxRaw)
+            if (2 in found) writeVolume(unitId, 2, maxRaw)
+            return intArrayOf(0)
+        }
+
+        // Priority 2: Discrete stereo channels (channel 1 = Left, channel 2 = Right)
+        // If master channel is absent or non-writable, both Left AND Right channels
+        // must be independently verified writable. If only one channel is writable,
+        // fail closed so hardware volume doesn't attenuate only one ear.
+        if (1 in found && 2 in found) {
+            val ch1Ok = verifyChannelWritable(unitId, 1)
+            val ch2Ok = verifyChannelWritable(unitId, 2)
+            if (ch1Ok && ch2Ok) {
+                return intArrayOf(1, 2)
             }
         }
-        return writable.toIntArray()
+
+        return intArrayOf()
     }
 
     private fun readVolume(unitId: Int, channel: Int): Int? {
@@ -238,7 +253,8 @@ class UacFeatureVolume(
         val data = byteArrayOf(if (mute) 1 else 0)
         val wIndex = (unitId shl 8) or controlInterfaceId
         var ok = false
-        for (channel in channels) {
+        val muteChannels = if (channels.contains(0)) intArrayOf(0) else channels
+        for (channel in muteChannels) {
             val wValue = MUTE_WVALUE or (channel and 0xFF)
             val ret = connection.controlTransfer(
                 0x21,
@@ -251,12 +267,29 @@ class UacFeatureVolume(
             )
             if (ret >= 0) ok = true
         }
+        if (!mute) {
+            for (ch in intArrayOf(1, 2)) {
+                val wValue = MUTE_WVALUE or (ch and 0xFF)
+                connection.controlTransfer(
+                    0x21,
+                    0x01,
+                    wValue,
+                    wIndex,
+                    data,
+                    data.size,
+                    TIMEOUT_MS,
+                )
+            }
+        }
         return ok
     }
 
     private fun parseFeatureUnitIds(): List<Int> {
         val raw = connection.rawDescriptors ?: return emptyList()
-        val ids = mutableListOf<Int>()
+        val allFeatureUnits = mutableListOf<Int>()
+        val outputTerminals = mutableListOf<Pair<Int, Int>>() // Pair(terminalType, sourceId)
+        val unitSources = mutableMapOf<Int, Int>() // unitId -> sourceId
+
         var i = 0
         var inAudioControl = false
         while (i + 1 < raw.size) {
@@ -270,17 +303,56 @@ class UacFeatureVolume(
             }
             if (inAudioControl && type == 0x24 && length >= 4) {
                 val subtype = raw[i + 2].toInt() and 0xFF
-                if (subtype == FEATURE_UNIT_SUBTYPE) {
-                    ids += raw[i + 3].toInt() and 0xFF
+                val unitId = raw[i + 3].toInt() and 0xFF
+                when (subtype) {
+                    FEATURE_UNIT_SUBTYPE -> {
+                        allFeatureUnits += unitId
+                        if (length >= 5) {
+                            unitSources[unitId] = raw[i + 4].toInt() and 0xFF
+                        }
+                    }
+                    OUTPUT_TERMINAL_SUBTYPE -> {
+                        if (length >= 8) {
+                            val termType = (raw[i + 4].toInt() and 0xFF) or ((raw[i + 5].toInt() and 0xFF) shl 8)
+                            val srcId = raw[i + 7].toInt() and 0xFF
+                            outputTerminals += Pair(termType, srcId)
+                        }
+                    }
+                    else -> {
+                        if (length >= 5) {
+                            unitSources[unitId] = raw[i + 4].toInt() and 0xFF
+                        }
+                    }
                 }
             }
             i += length
         }
-        return ids
+
+        // Trace backwards from physical playback Output Terminals (0x0300..0x03FF: Speaker, Headphones)
+        val playbackFus = mutableListOf<Int>()
+        for ((termType, srcId) in outputTerminals) {
+            if ((termType and 0xFF00) == 0x0300) {
+                var curr = srcId
+                val visited = mutableSetOf<Int>()
+                while (curr in unitSources && visited.add(curr)) {
+                    if (curr in allFeatureUnits) {
+                        playbackFus += curr
+                        break
+                    }
+                    curr = unitSources[curr] ?: break
+                }
+                if (srcId in allFeatureUnits && srcId !in playbackFus) {
+                    playbackFus += srcId
+                }
+            }
+        }
+
+        return (playbackFus + allFeatureUnits).distinct()
     }
 
     companion object {
         const val TAG = "UacFeatureVolume"
+        const val OUTPUT_TERMINAL_SUBTYPE = 0x03
         const val FEATURE_UNIT_SUBTYPE = 0x06
         const val VOLUME_WVALUE = 0x0200
         const val MUTE_WVALUE = 0x0100
