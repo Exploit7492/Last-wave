@@ -3386,6 +3386,7 @@ class InnerTubeMusicApi @Inject constructor(
                 AppLanguage.HINDI -> "IN"
                 AppLanguage.GERMAN -> if (sysCountry in setOf("AT", "CH", "DE")) sysCountry else "DE"
                 AppLanguage.FRENCH -> if (sysCountry in setOf("BE", "CA", "CH", "FR")) sysCountry else "FR"
+                AppLanguage.ITALIAN -> if (sysCountry == "CH") sysCountry else "IT"
                 AppLanguage.JAPANESE -> "JP"
                 AppLanguage.KOREAN -> "KR"
                 AppLanguage.ARABIC -> if (sysCountry in ARABIC_COUNTRIES) sysCountry else "SA"

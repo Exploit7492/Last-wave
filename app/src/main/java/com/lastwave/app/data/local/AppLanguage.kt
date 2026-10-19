@@ -28,6 +28,7 @@ enum class AppLanguage(val tag: String) {
     // Wave 2: audiophile/Hi-Res markets + MENA (Arabic is RTL).
     GERMAN("de"),
     FRENCH("fr"),
+    ITALIAN("it"),
     JAPANESE("ja"),
     KOREAN("ko"),
     ARABIC("ar");
@@ -86,6 +87,7 @@ fun AppLanguage.nativeDisplayName(): String = when (this) {
     AppLanguage.HINDI -> "हिन्दी"
     AppLanguage.GERMAN -> "Deutsch"
     AppLanguage.FRENCH -> "Français"
+    AppLanguage.ITALIAN -> "Italiano"
     AppLanguage.JAPANESE -> "日本語"
     AppLanguage.KOREAN -> "한국어"
     AppLanguage.ARABIC -> "العربية"
@@ -104,6 +106,7 @@ fun AppLanguage.selectorSubtitle(): String = when (this) {
     AppLanguage.HINDI -> "हिन्दी"
     AppLanguage.GERMAN -> "Deutsch"
     AppLanguage.FRENCH -> "Français"
+    AppLanguage.ITALIAN -> "Italiano"
     AppLanguage.JAPANESE -> "日本語"
     AppLanguage.KOREAN -> "한국어"
     AppLanguage.ARABIC -> "العربية"
