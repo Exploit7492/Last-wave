@@ -3299,14 +3299,15 @@ class TrackDownloadManager @Inject constructor(
         }
     }
 
-    private fun hasStoragePermission(): Boolean {
-        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    fun getRequiredAudioPermission(): String =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Manifest.permission.READ_MEDIA_AUDIO
         } else {
             Manifest.permission.READ_EXTERNAL_STORAGE
         }
-        return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
-    }
+
+    fun hasStoragePermission(): Boolean =
+        ContextCompat.checkSelfPermission(context, getRequiredAudioPermission()) == PackageManager.PERMISSION_GRANTED
 
     suspend fun restoreDownloadsAfterReinstall(): Boolean = withContext(Dispatchers.IO) {
         if (isDownloadsScanned()) return@withContext true
