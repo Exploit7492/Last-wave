@@ -298,7 +298,7 @@ dependencies {
     // The renderer factory prefers FFmpeg for every codec it supports so all
     // devices decode through one deterministic, OEM-bug-free path; platform
     // decoders remain as automatic fallbacks.
-    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.2.1+1")
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.9.0+")
 
     // Core library desugaring required by the FFmpeg decoder AAR metadata.
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
