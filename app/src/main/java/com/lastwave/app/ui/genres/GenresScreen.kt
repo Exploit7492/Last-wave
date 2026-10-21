@@ -309,7 +309,7 @@ private fun GenreTrackRow(
                     com.lastwave.app.playback.PlayableTrack(it.name, it.artist, album = it.album, artworkUrl = it.artworkUrl)
                 }
                 val index = allTracks.indexOf(track).coerceAtLeast(0)
-                musicPlayer.playQueue(queue, startIndex = index, sourceLabel = genreTitle)
+                musicPlayer.playQueue(queue, startIndex = index, sourceLabel = genreTitle, genreContext = genreTitle)
             }
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

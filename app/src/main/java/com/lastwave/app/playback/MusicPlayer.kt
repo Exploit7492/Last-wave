@@ -371,6 +371,15 @@ class MusicPlayer @Inject constructor(
     /** Set by a play-button tap during a recovery backoff to retry immediately. */
     @Volatile private var recoveryRetryNow = false
     private val playRequestGeneration = AtomicLong()
+    /**
+     * The campaign splice for a queue start. Campaign slots are fetched over
+     * the network, so the splice cannot run on the calling thread — a queue
+     * start would block on one round trip per slot. The generation counter is
+     * the same one every other resolution path in this class uses, so a splice
+     * that lands after the user started a different queue is discarded rather
+     * than starting the wrong playback.
+     */
+    private var campaignInjectionJob: Job? = null
     /** Work that must not compete with the first audio buffer. Runs on READY. */
     private var startupFollowUp: (() -> Unit)? = null
     private var activeUpgradeJob: Job? = null
@@ -2028,6 +2037,9 @@ class MusicPlayer @Inject constructor(
         // A podcast episode never seeds a music radio.
         val radioAllowed = startRadio && track.mediaType == MediaType.SONG
         radioQueueActive = radioAllowed
+        // Deliberately not routed through [playQueueInternal]: a one-item queue
+        // is shorter than one run of four, so no campaign slot can exist on it,
+        // and this path's own radio continuation is started separately below.
         startResolvedQueuePlayback(
             tracks = listOf(track),
             selectedIndex = 0,
@@ -2047,6 +2059,7 @@ class MusicPlayer @Inject constructor(
         sourceLabel: String = "LastWave",
         startShuffled: Boolean = false,
         enableRadioContinuation: Boolean = false,
+        genreContext: String? = null,
     ) {
         if (!enableRadioContinuation) disableRadioQueue()
         playQueueInternal(
@@ -2056,6 +2069,7 @@ class MusicPlayer @Inject constructor(
             sourceLabel = sourceLabel,
             startShuffled = startShuffled,
             enableRadioContinuation = enableRadioContinuation,
+            genreContext = genreContext,
         )
     }
 
@@ -2104,6 +2118,7 @@ class MusicPlayer @Inject constructor(
         sourceLabel: String = if (endlessDiscover) "Discover" else "LastWave",
         startShuffled: Boolean = false,
         enableRadioContinuation: Boolean = false,
+        genreContext: String? = null,
     ) {
         if (tracks.isEmpty()) return
         pendingRestoredSession = null
@@ -2132,24 +2147,44 @@ class MusicPlayer @Inject constructor(
         // through here, which is what makes injection a property of playback
         // rather than of one queue type. A build with no backend configured, or
         // a slot with nothing eligible, leaves the base queue unchanged.
-        val injectedTracks = if (com.lastwave.app.campaign.Campaigns.enabled) {
-            runBlocking {
-                com.lastwave.app.campaign.CampaignQueueInjection.inject(
-                    baseItems = tracks,
-                    targetOriginalIndex = selectedIndex,
-                ) { com.lastwave.app.campaign.Campaigns.nextForSlotResolvingGenre() }
+        if (com.lastwave.app.campaign.Campaigns.enabled) {
+            // The splice is one network call per slot, so it runs off the
+            // calling thread; playback begins from the continuation, guarded by
+            // the generation the splice was started under.
+            val generation = playRequestGeneration.incrementAndGet()
+            campaignInjectionJob?.cancel()
+            campaignInjectionJob = applicationScope.launch(Dispatchers.IO) {
+                val injected = try {
+                    com.lastwave.app.campaign.CampaignQueueInjection.inject(
+                        baseItems = tracks,
+                        targetOriginalIndex = selectedIndex,
+                    ) { com.lastwave.app.campaign.Campaigns.nextForSlotForGenre(genreContext) }
+                } catch (e: Exception) {
+                    null
+                }
+                val finalTracks = injected?.items ?: tracks
+                val finalIndex = injected?.adjustedTargetIndex
+                    ?.takeIf { it >= 0 }
+                    ?.coerceIn(0, finalTracks.lastIndex)
+                    ?: selectedIndex.coerceIn(finalTracks.indices)
+                onMain {
+                    // A queue the user started after this splice began wins.
+                    if (generation != playRequestGeneration.get()) return@onMain
+                    startResolvedQueuePlayback(
+                        tracks = finalTracks,
+                        selectedIndex = finalIndex,
+                        startPositionMs = 0L,
+                        sourceLabel = sourceLabel,
+                        endlessDiscover = endlessDiscover || enableRadioContinuation,
+                        startShuffled = startShuffled,
+                    )
+                }
             }
-        } else {
-            null
+            return
         }
-        val finalTracks = injectedTracks?.items ?: tracks
-        val finalIndex = injectedTracks?.adjustedTargetIndex
-            ?.takeIf { it >= 0 }
-            ?.coerceIn(0, finalTracks.lastIndex)
-            ?: selectedIndex.coerceIn(finalTracks.indices)
         startResolvedQueuePlayback(
-            tracks = finalTracks,
-            selectedIndex = finalIndex,
+            tracks = tracks,
+            selectedIndex = selectedIndex,
             startPositionMs = 0L,
             sourceLabel = sourceLabel,
             endlessDiscover = endlessDiscover || enableRadioContinuation,

@@ -10,13 +10,14 @@ import com.lastwave.app.playback.PlayableTrack
  * run. Injection happens on top of whatever order the base queue already has,
  * so a shuffled context keeps its shuffle and the campaigns ride along.
  *
- * The campaign for a slot is fetched *at the moment the slot is reached*, one
- * call per slot, never as a batch up front. That is deliberate: the queue-slot
- * RPC picks the least-recently-served eligible campaign and marks it served in
- * the same transaction, so the fairness guarantee is global across every
- * listener. Pre-fetching a batch would mark campaigns served long before any of
- * them reached a played slot, corrupting the bookkeeping for every other
- * listener building a queue at that moment.
+ * The campaign for a slot is fetched through [campaignForSlot] as the splice
+ * walks the base items — one call per slot, none pre-resolved by the caller.
+ * The queue-slot RPC picks the least-recently-served eligible campaign and
+ * stamps `last_served_at` in the same transaction, so the rotation is global
+ * across every listener. Note the stamp happens when the slot is *built*, not
+ * when it is played: a queue whose slots are all built up front marks every
+ * campaign it spliced as served at that moment, played or not. That is the
+ * server's contract, not something this splice can change.
  *
  * A slot whose fetch returns `null` (nothing eligible right now) is simply
  * skipped; the base items pass through unchanged and the run-of-four pattern
@@ -77,10 +78,18 @@ object CampaignQueueInjection {
     }
 
     /**
-     * A campaign track is a CONTEXT-tier entry like any other album or playlist
-     * row: it survives a user-queue clear and is never treated as a hand-queued
-     * track. LastWave has no explicit queue-tier model, so the flag rides on the
-     * row and the queue-clearing path preserves flagged entries.
+     * Marks a spliced row as a promoted campaign. The flag is what the play
+     * reporter reads to attribute a qualified play, and what keeps the row from
+     * being reported as ordinary listening.
+     *
+     * LastWave has no queue-tier model, so this flag does not by itself give the
+     * row the CONTEXT-tier survival BitChord and Velune implement: those apps
+     * keep a `queueTier` on every entry and their clear path spares CONTEXT
+     * rows, whereas [com.lastwave.app.playback.MusicPlayer.clearUpcoming] drops
+     * every row after the current one, campaigns included. A campaign slot
+     * cleared from the upcoming queue is gone; a later queue start fetches a
+     * fresh one. Stated plainly because the flag's name invites the opposite
+     * assumption.
      */
     private fun PlayableTrack.asCampaignEntry(): PlayableTrack = copy(isCampaign = true)
 }

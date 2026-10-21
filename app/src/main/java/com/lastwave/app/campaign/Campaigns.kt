@@ -119,9 +119,19 @@ object Campaigns {
      * slot, not a genre feature — while a concrete term confines the pick to
      * that genre and fails closed if it cannot be resolved.
      */
-    suspend fun nextForSlotResolvingGenre(): PlayableTrack? {
+    suspend fun nextForSlotResolvingGenre(): PlayableTrack? = nextForSlotForGenre(genreContext)
+
+    /**
+     * As [nextForSlotResolvingGenre], but for an explicitly supplied genre term
+     * rather than the ambient one. A queue start records its genre by passing
+     * the term here instead of calling [setGenreContext], which matters because
+     * the splice runs asynchronously: an ambient value set at the call site
+     * could be overwritten by a later queue start before the earlier splice
+     * reads it.
+     */
+    suspend fun nextForSlotForGenre(term: String?): PlayableTrack? {
         val r = repository ?: return null
-        val genre = genreContext?.let { GenreTileMappingCache.resolveTile(it, r) }
+        val genre = term?.let { GenreTileMappingCache.resolveTile(it, r) }
         return r.fetchNextForQueueSlot(genre)
     }
 

@@ -167,6 +167,7 @@ class GenresViewModel @Inject constructor(
                         playable,
                         startIndex = 0,
                         sourceLabel = "${genre.replaceFirstChar { it.uppercase() }} ${if (isDiscover) "Discovery" else "Mix"}",
+                        genreContext = genre,
                     )
                 }
                 val finalTracks = generateRepository.precheck(tracks).take(35).ifEmpty { tracks.take(35) }
