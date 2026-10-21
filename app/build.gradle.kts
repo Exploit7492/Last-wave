@@ -68,6 +68,18 @@ android {
         buildConfigField("String", "LASTWAVE_LYRICS_TOKEN", "\"$lastWaveLyricsToken\"")
         buildConfigField("String", "LASTWAVE_LYRICS_URL", "\"$lastWaveLyricsUrl\"")
 
+        // Campaign backend (Supabase). The same project mavins-web publishes
+        // campaigns into and Velune reads them from. Blank disables campaign
+        // injection rather than failing — a build with no backend configured
+        // plays a normal queue.
+        val supabaseUrl = resolveSecret("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL")
+        val supabaseAnonKey = resolveSecret("SUPABASE_ANON_KEY", "NEXT_PUBLIC_SUPABASE_ANON_KEY")
+        buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
+        // mavins-web origin used to report an unresolved genre tile for review.
+        val campaignGenreTileHost = resolveSecret("CAMPAIGN_GENRE_TILE_HOST", "MAVINS_WEB_URL")
+        buildConfigField("String", "CAMPAIGN_GENRE_TILE_HOST", "\"$campaignGenreTileHost\"")
+
         // Native secrets (addon client lock) live strictly in native .so via
         // SecretsBridge_generated.h (tools/generate_native_secrets.py).
         // No secret fields are exposed in DEX / BuildConfig.

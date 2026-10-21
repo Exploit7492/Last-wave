@@ -186,6 +186,14 @@ fun HomeScreen(
 
     var menuTrack by remember { mutableStateOf<HomeTrack?>(null) }
 
+    // The single live campaign for the promoted banner, or null. Loaded once
+    // per screen; empty when no backend is configured, which is what a build
+    // without one shows.
+    var featuredCampaign by remember { mutableStateOf<com.lastwave.app.campaign.CampaignCard?>(null) }
+    LaunchedEffect(Unit) {
+        featuredCampaign = com.lastwave.app.campaign.Campaigns.liveCampaignsForBanner().firstOrNull()
+    }
+
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
@@ -317,6 +325,27 @@ fun HomeScreen(
                         ),
                         modifier = Modifier.fillMaxSize(),
                     ) {
+                        // The promoted campaign banner leads the feed. A tap
+                        // plays the campaign's own track rather than being asked
+                        // again on the feed.
+                        featuredCampaign?.let { campaign ->
+                            item(key = "campaign_banner", contentType = "campaign") {
+                                CampaignBanner(
+                                    campaign = campaign,
+                                    onClick = {
+                                        val track = campaign.toPlayableTrack()
+                                        if (track != null) {
+                                            musicPlayer.playQueue(
+                                                tracks = listOf(track),
+                                                startIndex = 0,
+                                                sourceLabel = "Promoted",
+                                            )
+                                        }
+                                    },
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
+                                )
+                            }
+                        }
                         itemsIndexed(
                             rows,
                             key = { _, row ->

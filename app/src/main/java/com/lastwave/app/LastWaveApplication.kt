@@ -123,6 +123,11 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
             runCatching { trackDownloadManager.get().syncDownloadsFromStorage() }
                 .onFailure { com.lastwave.app.diagnostics.AppLog.e("LastWaveStartup", "Download sync startup failed", it) }
         }
+        // Campaign backend. Enables queue-slot injection and the home banner;
+        // a build with no Supabase URL/key configured stays disabled and plays
+        // a normal queue. Never allowed to affect startup.
+        runCatching { com.lastwave.app.campaign.CampaignBootstrap.init(this, innerTubeMusicApi.get()) }
+            .onFailure { com.lastwave.app.diagnostics.AppLog.e("LastWaveStartup", "Campaign init disabled", it) }
         // Discord Rich Presence (no-ops unless the switch is on AND the Discord
         // app is installed and signed in). Observes playback state only; it can
         // never affect audio delivery, and every failure stays contained here so

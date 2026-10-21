@@ -146,6 +146,19 @@ data class PlayableTrack(
     val mediaType: MediaType = MediaType.SONG,
     /** Podcast show id (MPSPPL…) when this entry is a podcast episode. */
     val showId: String? = null,
+    /**
+     * True when this row is a promoted campaign spliced into the queue by
+     * [com.lastwave.app.campaign.CampaignQueueInjection]. A campaign row is a
+     * context-tier entry: it survives a user-queue clear, is excluded from the
+     * queue's canonical album/playlist set, and its play is reported separately.
+     */
+    val isCampaign: Boolean = false,
+    /**
+     * The campaign's own id, present only on a campaign row. Carries the
+     * attribution [com.lastwave.app.campaign.CampaignPlaybackTracker] needs to
+     * report a qualified play without a second lookup.
+     */
+    val campaignId: String? = null,
 )
 
 @Serializable
@@ -846,6 +859,9 @@ class MusicPlayer @Inject constructor(
             // paths don't record — manual seeks arrive as SEEK, not AUTO.
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
                 recordHistory(_state.value.current?.mediaIdKey())
+                // A track that has ended must not carry its campaign progress
+                // into the next appearance of the same campaign.
+                com.lastwave.app.campaign.CampaignPlaybackTracker.onStopped()
             }
             if (mediaItem != null) {
                 losslessBypassMediaIds.retainAll(setOf(mediaItem.mediaId))
@@ -1685,6 +1701,15 @@ class MusicPlayer @Inject constructor(
                             val pos = _state.value.positionMs
                             val buf = player.bufferedPosition.coerceAtLeast(0)
                             val sleepRemaining = remaining?.coerceAtLeast(0)
+                            // A promoted row is a paid play; it is qualified and
+                            // reported from the same "audio is actually coming
+                            // out" tick the listening record uses, so a skip can
+                            // never count. Ordinary tracks return immediately.
+                            if (playingNow) {
+                                _state.value.current?.let {
+                                    com.lastwave.app.campaign.CampaignPlaybackTracker.onSample(it, dur)
+                                }
+                            }
 
                             if (updateCrossfade(pos)) {
                                 cadenceMs = 60L
@@ -2102,9 +2127,29 @@ class MusicPlayer @Inject constructor(
         playHistory.clear()
         latePreloadKey = null
         lastPreloadRetryMs = 0L
+        // Campaign injection is the last step before playback, on top of the
+        // order the caller already settled. Every queue the app starts passes
+        // through here, which is what makes injection a property of playback
+        // rather than of one queue type. A build with no backend configured, or
+        // a slot with nothing eligible, leaves the base queue unchanged.
+        val injectedTracks = if (com.lastwave.app.campaign.Campaigns.enabled) {
+            runBlocking {
+                com.lastwave.app.campaign.CampaignQueueInjection.inject(
+                    baseItems = tracks,
+                    targetOriginalIndex = selectedIndex,
+                ) { com.lastwave.app.campaign.Campaigns.nextForSlotResolvingGenre() }
+            }
+        } else {
+            null
+        }
+        val finalTracks = injectedTracks?.items ?: tracks
+        val finalIndex = injectedTracks?.adjustedTargetIndex
+            ?.takeIf { it >= 0 }
+            ?.coerceIn(0, finalTracks.lastIndex)
+            ?: selectedIndex.coerceIn(finalTracks.indices)
         startResolvedQueuePlayback(
-            tracks = tracks,
-            selectedIndex = selectedIndex,
+            tracks = finalTracks,
+            selectedIndex = finalIndex,
             startPositionMs = 0L,
             sourceLabel = sourceLabel,
             endlessDiscover = endlessDiscover || enableRadioContinuation,
@@ -8370,6 +8415,12 @@ private fun PlayableTrack.toMediaItem(resolved: MusicPlayer.ResolvedStream? = nu
                         internalTrackId?.takeIf { it.isNotBlank() }?.let { putString("internalTrackId", it) }
                         putString("mediaType", mediaType.name)
                         showId?.takeIf { it.isNotBlank() }?.let { putString("showId", it) }
+                        // Campaign identity must survive the MediaItem round
+                        // trip: the play reporter reads the flag and the id off
+                        // the current row, which is rebuilt from the player's
+                        // MediaItem on every track change.
+                        putBoolean("isCampaign", isCampaign)
+                        campaignId?.takeIf { it.isNotBlank() }?.let { putString("campaignId", it) }
                     }
                 )
                 .build(),
@@ -8421,6 +8472,8 @@ private fun MediaItem.toPlayableTrack(): PlayableTrack {
         durationMs = dur,
         mediaType = mediaType,
         showId = mediaMetadata.extras?.getString("showId"),
+        isCampaign = mediaMetadata.extras?.getBoolean("isCampaign") == true,
+        campaignId = mediaMetadata.extras?.getString("campaignId"),
     )
 }
 
