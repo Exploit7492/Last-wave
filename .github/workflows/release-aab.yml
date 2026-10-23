@@ -192,13 +192,14 @@ jobs:
           [ -n "${ZEALOT_CHANNEL_KEY:-}" ] || fail "ZEALOT_CHANNEL_KEY is not set"
           [ -n "${ZEALOT_APP_TOKEN:-}" ] || fail "secret ZEALOT_APP_TOKEN is not set"
           base="${ZEALOT_URL%/}"
+          echo "::add-mask::$ZEALOT_APP_TOKEN"
           size=$(stat -c %s "$AAB")
           changelog="Version $NAME (build $CODE), commit ${GITHUB_SHA:0:7}."
 
           # Open a session, PUT the bundle to the staging bucket, finalize, then wait
           # for Zealot's CI to read, sign and publish it. Nothing is retried blindly.
           status=$(curl -sS -o "$RUNNER_TEMP/session.json" -w '%{http_code}' --max-time 60 \
-            -H "Authorization: Bearer $ZEALOT_APP_TOKEN" \
+            --form-string "token=$ZEALOT_APP_TOKEN" \
             --form-string "channel_key=$ZEALOT_CHANNEL_KEY" \
             --form-string "filename=$(basename "$AAB")" \
             --form-string "size=$size" \
@@ -223,7 +224,7 @@ jobs:
           case "$status" in 200|201|204) ;; *) head -c 800 "$RUNNER_TEMP/put.out" || true; echo; fail "staging answered $status";; esac
 
           status=$(curl -sS -o "$RUNNER_TEMP/finalize.json" -w '%{http_code}' --max-time 120 \
-            -X POST -H "Authorization: Bearer $ZEALOT_APP_TOKEN" \
+            -X POST --form-string "token=$ZEALOT_APP_TOKEN" \
             "$base/api/apps/upload_sessions/$session_id/finalize") || fail "finalize failed"
           [ "$status" = "200" ] || { head -c 1500 "$RUNNER_TEMP/finalize.json" || true; echo; fail "Zealot answered $status to finalize (200 expected)"; }
 
@@ -231,7 +232,7 @@ jobs:
           state=""
           while :; do
             status=$(curl -sS -o "$RUNNER_TEMP/poll.json" -w '%{http_code}' --max-time 60 \
-              -H "Authorization: Bearer $ZEALOT_APP_TOKEN" "$base/api/apps/upload_sessions/$session_id") || status=000
+              "$base/api/apps/upload_sessions/$session_id?token=$ZEALOT_APP_TOKEN") || status=000
             if [ "$status" = "200" ]; then
               state=$(jq -r '.state // ""' "$RUNNER_TEMP/poll.json")
               [ "$state" = "done" ] && break
