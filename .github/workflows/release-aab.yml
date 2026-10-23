@@ -1,0 +1,250 @@
+# Build the Play-format release bundle (.aab) and hand it to Zealot.
+#
+# Why a bundle and not an APK: the store signs and splits the upload itself, so the
+# app never needs its release keystore in CI. The bundle is built unsigned (a
+# throwaway keystore satisfies Gradle's signing config and is discarded), uploaded
+# through Zealot's direct-upload session API, and Zealot re-signs it with the
+# organisation key before the release goes live.
+#
+# The upload only runs on main. It is skipped unless the repository variable
+# AUTO_RELEASE is "true", so a merge builds and checks the bundle without shipping
+# it. A manual run can force it with dry_run=false.
+#
+# Repository variables: ZEALOT_URL, ZEALOT_CHANNEL_KEY, AUTO_RELEASE
+# Repository secret:    ZEALOT_APP_TOKEN (a Zealot API token)
+name: Release AAB
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - "gradle/**"
+      - "gradlew"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true = build and check only; false = also upload to Zealot (main only)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: release-aab
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      publish: ${{ steps.plan.outputs.publish }}
+      code: ${{ steps.plan.outputs.code }}
+      name: ${{ steps.plan.outputs.name }}
+      bundle_id: ${{ steps.plan.outputs.bundle_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Decide
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          AUTO_RELEASE: ${{ vars.AUTO_RELEASE }}
+          ZEALOT_URL: ${{ vars.ZEALOT_URL }}
+          ZEALOT_CHANNEL_KEY: ${{ vars.ZEALOT_CHANNEL_KEY }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+
+          code=$(grep -m1 -oP '^\s*versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts || true)
+          name=$(grep -m1 -oP '^\s*versionName\s*=\s*"\K[^"]+' app/build.gradle.kts || true)
+          [ -n "$code" ] || fail "could not read versionCode from app/build.gradle.kts"
+          [ -n "$name" ] || fail "could not read versionName from app/build.gradle.kts"
+          bundle_id=$(grep -m1 -oP '^\s*applicationId\s*=\s*"\K[^"]+' app/build.gradle.kts || true)
+          [ -n "$bundle_id" ] || fail "could not read applicationId from app/build.gradle.kts"
+
+          # Build and check on every push; upload only from main, and only when asked.
+          release=true
+          publish=false
+          note=""
+          if [ "$REF" != "refs/heads/main" ]; then
+            note="${REF#refs/heads/} is not main: the bundle is built and checked, nothing is uploaded"
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            if [ "$INPUT_DRY_RUN" = "false" ]; then publish=true; else note="dry run: nothing is uploaded"; fi
+          elif [ "$AUTO_RELEASE" = "true" ]; then
+            publish=true
+          else
+            note="repository variable AUTO_RELEASE is not 'true': nothing is uploaded"
+          fi
+
+          # The channel key is the duplicate guard: it needs no token and answers 404 when
+          # Zealot does not yet hold this exact version.
+          if [ "$publish" = "true" ]; then
+            [ -n "${ZEALOT_URL:-}" ] || fail "repository variable ZEALOT_URL is not set"
+            [ -n "${ZEALOT_CHANNEL_KEY:-}" ] || fail "repository variable ZEALOT_CHANNEL_KEY is not set"
+            status=$(curl -sS -G -o "$RUNNER_TEMP/exist.json" -w '%{http_code}' \
+              --max-time 120 --retry 3 --retry-delay 5 \
+              --data-urlencode "channel_key=$ZEALOT_CHANNEL_KEY" \
+              --data-urlencode "bundle_id=$bundle_id" \
+              --data-urlencode "release_version=$name" \
+              --data-urlencode "build_version=$code" \
+              "${ZEALOT_URL%/}/api/apps/version_exist") || fail "could not reach Zealot"
+            case "$status" in
+              200) release=false; note="Zealot already holds $name ($code)";;
+              404) ;;
+              *) head -c 800 "$RUNNER_TEMP/exist.json" || true; echo; fail "Zealot answered $status to version_exist";;
+            esac
+          fi
+
+          {
+            echo "release=$release"; echo "publish=$publish"
+            echo "code=$code"; echo "name=$name"; echo "bundle_id=$bundle_id"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::release=$release publish=$publish version=$name code=$code${note:+; $note}"
+
+  build:
+    name: Build
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The store re-signs, so the bundle only has to satisfy Gradle. A throwaway
+      # keystore keeps the release signing config valid without shipping a real key.
+      - name: Provide a throwaway signing key
+        run: |
+          set -euo pipefail
+          keytool -genkeypair -keystore ci-release.jks -storepass throwaway -keypass throwaway \
+            -alias throwaway -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=CI Throwaway,O=LastWave,C=US"
+          echo "SIGNING_KEY=$(base64 -w0 ci-release.jks)" >> "$GITHUB_ENV"
+          echo "RELEASE_STORE_FILE=$PWD/ci-release.jks" >> "$GITHUB_ENV"
+          echo "RELEASE_STORE_PASSWORD=throwaway" >> "$GITHUB_ENV"
+          echo "RELEASE_KEY_ALIAS=throwaway" >> "$GITHUB_ENV"
+          echo "RELEASE_KEY_PASSWORD=throwaway" >> "$GITHUB_ENV"
+
+      - name: Build the release bundle
+        env:
+          STORE_PASSWORD: throwaway
+          KEY_ALIAS: throwaway
+          KEY_PASSWORD: throwaway
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --console=plain :app:bundleRawRelease
+
+      - name: Check the bundle
+        id: aab
+        run: |
+          set -euo pipefail
+          dir=app/build/outputs/bundle/rawRelease
+          ls -l "$dir"
+          shopt -s nullglob
+          files=("$dir"/*.aab)
+          [ "${#files[@]}" -eq 1 ] || { echo "::error::expected exactly one .aab in $dir, found ${#files[@]}"; exit 1; }
+          aab="${files[0]}"
+          unzip -l "$aab" | grep -q ' base/manifest/AndroidManifest.xml$' \
+            || { echo "::error::$aab has no base/manifest/AndroidManifest.xml"; exit 1; }
+          echo "aab=$aab" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: last-wave-aab
+          path: ${{ steps.aab.outputs.aab }}
+          if-no-files-found: error
+
+      - name: Hand the bundle to Zealot
+        if: needs.plan.outputs.publish == 'true'
+        env:
+          ZEALOT_URL: ${{ vars.ZEALOT_URL }}
+          ZEALOT_CHANNEL_KEY: ${{ vars.ZEALOT_CHANNEL_KEY }}
+          ZEALOT_APP_TOKEN: ${{ secrets.ZEALOT_APP_TOKEN }}
+          AAB: ${{ steps.aab.outputs.aab }}
+          NAME: ${{ needs.plan.outputs.name }}
+          CODE: ${{ needs.plan.outputs.code }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          [ -n "${ZEALOT_URL:-}" ] || fail "ZEALOT_URL is not set"
+          [ -n "${ZEALOT_CHANNEL_KEY:-}" ] || fail "ZEALOT_CHANNEL_KEY is not set"
+          [ -n "${ZEALOT_APP_TOKEN:-}" ] || fail "secret ZEALOT_APP_TOKEN is not set"
+          base="${ZEALOT_URL%/}"
+          size=$(stat -c %s "$AAB")
+          changelog="Version $NAME (build $CODE), commit ${GITHUB_SHA:0:7}."
+
+          # Open a session, PUT the bundle to the staging bucket, finalize, then wait
+          # for Zealot's CI to read, sign and publish it. Nothing is retried blindly.
+          status=$(curl -sS -o "$RUNNER_TEMP/session.json" -w '%{http_code}' --max-time 60 \
+            -H "Authorization: Bearer $ZEALOT_APP_TOKEN" \
+            --form-string "channel_key=$ZEALOT_CHANNEL_KEY" \
+            --form-string "filename=$(basename "$AAB")" \
+            --form-string "size=$size" \
+            --form-string "hold=false" \
+            --form-string "source=github-actions" \
+            --form-string "git_commit=$GITHUB_SHA" \
+            --form-string "branch=$GITHUB_REF_NAME" \
+            --form-string "ci_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --form-string "changelog=$changelog" \
+            "$base/api/apps/upload_sessions") || fail "opening the upload session failed"
+          [ "$status" = "201" ] || { head -c 1500 "$RUNNER_TEMP/session.json" || true; echo; fail "Zealot answered $status to the session (201 expected)"; }
+          session_id=$(jq -er '.id | select(type == "number")' "$RUNNER_TEMP/session.json")
+          upload_url=$(jq -er '.upload_url | select(type == "string" and startswith("https://"))' "$RUNNER_TEMP/session.json")
+          echo "::add-mask::$upload_url"
+
+          hdr_args=()
+          while IFS= read -r line; do [ -n "$line" ] && hdr_args+=(-H "$line"); done \
+            < <(jq -r '(.headers // {}) | to_entries[] | "\(.key): \(.value)"' "$RUNNER_TEMP/session.json")
+          status=$(curl -sS -o "$RUNNER_TEMP/put.out" -w '%{http_code}' --max-time 1500 \
+            --retry 3 --retry-all-errors --retry-delay 10 \
+            "${hdr_args[@]}" -X PUT --upload-file "$AAB" "$upload_url") || fail "the transfer to staging failed"
+          case "$status" in 200|201|204) ;; *) head -c 800 "$RUNNER_TEMP/put.out" || true; echo; fail "staging answered $status";; esac
+
+          status=$(curl -sS -o "$RUNNER_TEMP/finalize.json" -w '%{http_code}' --max-time 120 \
+            -X POST -H "Authorization: Bearer $ZEALOT_APP_TOKEN" \
+            "$base/api/apps/upload_sessions/$session_id/finalize") || fail "finalize failed"
+          [ "$status" = "200" ] || { head -c 1500 "$RUNNER_TEMP/finalize.json" || true; echo; fail "Zealot answered $status to finalize (200 expected)"; }
+
+          deadline=$(( $(date +%s) + 1800 ))
+          state=""
+          while :; do
+            status=$(curl -sS -o "$RUNNER_TEMP/poll.json" -w '%{http_code}' --max-time 60 \
+              -H "Authorization: Bearer $ZEALOT_APP_TOKEN" "$base/api/apps/upload_sessions/$session_id") || status=000
+            if [ "$status" = "200" ]; then
+              state=$(jq -r '.state // ""' "$RUNNER_TEMP/poll.json")
+              [ "$state" = "done" ] && break
+              if [ "$state" = "failed" ] || [ "$state" = "expired" ]; then
+                head -c 1500 "$RUNNER_TEMP/poll.json" || true; echo
+                fail "Zealot ended the upload as $state"
+              fi
+            elif [ "$status" != "000" ] && [ "$status" != "429" ] && [ "${status:0:1}" != "5" ]; then
+              head -c 800 "$RUNNER_TEMP/poll.json" || true; echo; fail "Zealot answered $status while waiting"
+            fi
+            [ "$(date +%s)" -lt "$deadline" ] || fail "Zealot had not finished after 30 minutes (last state: ${state:-unknown})"
+            sleep 20
+          done
+
+          rel=$(jq -r '.release_version // "?"' "$RUNNER_TEMP/poll.json")
+          echo "::notice::Zealot published $rel for $ZEALOT_CHANNEL_KEY"
