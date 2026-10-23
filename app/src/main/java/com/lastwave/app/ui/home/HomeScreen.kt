@@ -186,13 +186,15 @@ fun HomeScreen(
 
     var menuTrack by remember { mutableStateOf<HomeTrack?>(null) }
 
-    // The single live campaign for the promoted banner, or null. Loaded once
-    // per screen; empty when no backend is configured, which is what a build
-    // without one shows.
-    var featuredCampaign by remember { mutableStateOf<com.lastwave.app.campaign.CampaignCard?>(null) }
+    // The live campaigns for the promoted banner. The banner slides through
+    // them one at a time on its own timer; empty when no backend is
+    // configured, which is what a build without one shows.
+    var liveCampaigns by remember { mutableStateOf<List<com.lastwave.app.campaign.CampaignCard>>(emptyList()) }
     LaunchedEffect(Unit) {
-        featuredCampaign = com.lastwave.app.campaign.Campaigns.liveCampaignsForBanner().firstOrNull()
+        liveCampaigns = com.lastwave.app.campaign.Campaigns.liveCampaignsForBanner()
     }
+    val campaignCarousel = com.lastwave.app.campaign.rememberCampaignCarouselState(liveCampaigns)
+    val featuredCampaign = campaignCarousel.current
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),

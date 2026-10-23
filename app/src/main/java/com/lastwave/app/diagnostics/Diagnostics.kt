@@ -27,19 +27,30 @@ object Diagnostics {
     private var watchdog: AnrWatchdog? = null
 
     fun install(context: Context) {
+        val appContext = context.applicationContext ?: context
         runCatching {
-            val uncleanSession = SessionMarker.takeUncleanSession(context)
-            SessionMarker.markRunning(context)
+            val uncleanSession = SessionMarker.takeUncleanSession(appContext)
+            SessionMarker.markRunning(appContext)
 
-            AppLog.install(context)
-            CrashHandler.install(context)
+            AppLog.install(appContext)
+            CrashHandler.install(appContext)
 
             AppLog.i(TAG, "Diagnostics starting (pid=${android.os.Process.myPid()})")
 
             // A native crash, a low-memory kill, or a system-recorded ANR leave
             // no Java stack trace for the crash handler to see. Android 11+
             // records them itself and this surfaces them as crash files.
-            runCatching { ExitReasonReader.recordHistoricalExits(context) }
+            //
+            // Off the main thread: `getHistoricalProcessExitReasons` is a Binder
+            // call, and `readSystemTrace` reads the ANR trace back through the
+            // same channel. `install` runs from `attachBaseContext`, so doing
+            // that inline blocks the launch on a system service and can be
+            // killed with "Timed out while trying to bind" before the first
+            // frame. The findings are written as crash files and are not needed
+            // for the UI, so a background thread loses nothing.
+            Thread { runCatching { ExitReasonReader.recordHistoricalExits(appContext) } }
+                .apply { isDaemon = true; name = "exit-history" }
+                .start()
 
             if (uncleanSession != null) {
                 // Not a crash on its own: the marker cannot tell a system kill
